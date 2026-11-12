@@ -1,0 +1,34 @@
+#!/bin/sh
+# The licence guard on every push: refuses vendor or binary files added or
+# modified by any commit the push would send (scripts/check-no-vendor.sh
+# --range). Enabled per clone with
+#   git config core.hooksPath .githooks
+#
+# git passes the remote's name (or URL) as $1 and one line per pushed ref on
+# stdin: <local ref> <local id> <remote ref> <remote id>.
+set -eu
+# The guard next to this hook (the repository that holds it); git runs a
+# hook from the top of the work tree being committed or pushed.
+guard=$(cd "$(dirname "$0")/.." && pwd)/scripts/check-no-vendor.sh
+remote=$1
+# The all-zero object id (40 or 64 digits) marks a ref that does not exist.
+zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
+status=0
+while read -r local_ref local_id remote_ref remote_id; do
+    # A deletion sends no commit.
+    [ "$local_id" != "$zero" ] || continue
+    if [ "$remote_id" != "$zero" ] && git cat-file -e "$remote_id^{commit}" 2>/dev/null; then
+        # An update: the commits the remote does not have yet.
+        set -- "$remote_id..$local_id"
+    else
+        # A new ref, or a remote state unknown here: every commit not on a
+        # remote-tracking ref of this remote (all of them when there is none).
+        set -- "$local_id" --not --remotes="$remote"
+    fi
+    # The guard must not read the ref lines on stdin.
+    if ! "$guard" --range "$@" </dev/null; then
+        echo "pre-push: refusing to push $local_ref to $remote_ref" >&2
+        status=1
+    fi
+done
+exit "$status"

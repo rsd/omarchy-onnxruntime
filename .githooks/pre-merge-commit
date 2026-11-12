@@ -1,0 +1,10 @@
+#!/bin/sh
+# The licence guard on every merge commit: refuses vendor or binary files the
+# merge would bring in (scripts/check-no-vendor.sh), e.g. from a branch
+# committed with --no-verify. Enabled per clone with
+#   git config core.hooksPath .githooks
+set -eu
+# The guard next to this hook (the repository that holds it); git runs a
+# hook from the top of the work tree being committed or pushed.
+guard=$(cd "$(dirname "$0")/.." && pwd)/scripts/check-no-vendor.sh
+exec "$guard" --staged

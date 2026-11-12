@@ -1,0 +1,9 @@
+#!/bin/sh
+# The licence guard on every commit: refuses staged vendor (NVIDIA, Intel)
+# or binary files (scripts/check-no-vendor.sh). Enabled per clone with
+#   git config core.hooksPath .githooks
+set -eu
+# The guard next to this hook (the repository that holds it); git runs a
+# hook from the top of the work tree being committed or pushed.
+guard=$(cd "$(dirname "$0")/.." && pwd)/scripts/check-no-vendor.sh
+exec "$guard" --staged

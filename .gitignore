@@ -1,0 +1,52 @@
+# This repository holds recipes only. Nothing from NVIDIA or Intel is ever
+# committed: no libraries, headers, archives, models or licence documents,
+# and no build output. scripts/check-no-vendor.sh (the pre-commit hook)
+# enforces the same rules.
+
+# makepkg's work directories, sources and built packages. SRCDEST defaults
+# to the recipe directory: the ONNX Runtime git clone and the dependency
+# archives land there.
+onnxruntime-full/src/
+onnxruntime-full/pkg/
+onnxruntime-full/onnxruntime/
+onnxruntime-full/ortf-dep-*.zip
+*.pkg.tar*
+*.src.tar*
+
+# Other build output (CMake build trees, Python wheels and dists).
+build/
+target/
+dist/
+*.egg-info/
+__pycache__/
+
+# Libraries, models and engine caches.
+*.so
+*.so.*
+*.a
+*.o
+*.whl
+*.onnx
+*.engine
+*.trt
+*.plan
+*.cubin
+*.fatbin
+*.blob
+
+# Archives and documents as the vendors ship them.
+*.tgz
+*.tar
+*.tar.*
+*.zip
+*.deb
+*.rpm
+*.pdf
+
+# Upstream source checkouts and vendor trees next to the recipe.
+/onnxruntime/
+TensorRT-*/
+l_openvino_toolkit_*/
+openvino_toolkit_*/
+
+*.log
