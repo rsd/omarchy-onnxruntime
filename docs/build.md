@@ -64,12 +64,21 @@ With `ccache` on `PATH` the recipe uses it as the C, C++ and CUDA compiler launc
 
 ## Parallelism, memory and disk
 
-- **Time.** A build with CUDA takes hours. CUDA kernels (CUTLASS, flash attention) dominate.
+- **Time.** CUDA kernels (CUTLASS, flash attention) dominate a build with CUDA, and the time grows with the number of architectures in `ORTF_CUDA_ARCHS`. With the default single architecture the full build took under half an hour on the machine below; see the measurement at the end of this section.
 - **Memory.** A CUDA compile job takes several GiB of RAM, so the job count (`MAKEFLAGS=-jN`), not the thread count, decides whether the build fits in memory. The PKGBUILD's guidance for 24 threads and 30 GiB of RAM is `MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1`; lower it to `-j6` if the build is killed for lack of memory. Each job's nvcc threads multiply on top of the job count, so raise `ORTF_NVCC_THREADS` only with memory to spare.
 - **Disk.** Tens of GiB under the build directory. `BUILDDIR=/path/with/space makepkg ...` moves the build tree, and `SRCDEST=/path/with/space` moves the downloaded sources, including the 1.6 GiB git clone. Set both in `makepkg.conf` to make this permanent.
 - **No LTO, no debug package.** The recipe sets `!lto` (link-time optimisation of the CUDA provider costs hours and many GiB of RAM; upstream's releases are not LTO builds) and `!debug` (the CUDA provider's debug information alone runs to GiB).
 
-Measured so far: a CPU-only build (`ORTF_EPS=cpu`) took about 7 to 8.5 minutes at `-j8` on a 24-thread Core Ultra 9 275HX, without ccache. A full build with CUDA, TensorRT and OpenVINO has not been timed yet; the CUDA kernels dominate it.
+Measured so far, on a 24-thread Intel Core Ultra 9 275HX with 30 GiB of RAM:
+
+| Build | Time | Conditions |
+|---|---|---|
+| CPU-only (`ORTF_EPS=cpu`) | about 7 to 8.5 minutes | `-j8`, without ccache |
+| Full (`ORTF_EPS` default, `ORTF_CUDA_ARCHS=120`) | 27 minutes, including the download of the 3.2 GiB of sources | `MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1`, under `nice -n 19` and `ionice -c 3`, cold ccache, with other builds running on the machine |
+
+The full build succeeded without any change to the recipe against CUDA 13.4.3 (nvcc 13.4, host gcc 16.2.1), cuDNN 9.27.0.42, TensorRT 11.4.0.106 (`nvidia-tensorrt-sdk-local`, under `/opt/nvidia/tensorrt`) and OpenVINO 2026.4.1 with its GPU and NPU plugins (`intel-compute-runtime`, `level-zero-loader`, `intel-npu-driver` 1.38.0). The packages are `onnxruntime-full` at 52 MiB (`.pkg.tar.zst`; 121 MiB installed) and `python-onnxruntime-full` at 13 MiB. The CUDA provider holds `sm_120a` machine code, plus a few `sm_90a` kernels that upstream compiles unconditionally.
+
+An earlier estimate of hours for a full build was too high for one architecture; more architectures, fewer jobs or a slower machine lengthen it. The results of the build's checks are in [results.md](results.md).
 
 ## Checking the recipe without the vendor runtimes
 

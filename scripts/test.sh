@@ -4,7 +4,9 @@
 # scripts/tests/, tools/) and the PKGBUILD, the PKGBUILD's syntax and
 # metadata (`makepkg --printsrcinfo` and the names, provides and conflicts
 # consumers rely on), namcap when it is installed, every
-# scripts/tests/*-test.sh, and the licence guard over the whole tree.
+# scripts/tests/*-test.sh, the byte-compile and --help of
+# tools/ort-model-check/model-check.py, and the licence guard over the whole
+# tree.
 # Scratch files go to mktemp, never into the working tree.
 #
 #   scripts/test.sh                      # shellcheck from PATH, else uvx
@@ -132,6 +134,22 @@ fi
 for t in scripts/tests/*-test.sh; do
     run "${t#scripts/tests/}" "$t"
 done
+
+# tools/ort-model-check/model-check.py: byte-compiles, and --help works with no
+# onnxruntime installed (the module is imported only after the arguments are
+# parsed).  The bytecode goes to a temporary directory, never into the tree.
+model_check_compile() {
+    PYTHONPYCACHEPREFIX=$tmp/pycache python3 -m py_compile tools/ort-model-check/model-check.py
+}
+model_check_help() {
+    PYTHONPYCACHEPREFIX=$tmp/pycache python3 tools/ort-model-check/model-check.py --help >/dev/null
+}
+if command -v python3 >/dev/null 2>&1; then
+    run "ort-model-check: py_compile" model_check_compile
+    run "ort-model-check: --help" model_check_help
+else
+    echo "== ort-model-check: skipped (python3 not found)"
+fi
 run "licence guard (--all)" scripts/check-no-vendor.sh --all
 
 if ((${#failed[@]} > 0)); then

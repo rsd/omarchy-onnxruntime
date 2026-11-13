@@ -562,7 +562,7 @@ int main(int argc, char **argv)
     if ((st = g_api->GetAvailableProviders(&providers, &nproviders)) != NULL) {
         fprintf(stderr, "smoke: GetAvailableProviders: %s\n", g_api->GetErrorMessage(st));
         g_api->ReleaseStatus(st);
-        g_api->ReleaseEnv(env);
+        /* The environment is deliberately not released: see "cleanup" below. */
         return 3;
     }
     printf("available providers:");
@@ -635,7 +635,18 @@ cleanup:
         fprintf(stderr, "smoke: ReleaseAvailableProviders: %s\n", g_api->GetErrorMessage(st));
         g_api->ReleaseStatus(st);
     }
-    g_api->ReleaseEnv(env);
+    /* The OrtEnv is deliberately never released. With ONNX Runtime 1.29.0 and
+     * OpenVINO 2026.4, releasing it after an OpenVINO session had been created
+     * made the process crash at exit (SIGSEGV) although every target had
+     * reported ok. Releasing the environment makes ONNX Runtime unload
+     * libonnxruntime_providers_openvino.so, and with it OpenVINO's CPU plugin
+     * (libopenvino_intel_cpu_plugin.so); the crash happens afterwards, when
+     * OpenVINO/TBB worker threads or thread-local destructors run in code that
+     * is no longer mapped. An LD_PRELOAD shim that skipped only the dlclose of
+     * either of those two libraries made the exit clean; skipping the TBB
+     * libraries did not. The cause inside OpenVINO was not investigated further.
+     * The process is ending, so the operating system reclaims the environment;
+     * the sessions, options, values and memory info above are still released. */
     return rc;
 }
 #endif /* SMOKE_UNIT_TEST */

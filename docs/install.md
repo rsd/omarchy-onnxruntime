@@ -66,13 +66,31 @@ MAKEFLAGS=-j8 makepkg -f
 sudo pacman -U onnxruntime-full-1.29.0-1-x86_64.pkg.tar.zst python-onnxruntime-full-1.29.0-1-x86_64.pkg.tar.zst
 ```
 
-`makepkg` downloads the upstream source and the pinned dependencies as its sources, then builds both packages. A build with CUDA takes hours and needs tens of GiB of disk; choose `-jN` for your memory, and see [build.md](build.md#parallelism-memory-and-disk) before the first run. If you installed `ccache` it is used automatically.
+`makepkg` downloads the upstream source and the pinned dependencies as its sources, then builds both packages. A full build with one CUDA architecture took 27 minutes on a 24-thread machine ([build.md](build.md#parallelism-memory-and-disk)); it needs tens of GiB of disk, so choose `-jN` for your memory and read that section before the first run. If you installed `ccache` it is used automatically.
 
 Install both packages in one `pacman -U`. If an Arch ONNX Runtime variant (`onnxruntime`, `onnxruntime-cuda`, `onnxruntime-opt-cuda` and so on, and their `python-` packages) is installed, pacman reports the conflict and offers to remove it; programs built against it keep working, because this package provides `onnxruntime`, `python-onnxruntime` and `libonnxruntime.so` at the same version.
 
 For a CPU-only package, or any other combination, set the build inputs first: [build.md](build.md#build-inputs).
 
 ## 4. Verify
+
+### Before installing: the build tree
+
+`makepkg` leaves the build tree in `onnxruntime-full/src/build`. It holds `libonnxruntime.so`, the provider libraries and the Python package, so both tools can check the build before `pacman -U` replaces anything. From the repository root, with `<src>` the upstream source directory under `onnxruntime-full/src/`:
+
+```bash
+# the C smoke test against the build tree
+scripts/smoke-test.sh --include <src>/include/onnxruntime --libdir onnxruntime-full/src/build \
+    --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
+
+# a real model on every engine; the TensorRT environment file lets the provider find its libraries
+set -a; . /usr/share/nvidia-tensorrt/nvidia-tensorrt.env; set +a
+PYTHONPATH=onnxruntime-full/src/build tools/ort-model-check/model-check.py model.onnx
+```
+
+Skip the environment file when TensorRT is under `/usr`. The option meanings are in the [smoke test](../tools/ort-smoke/README.md#running-it) and [model check](../tools/ort-model-check/README.md#running-it) READMEs; results of both on a full build are in [results.md](results.md).
+
+### After installing
 
 ```bash
 scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
@@ -81,6 +99,8 @@ scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,open
 The test lists the providers and runs a small model on every engine and device it finds, comparing the numbers with a reference. `--require` takes a comma-separated list of targets (`cpu`, `cuda`, `tensorrt`, `openvino:CPU`, `openvino:GPU`, `openvino:NPU`) and exits 1 unless each is `ok`. Without `--require`, an engine whose runtime or device is missing is reported `unavailable`, not as a failure. List only the engines your machine has, for example `--require cpu,cuda` on a machine without Intel hardware.
 
 The wrapper needs a C compiler and Python 3. `--only` and the other options, and how to read the output (`ok`, `FAIL`, `unavailable`), are in [tools/ort-smoke/README.md](../tools/ort-smoke/README.md).
+
+The model check also runs against the installed package, without `PYTHONPATH`.
 
 A TensorRT `ok` does not show that TensorRT's built-in plugins load; see [engines.md](engines.md#tensorrt).
 

@@ -23,8 +23,8 @@
 # Environment: CC selects the C compiler (default cc), PYTHON the interpreter
 # that writes the model (default python3).
 #
-# Exit status: 0 success, 1 a test failed (or a required target is not ok),
-# 2 usage error, 3 missing ONNX Runtime, compiler or Python.
+# Exit status: 0 success, 1 a test failed (or a required target is not ok, or
+# the test program was killed by a signal), 2 usage error, 3 missing ONNX Runtime, compiler or Python.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -96,4 +96,10 @@ esac
 
 status=0
 "$tmp/smoke" "${args[@]}" || status=$?
+# A status above 128 means the program died from a signal (a crash), not that
+# it reported a result: say so and fail with the documented status 1.
+if ((status > 128)); then
+    signal=$(kill -l "$status" 2>/dev/null || echo "$((status - 128))")
+    die 1 "the test program was killed by signal $((status - 128)) ($signal), exit status $status: the results above are not trustworthy"
+fi
 exit "$status"

@@ -110,7 +110,24 @@ To build by hand:
 Exit status of the program: `0` when no available target failed and every
 `--require`d target is `ok`; `1` otherwise; `2` for a usage error; `3` when the
 ONNX Runtime API cannot be initialised. The wrapper adds `3` for a missing
-ONNX Runtime installation, compiler or Python.
+ONNX Runtime installation, compiler or Python. The wrapper also exits `1`, with
+a message naming the signal, when the program is killed by a signal (a crash)
+instead of exiting on its own.
+
+### Process exit with OpenVINO
+
+In this test, releasing the ONNX Runtime environment (`ReleaseEnv`) after the
+OpenVINO execution provider had been used crashed the process at exit
+(`SIGSEGV`) with ONNX Runtime 1.29.0 and OpenVINO 2026.4, even though every
+target had reported `ok`. Releasing the environment makes ONNX Runtime unload
+the OpenVINO provider library and, with it, OpenVINO's CPU plugin; the crash
+follows when OpenVINO or TBB threads, or thread-local destructors, run in code
+that is no longer loaded. Preloading a `dlclose` shim that skipped only those
+libraries made the exit clean. The cause inside OpenVINO was not investigated.
+C API users should keep the environment for the life of the process and not
+release it at exit. `smoke.c` does this; it still releases its sessions,
+options, values and memory info. The Python API is not affected, since it does
+not release its environment.
 
 ### TensorRT and its plugin library
 

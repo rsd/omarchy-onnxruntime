@@ -125,6 +125,7 @@ cat >"$out" <<'INNER'
 printf '%s\n' "$@" >"$FAKE_LOG.run"
 printf 'LD=%s\n' "${LD_LIBRARY_PATH-unset}" >>"$FAKE_LOG.run"
 printf '%s\n' "$0" >"$FAKE_LOG.bin"
+[[ -z ${FAKE_SIGNAL:-} ]] || kill -"$FAKE_SIGNAL" $$
 exit "${FAKE_RC:-0}"
 INNER
 chmod +x "$out"
@@ -160,6 +161,13 @@ fi
 
 expect "the test binary's exit status is passed through" 1 \
     "$(FAKE_RC=1 CC=$fakecc status_of "$smoke" --prefix "$fakeprefix")"
+
+# A crash of the test program (here SIGSEGV after printing results) is a failure
+# of the wrapper with a clear message, not a silent pass-through of 139.
+out=$(FAKE_SIGNAL=SEGV CC=$fakecc "$smoke" --prefix "$fakeprefix" 2>&1 || true)
+contains "a crash is reported: signal" "killed by signal 11 (SEGV)" "$out"
+expect "a crash of the test program exits 1" 1 \
+    "$(FAKE_SIGNAL=SEGV CC=$fakecc status_of "$smoke" --prefix "$fakeprefix")"
 
 # A source-tree layout: header under core/session, library in a separate build dir.
 tree=$tmp/srctree

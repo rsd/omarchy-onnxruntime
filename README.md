@@ -76,7 +76,7 @@ cd ..
 scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
 ```
 
-The build is long with CUDA and needs tens of GiB of disk. Build inputs (engines, GPU architecture, TensorRT location, parallelism) are in [docs/build.md](docs/build.md).
+A full build with one CUDA architecture took 27 minutes on a 24-thread machine ([measured](docs/build.md#parallelism-memory-and-disk)), with more architectures taking longer, and it needs tens of GiB of disk. Build inputs (engines, GPU architecture, TensorRT location, parallelism) are in [docs/build.md](docs/build.md).
 
 ## Documentation
 
@@ -85,7 +85,9 @@ The build is long with CUDA and needs tens of GiB of disk. Build inputs (engines
 | [docs/install.md](docs/install.md) | Prerequisites, runtimes, TensorRT, building and installing the packages, verifying |
 | [docs/build.md](docs/build.md) | Build inputs, dependency mirroring, ccache, parallelism and resources, a CPU-only recipe check |
 | [docs/engines.md](docs/engines.md) | Per-engine notes, TensorRT plugins, ROCm, using the library from C, Rust and Python |
+| [docs/results.md](docs/results.md) | Measured results: smoke test and model check of a full build, with the conditions |
 | [tools/ort-smoke/README.md](tools/ort-smoke/README.md) | The smoke test: targets, options, how to read its output |
+| [tools/ort-model-check/README.md](tools/ort-model-check/README.md) | The model check: runs a real ONNX model on each engine and compares the outputs and timings |
 
 ## Repository layout
 
@@ -99,7 +101,8 @@ scripts/smoke-test.sh             builds and runs tools/ort-smoke against an ins
 scripts/test.sh                   runs every check of this repository
 scripts/tests/                    tests of the guard, of the smoke-test wrapper and of the PKGBUILD's build inputs
 tools/ort-smoke/                  the smoke test program (C) and its model generator
-docs/                             install, build and engine notes
+tools/ort-model-check/            runs a real ONNX model on each engine, compares outputs and timings (Python)
+docs/                             install, build, engine notes and measured results
 ```
 
 ## Testing
