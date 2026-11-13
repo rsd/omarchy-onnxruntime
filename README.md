@@ -11,6 +11,19 @@ The recipe `onnxruntime-full/PKGBUILD` builds two packages from the upstream sou
 
 Version 1.29.0 is the release Arch ships, so programs built against Arch's `onnxruntime` see the same API. The packages provide `onnxruntime` and `python-onnxruntime`, and `libonnxruntime.so`.
 
+## Why not Arch's onnxruntime packages
+
+Arch's `extra` repository ships ONNX Runtime 1.29.0 (`1.29.0-3` when this was written) as separate builds: `onnxruntime-cpu`, `onnxruntime-cuda`, `onnxruntime-opt-cuda` (AVX2 build), `onnxruntime-rocm` and `onnxruntime-opt-rocm`, each with a `python-` counterpart. Each build provides `onnxruntime` and conflicts with it, so one is installed at a time. This recipe exists for the combination none of them offers:
+
+| | Arch `extra` builds | `onnxruntime-full` |
+|---|---|---|
+| CPU, CUDA | CUDA builds include the CPU provider | yes |
+| TensorRT, OpenVINO (CPU, Intel GPU, Intel NPU) | not enabled in the recipe | yes, in one library |
+| NVIDIA and Intel engines in one install | no: CUDA and ROCm are separate packages, and the CUDA builds add oneDNN (`dnnl`) as the other provider | yes |
+| CUDA architectures | a list from `75` to `121`, including `120` (Blackwell) | `120` by default, set with `ORTF_CUDA_ARCHS` |
+
+Support for `sm_120` is therefore not the difference: the Arch CUDA builds include it. The difference is the TensorRT and OpenVINO providers, which the Arch recipe does not build. The version is the same, so programs built against Arch's package see the same API. Source: the Arch recipe at <https://gitlab.archlinux.org/archlinux/packaging/packages/onnxruntime> and `pacman -Si`.
+
 ## Engines
 
 Each provider is a separate library that ONNX Runtime loads only when a session asks for it, and the core library links no vendor runtime. A missing vendor runtime disables that provider only. Details are in [docs/engines.md](docs/engines.md).
