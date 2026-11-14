@@ -93,7 +93,7 @@ empty=$tmp/empty
 mkdir -p "$empty"
 out=$("$smoke" --prefix "$empty" 2>&1 || true)
 contains "missing headers: names the problem" "onnxruntime_c_api.h not found" "$out"
-contains "missing headers: asks whether the package is installed" "is onnxruntime-full installed?" "$out"
+contains "missing headers: asks whether the package is installed" "is onnxruntime-core installed?" "$out"
 expect "missing headers exit 3" 3 "$(status_of "$smoke" --prefix "$empty")"
 
 fakeprefix=$tmp/prefix
@@ -104,7 +104,7 @@ mkdir -p "$fakeprefix/include/onnxruntime" "$fakeprefix/lib"
 touch "$fakeprefix/lib/libonnxruntime.so.1"
 out=$("$smoke" --prefix "$fakeprefix" 2>&1 || true)
 contains "missing library: names the problem" "libonnxruntime.so not found" "$out"
-contains "missing library: asks whether the package is installed" "is onnxruntime-full installed?" "$out"
+contains "missing library: asks whether the package is installed" "is onnxruntime-core installed?" "$out"
 expect "missing library exits 3" 3 "$(status_of "$smoke" --prefix "$fakeprefix")"
 expect "a libdir with only libonnxruntime.so.1 exits 3" 3 "$(status_of "$smoke" --prefix "$fakeprefix")"
 rm -f "$fakeprefix/lib/libonnxruntime.so.1"

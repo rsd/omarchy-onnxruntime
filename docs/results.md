@@ -6,7 +6,7 @@ What the recipe's checks reported for one full build, and the conditions they we
 
 | | |
 |---|---|
-| ONNX Runtime | 1.29.0, built by this recipe with `ORTF_EPS` at its default and `ORTF_CUDA_ARCHS=120` ([build.md](build.md#parallelism-memory-and-disk) has the build and the vendor runtime versions) |
+| ONNX Runtime | 1.29.0, built by this recipe with `ORTF_EPS` at its default and `ORTF_CUDA_ARCHS=120` ([build.md](build.md#parallelism-memory-and-disk) has the build and the vendor runtime versions). It is the build of the single `onnxruntime-full` 1.29.0-1; 1.29.0-2 splits the same libraries into `onnxruntime-core` and one package per engine ([build.md](build.md#package-names)) and was not measured separately |
 | NVIDIA GPU | GeForce RTX 5080 Laptop GPU |
 | CPU | Intel Core Ultra 9 275HX, 24 threads, 30 GiB of RAM |
 | Intel GPU and NPU | the integrated graphics and the NPU of that CPU |

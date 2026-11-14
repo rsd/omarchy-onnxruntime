@@ -94,9 +94,12 @@ To build by hand:
 - **unavailable** - the engine cannot be used on this machine. This is not a
   failure, unless the target was named in `--require`. Three causes:
   - the provider is not in the available-providers list;
-  - the provider's vendor runtime is not installed. The package compiles every
-    provider in, so `available providers` lists CUDA, TensorRT and OpenVINO even
-    when their runtimes (optional dependencies) are missing. ORT then fails the
+  - the provider's library or its vendor runtime is not installed. The list is
+    fixed when ONNX Runtime is built, so `available providers` lists CUDA,
+    TensorRT and OpenVINO even when their provider package is not installed
+    (`onnxruntime-provider-cuda<M>-<sfx>`, `onnxruntime-provider-tensorrt-cuda<M>`, `onnxruntime-provider-openvino`), or when
+    its runtime is missing (possible with a build tree or `--nodeps`: an installed
+    provider package depends on its runtimes). ORT then fails the
     provider's setup with a dlopen error, and the note reads
     `vendor runtime not installed: libcudnn.so.9`. Only a "cannot open shared
     object file" error from loading a provider counts; other load errors (an

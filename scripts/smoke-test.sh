@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for an installed ONNX Runtime (package onnxruntime-full): lists the
+# Smoke test for an installed ONNX Runtime (package onnxruntime-core): lists the
 # available execution providers and runs a tiny model on each engine/device.
 #
 # Usage: scripts/smoke-test.sh [--prefix DIR] [--include DIR] [--libdir DIR]
@@ -66,9 +66,9 @@ if [[ ! -f $include/onnxruntime_c_api.h && -f $include/core/session/onnxruntime_
     include=$include/core/session
 fi
 [[ -f $include/onnxruntime_c_api.h ]] ||
-    die 3 "onnxruntime_c_api.h not found in $include: is onnxruntime-full installed? (see --prefix / --include)"
+    die 3 "onnxruntime_c_api.h not found in $include: is onnxruntime-core installed? (see --prefix / --include)"
 [[ -e $libdir/libonnxruntime.so ]] ||
-    die 3 "libonnxruntime.so not found in $libdir: is onnxruntime-full installed? (see --prefix / --libdir)"
+    die 3 "libonnxruntime.so not found in $libdir: is onnxruntime-core installed? (see --prefix / --libdir)"
 command -v "$cc" >/dev/null || die 3 "C compiler '$cc' not found (set CC)"
 command -v "$python" >/dev/null || die 3 "'$python' not found (set PYTHON)"
 

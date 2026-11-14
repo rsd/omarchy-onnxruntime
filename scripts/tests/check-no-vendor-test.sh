@@ -130,10 +130,10 @@ accepted() {
 
 echo "== staged (the default), in a repository with no commits"
 repo=$(new_repo)
-mkdir -p "$repo/onnxruntime-full" "$repo/scripts"
-printf '# recipe\npkgname=x\n' >"$repo/onnxruntime-full/PKGBUILD"
+mkdir -p "$repo/onnxruntime-split" "$repo/scripts"
+printf '# recipe\npkgname=x\n' >"$repo/onnxruntime-split/PKGBUILD"
 printf '#!/bin/sh\necho hello\n' >"$repo/scripts/test.sh"
-git -C "$repo" add README.md onnxruntime-full/PKGBUILD scripts/test.sh
+git -C "$repo" add README.md onnxruntime-split/PKGBUILD scripts/test.sh
 expect pass "clean text files pass" "$repo"
 expect pass "clean text files pass (--staged)" "$repo" --staged
 expect pass "nothing staged passes" "$(new_repo)"
@@ -144,14 +144,14 @@ stage_case fail "a versioned library fails" lib/libonnxruntime.so.1.29.0 printf 
 stage_case fail "a static library fails" lib/libthing.a printf 'x\n'
 stage_case fail "an object file fails" build.o printf 'x\n'
 stage_case fail "a DLL fails" bin/thing.DLL printf 'x\n'
-stage_case fail "a built package fails" onnxruntime-full-1.29.0-1-x86_64.pkg.tar.zst printf 'x\n'
+stage_case fail "a built package fails" onnxruntime-core-1.29.0-2-x86_64.pkg.tar.zst printf 'x\n'
 stage_case fail "an uncompressed built package fails" x-1-1-x86_64.pkg.tar printf 'x\n'
 stage_case fail "a Python wheel fails" onnxruntime-1.29.0-cp314-linux_x86_64.whl printf 'x\n'
 for f in a.tgz a.tar a.tar.gz a.tar.xz a.tar.zst a.zip a.deb a.rpm; do
     stage_case fail "an archive $f fails" "dl/$f" printf 'x\n'
 done
 stage_case fail "a .pdf fails" licence.pdf printf 'not really a pdf\n'
-stage_case fail "a log fails" onnxruntime-full/build.log printf 'x\n'
+stage_case fail "a log fails" onnxruntime-split/build.log printf 'x\n'
 
 echo "== paths: models, engines, compiled kernels"
 stage_case fail "an ONNX model fails" tools/ort-smoke/model.onnx printf 'x\n'
@@ -173,7 +173,7 @@ stage_case fail "an OpenVINO header under openvino/ fails" include/openvino/runt
 stage_case fail "an OpenVINO C header under openvino/ fails" include/openvino/c/openvino.h printf '// x\n'
 stage_case fail "openvino.hpp fails" src/openvino.hpp printf '// x\n'
 stage_case fail "an unpacked TensorRT-11.4.0.106/ fails" TensorRT-11.4.0.106/notes.txt printf 'plain text\n'
-stage_case fail "a nested TensorRT-*/ fails" onnxruntime-full/TensorRT-11.4/doc/a.txt printf 'plain text\n'
+stage_case fail "a nested TensorRT-*/ fails" onnxruntime-split/TensorRT-11.4/doc/a.txt printf 'plain text\n'
 stage_case fail "an OpenVINO toolkit tree fails" l_openvino_toolkit_ubuntu24_2026.4.0/readme.txt printf 'x\n'
 stage_case fail "an OpenVINO archive tree fails" dl/openvino_toolkit_2026.4/readme.txt printf 'x\n'
 stage_case fail "a CUDA toolkit tree fails" opt/cuda/targets/x86_64-linux/include/notes.txt printf 'x\n'
@@ -188,15 +188,15 @@ stage_case fail "a TensorRT tree under a directory with a newline fails" $'a\nb/
 stage_case pass "a clean path with a newline passes" $'a\nb/notes.md' printf 'text\n'
 
 echo "== paths: build output and makepkg's directories"
-stage_case fail "onnxruntime-full/src/ fails" onnxruntime-full/src/ortf.conf printf 'x\n'
-stage_case fail "onnxruntime-full/pkg/ fails" onnxruntime-full/pkg/onnxruntime-full/usr/x.txt printf 'x\n'
-stage_case fail "the git clone in the recipe directory fails" onnxruntime-full/onnxruntime/HEAD printf 'x\n'
+stage_case fail "onnxruntime-split/src/ fails" onnxruntime-split/src/ortf.conf printf 'x\n'
+stage_case fail "onnxruntime-split/pkg/ fails" onnxruntime-split/pkg/onnxruntime-core/usr/x.txt printf 'x\n'
+stage_case fail "the git clone in the recipe directory fails" onnxruntime-split/onnxruntime/HEAD printf 'x\n'
 stage_case fail "an ONNX Runtime checkout at the top fails" onnxruntime/setup.py printf 'x\n'
 stage_case fail "a CMake build tree fails" tools/ort-smoke/build/CMakeCache.txt printf 'x\n'
 stage_case fail "a Python dist/ fails" dist/notes.txt printf 'x\n'
 stage_case fail "__pycache__ fails" tools/__pycache__/x.pyc printf 'x\n'
 for f in PKGBUILD README.md; do
-    stage_case pass "the recipe file onnxruntime-full/$f passes" "onnxruntime-full/$f" printf '# recipe\n'
+    stage_case pass "the recipe file onnxruntime-split/$f passes" "onnxruntime-split/$f" printf '# recipe\n'
 done
 for f in scripts/test.sh scripts/check-no-vendor.sh scripts/tests/check-no-vendor-test.sh \
     scripts/smoke-test.sh tools/ort-smoke/smoke.c tools/ort-smoke/make-model.py docs/usage.md; do

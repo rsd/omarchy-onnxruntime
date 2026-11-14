@@ -84,7 +84,7 @@ requested.
 
 ## Running it
 
-Against an installed package (`python-onnxruntime-full`):
+Against an installed package (`python-onnxruntime-core`):
 
     tools/ort-model-check/model-check.py model.onnx
     tools/ort-model-check/model-check.py model.onnx --targets cpu,cuda --require cpu,cuda

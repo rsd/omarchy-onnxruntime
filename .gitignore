@@ -6,10 +6,10 @@
 # makepkg's work directories, sources and built packages. SRCDEST defaults
 # to the recipe directory: the ONNX Runtime git clone and the dependency
 # archives land there.
-onnxruntime-full/src/
-onnxruntime-full/pkg/
-onnxruntime-full/onnxruntime/
-onnxruntime-full/ortf-dep-*.zip
+onnxruntime-split/src/
+onnxruntime-split/pkg/
+onnxruntime-split/onnxruntime/
+onnxruntime-split/ortf-dep-*.zip
 *.pkg.tar*
 *.src.tar*
 
