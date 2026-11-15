@@ -108,7 +108,7 @@ if command -v makepkg >/dev/null 2>&1; then
             'pkgbase = onnxruntime-split' 'pkgname = onnxruntime-core' \
             "pkgname = onnxruntime-provider-$cu-rtx" "pkgname = onnxruntime-provider-tensorrt-$cu" \
             'pkgname = onnxruntime-provider-openvino' 'pkgname = python-onnxruntime-core' \
-            "${T}pkgrel = 5"
+            "${T}pkgrel = 6"
         # makepkg writes the packages in this order: onnxruntime-core first
         # (the provider packages copy from its install), the Python one last
         # (it checks its libraries against the others).
@@ -145,12 +145,11 @@ if command -v makepkg >/dev/null 2>&1; then
             "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \
             "${T}optdepends = onnxruntime-provider-cuda: the CUDA execution provider" \
             "${T}optdepends = onnxruntime-provider-tensorrt: the TensorRT execution provider" \
-            "${T}optdepends = onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)" \
-            "${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs, untested)"
+            "${T}optdepends = onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)"
         # The plain name and the one with the CUDA major, provided and
         # conflicted: one CUDA package at a time.
         run ".SRCINFO: onnxruntime-provider-$cu-rtx" srcinfo_has "$tmp/cuda" \
-            "${T}depends = onnxruntime-core=1.29.0-5" "${T}depends = cuda" "${T}depends = cudnn" \
+            "${T}depends = onnxruntime-core=1.29.0-6" "${T}depends = cuda" "${T}depends = cudnn" \
             "${T}depends = nvidia-utils" \
             "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \
             "${T}provides = onnxruntime-provider-cuda=1.29.0" "${T}provides = onnxruntime-provider-$cu=1.29.0" \
@@ -160,14 +159,14 @@ if command -v makepkg >/dev/null 2>&1; then
         # optdepends use. Its TensorRT package is decided by prepare(), so
         # it is not here.
         run ".SRCINFO: onnxruntime-provider-tensorrt-$cu" srcinfo_has "$tmp/tensorrt" \
-            "${T}depends = onnxruntime-core=1.29.0-5" "${T}depends = onnxruntime-provider-$cu=1.29.0" \
+            "${T}depends = onnxruntime-core=1.29.0-6" "${T}depends = onnxruntime-provider-$cu=1.29.0" \
             "${T}depends = cuda" "${T}depends = cudnn" "${T}depends = nvidia-utils" \
             "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \
             "${T}provides = onnxruntime-provider-tensorrt=1.29.0" "${T}conflicts = onnxruntime-provider-tensorrt"
         run ".SRCINFO: onnxruntime-provider-tensorrt-$cu names no suffixed CUDA package" srcinfo_lacks "$tmp/tensorrt" \
             "^${T}(depends|provides|conflicts) = onnxruntime-provider-cuda[0-9x]*-|^${T}depends = onnxruntime-provider-cuda=|^${T}(provides|conflicts) = onnxruntime-provider-cuda"
         run ".SRCINFO: onnxruntime-provider-openvino" srcinfo_has "$tmp/openvino" \
-            "${T}depends = onnxruntime-core=1.29.0-5" "${T}depends = openvino" \
+            "${T}depends = onnxruntime-core=1.29.0-6" "${T}depends = openvino" \
             "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \
             "${T}optdepends = openvino-intel-gpu-plugin: the OpenVINO GPU device (Intel graphics)" \
             "${T}optdepends = openvino-intel-npu-plugin: the OpenVINO NPU device (Intel NPU)" \
@@ -175,7 +174,7 @@ if command -v makepkg >/dev/null 2>&1; then
             "${T}optdepends = level-zero-loader: oneAPI Level Zero loader (OpenVINO GPU and NPU devices)" \
             "${T}optdepends = intel-npu-driver: Intel NPU user-space driver (OpenVINO NPU device)"
         run ".SRCINFO: python-onnxruntime-core" srcinfo_has "$tmp/python" \
-            "${T}provides = python-onnxruntime=1.29.0" "${T}depends = onnxruntime-core=1.29.0-5" \
+            "${T}provides = python-onnxruntime=1.29.0" "${T}depends = onnxruntime-core=1.29.0-6" \
             "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \
             "${T}depends = python" "${T}depends = python-numpy" "${T}depends = python-flatbuffers" \
             "${T}depends = python-packaging" "${T}depends = python-protobuf" \
@@ -188,10 +187,10 @@ if command -v makepkg >/dev/null 2>&1; then
             "${T}optdepends = onnxruntime-provider-cuda: the CUDA execution provider" \
             "${T}optdepends = onnxruntime-provider-tensorrt: the TensorRT execution provider" \
             "${T}optdepends = onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)"
-        # The MIGraphX package links its library into the Python module's
-        # capi directory, so the Python module lists it too.
-        run ".SRCINFO: python-onnxruntime-core lists the migraphx provider" srcinfo_has "$tmp/python" \
-            "${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs, untested)"
+        # The MIGraphX package is an optdepend only of a build that makes
+        # it (nothing else provides it; it is never prebuilt), below.
+        run ".SRCINFO: no MIGraphX optdepend by default" srcinfo_lacks "$srcinfo" \
+            "^${T}optdepends = onnxruntime-provider-migraphx"
         # The core and the Python module run without any vendor runtime; the
         # provider packages depend on theirs (the bounds are added at
         # package time). No vendor package is an optdepend any more, and the
@@ -235,7 +234,17 @@ if command -v makepkg >/dev/null 2>&1; then
             'pkgname = onnxruntime-core' 'pkgname = onnxruntime-provider-migraphx' 'pkgname = python-onnxruntime-core' \
             "${T}makedepends = migraphx" "${T}makedepends = hip-runtime-amd" \
             "${T}pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)" \
-            "${T}depends = onnxruntime-core=1.29.0-5" "${T}depends = migraphx" "${T}depends = hip-runtime-amd"
+            "${T}depends = onnxruntime-core=1.29.0-6" "${T}depends = migraphx" "${T}depends = hip-runtime-amd"
+        # The MIGraphX package links its library into the Python module's
+        # capi directory, so the Python module lists it too.
+        mgx_optdepends() {
+            local p want="${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs, untested)"
+            for p in onnxruntime-core python-onnxruntime-core; do
+                sed -n "/^pkgname = $p\$/,/^\$/p" "$srcinfo_mgx" | grep -qxF -- "$want" ||
+                    { echo "no MIGraphX optdepend in $p"; return 1; }
+            done
+        }
+        run ".SRCINFO (ORTF_EPS=migraphx): onnxruntime-core and python-onnxruntime-core list the MIGraphX provider" mgx_optdepends
         run ".SRCINFO (ORTF_EPS=migraphx): no NVIDIA or OpenVINO package, no rocm-hip-sdk" srcinfo_lacks "$srcinfo_mgx" \
             "^pkgname = onnxruntime-provider-(cuda|tensorrt|openvino)|rocm-hip-sdk"
         # The migraphx and hip-runtime-amd bounds come from the installed

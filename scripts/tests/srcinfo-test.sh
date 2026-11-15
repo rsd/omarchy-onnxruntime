@@ -5,7 +5,7 @@
 # --write mends it; the output is the same whatever ORTF_* variables the
 # caller has; --aur copies into the top of a git clone only; the committed
 # .SRCINFO has the AUR's default names (CUDA 13, the rtx preset), tensorrt
-# in makedepends and this pkgrel; git neither ignores it nor would the
+# in makedepends, no MIGraphX optdepend and this pkgrel; git neither ignores it nor would the
 # licence guard refuse it.
 # Usage: scripts/tests/srcinfo-test.sh. Exits non-zero on any failure.
 set -euo pipefail
@@ -43,7 +43,7 @@ fi
 
 echo "== the committed .SRCINFO"
 T=$'\t'
-for line in 'pkgbase = onnxruntime-split' "${T}pkgrel = 5" 'pkgname = onnxruntime-core' \
+for line in 'pkgbase = onnxruntime-split' "${T}pkgrel = 6" 'pkgname = onnxruntime-core' \
     'pkgname = onnxruntime-provider-cuda13-rtx' 'pkgname = onnxruntime-provider-tensorrt-cuda13' \
     'pkgname = onnxruntime-provider-openvino' 'pkgname = python-onnxruntime-core' \
     "${T}makedepends = tensorrt" "${T}makedepends = cuda" "${T}makedepends = cudnn"; do
@@ -51,10 +51,10 @@ for line in 'pkgbase = onnxruntime-split' "${T}pkgrel = 5" 'pkgname = onnxruntim
 done
 if grep -n 'cudax' "$srcinfo_file"; then fail "a name with the old fallback cudax (above)"; else
     ok "no cudax name"; fi
-if grep -nE '^pkgname = onnxruntime-provider-migraphx$|makedepends = (migraphx|hip-runtime-amd)$' "$srcinfo_file"; then
-    fail "the default build has no MIGraphX package or ROCm build input (above)"
+if grep -nE '^pkgname = onnxruntime-provider-migraphx$|makedepends = (migraphx|hip-runtime-amd)$|optdepends = onnxruntime-provider-migraphx' "$srcinfo_file"; then
+    fail "the default build has no MIGraphX package, ROCm build input or MIGraphX optdepend (above)"
 else
-    ok "no MIGraphX package or ROCm build input"
+    ok "no MIGraphX package, ROCm build input or MIGraphX optdepend"
 fi
 # Tracked or untracked, never ignored; and nothing the licence guard
 # refuses (a .SRCINFO is plain metadata).
@@ -83,10 +83,10 @@ cp "$top/scripts/srcinfo.sh" "$copy/scripts/"
 cp "$top/onnxruntime-split/PKGBUILD" "$srcinfo_file" "$copy/onnxruntime-split/"
 if "$copy/scripts/srcinfo.sh" --check >/dev/null 2>&1; then ok "the copy checks out"; else
     fail "the unaltered copy fails --check"; fi
-sed -i 's/^\tpkgrel = 5$/\tpkgrel = 4/' "$copy/onnxruntime-split/.SRCINFO"
+sed -i 's/^\tpkgrel = 6$/\tpkgrel = 5/' "$copy/onnxruntime-split/.SRCINFO"
 status=0
 out=$("$copy/scripts/srcinfo.sh" --check 2>&1) || status=$?
-if ((status == 1)) && grep -qxF -- "-${T}pkgrel = 4" <<<"$out" && grep -qxF -- "+${T}pkgrel = 5" <<<"$out" &&
+if ((status == 1)) && grep -qxF -- "-${T}pkgrel = 5" <<<"$out" && grep -qxF -- "+${T}pkgrel = 6" <<<"$out" &&
     grep -qF 'is stale: run srcinfo.sh --write' <<<"$out"; then
     ok "an altered .SRCINFO fails --check (exit 1) with a diff"
 else
@@ -144,7 +144,7 @@ else
     fail "--aur into a clone: $out"
 fi
 rm -f "$aur/PKGBUILD" "$aur/.SRCINFO"
-sed -i 's/^\tpkgrel = 5$/\tpkgrel = 4/' "$copy/onnxruntime-split/.SRCINFO"
+sed -i 's/^\tpkgrel = 6$/\tpkgrel = 5/' "$copy/onnxruntime-split/.SRCINFO"
 status=0
 out=$("$copy/scripts/srcinfo.sh" --aur "$aur" 2>&1) || status=$?
 if ((status == 1)) && [[ ! -e $aur/PKGBUILD ]]; then ok "--aur with a stale .SRCINFO fails, copies nothing"; else

@@ -16,9 +16,10 @@
 # (_ortf_lib_depends, on the real lists of a 1.29.0 build; the MIGraphX
 # provider's is a stand-in), the package
 # functions of every package run as makepkg runs them (set -eE) on a stub
-# install (the CUDA one with cudnn-frontend's licence), that of `makepkg
-# --printsrcinfo` only the package names (and, with tensorrt or migraphx,
-# makedepends) depend on the inputs, from the environment or from the
+# install (each with cpuinfo's and protobuf's licences, the CUDA one also
+# with cudnn-frontend's; bare names of bounded dependencies dropped), that
+# of `makepkg --printsrcinfo` only the package names (and, with tensorrt or
+# migraphx, makedepends; with migraphx, its optdepends) depend on the inputs, from the environment or from the
 # PKGBUILD's _ortf_default_* lines (a copy with another line), and that
 # every dependency between the packages is met by
 # the packages' names and provides, and by those of their -bin
@@ -793,11 +794,11 @@ expect_libs_fail() { # expect_libs_fail <description> <message fragment> <lib_de
 # The static depends of each package, as the PKGBUILD writes them, with
 # what package() adds before the check (the TensorRT package).
 core_deps='glibc libgcc libstdc++'
-cuda_deps='onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ cuda cudnn nvidia-utils'
-trt_deps='onnxruntime-core=1.29.0-5 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt'
-ov_deps='onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ openvino'
-py_deps='onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf'
-mgx_deps='onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ migraphx hip-runtime-amd'
+cuda_deps='onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ cuda cudnn nvidia-utils'
+trt_deps='onnxruntime-core=1.29.0-6 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt'
+ov_deps='onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ openvino'
+py_deps='onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf'
+mgx_deps='onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ migraphx hip-runtime-amd'
 cu_pkg=onnxruntime-provider-cuda13-rtx trt_pkg=onnxruntime-provider-tensorrt-cuda13 ov_pkg=onnxruntime-provider-openvino
 mgx_pkg=onnxruntime-provider-migraphx
 # shellcheck disable=SC2086 # the NEEDED lists are words
@@ -1012,6 +1013,18 @@ package_run() {
         echo 'cudnn-frontend MIT licence stand-in' >"$dir/zip/cudnn-frontend-1.24.0/LICENSE.txt"
         (cd "$dir/zip" && bsdtar --format=zip -cf "$dir/src/ortf-dep-cudnn_frontend.zip" cudnn-frontend-1.24.0)
     fi
+    # cpuinfo's and protobuf's source archives, each holding <top>/LICENSE
+    # (a stand-in text) and a LICENSE deeper in the tree, which is not the
+    # one to take; FX_NO_DEP_LICENSE=<dependency> leaves that archive out.
+    local dep top
+    for dep in pytorch_cpuinfo:cpuinfo-4628dc0 protobuf:protobuf-21.12; do
+        top=${dep#*:} dep=${dep%%:*}
+        [[ ${FX_NO_DEP_LICENSE:-} != "$dep" ]] || continue
+        mkdir -p "$dir/zip/$top/third_party"
+        echo "$dep licence stand-in" >"$dir/zip/$top/LICENSE"
+        echo 'another licence' >"$dir/zip/$top/third_party/LICENSE"
+        (cd "$dir/zip" && bsdtar --format=zip -cf "$dir/src/ortf-dep-$dep.zip" "$top")
+    done
     printf '%s\n' "$conf" >"$dir/src/ortf.conf"
     tr ' ' '\n' <<<"$needed_core" >"$dir/needed/libonnxruntime.so.1.29.0"
     : >"$dir/needed/libonnxruntime_providers_shared.so"
@@ -1067,7 +1080,15 @@ conf_all+=$'\nORTF_PYTHON_EXE='"$fx/pystub/python"$'\nORTF_PYTHON_VERSION=3.14.8
 package_run "$conf_all" --
 if ((status == 0)); then ok "every package function of the default build runs under set -eE"; else
     fail "the package functions (exit $status): $out"; fi
-lic() { printf './usr/share/licenses/%s/LICENSE ./usr/share/licenses/%s/ThirdPartyNotices.txt' "$1" "$1"; }
+# lic <package> [cudnn]: the files of its licence directory, in find's C
+# order: ONNX Runtime's LICENSE and ThirdPartyNotices.txt, cpuinfo's and
+# protobuf's licences and, with cudnn, cudnn-frontend's (the CUDA package).
+lic() {
+    local d=./usr/share/licenses/$1
+    printf '%s/LICENSE %s/ThirdPartyNotices.txt %s/cpuinfo-LICENSE' "$d" "$d" "$d"
+    [[ ${2:-} != cudnn ]] || printf ' %s/cudnn-frontend-LICENSE.txt' "$d"
+    printf ' %s/protobuf-LICENSE' "$d"
+}
 cu=onnxruntime-provider-cuda13-rtx trt=onnxruntime-provider-tensorrt-cuda13 ov=onnxruntime-provider-openvino
 py=python-onnxruntime-core site=usr/lib/python3.14/site-packages
 for line in \
@@ -1076,18 +1097,18 @@ for line in \
     'onnxruntime-core conflicts: onnxruntime onnxruntime-cpu onnxruntime-cuda onnxruntime-opt-cuda onnxruntime-rocm onnxruntime-opt-rocm onnxruntime-git onnxruntime-full' \
     'onnxruntime-core replaces: onnxruntime-full' \
     "onnxruntime-core files: ./usr/include/onnxruntime/onnxruntime_c_api.h ./usr/include/onnxruntime/onnxruntime_cxx_api.h ./usr/lib/cmake/onnxruntime/onnxruntimeConfig.cmake ./usr/lib/libonnxruntime.so ./usr/lib/libonnxruntime.so.1 ./usr/lib/libonnxruntime.so.1.29.0 ./usr/lib/libonnxruntime_providers_shared.so ./usr/lib/pkgconfig/libonnxruntime.pc $(lic onnxruntime-core) " \
-    "$cu depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ cuda cudnn nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$cu depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$cu provides: onnxruntime-provider-cuda=1.29.0 onnxruntime-provider-cuda13=1.29.0" \
     "$cu conflicts: onnxruntime-provider-cuda onnxruntime-provider-cuda13" \
-    "$cu files: ./usr/lib/libonnxruntime_providers_cuda.so $(lic "$cu") ./usr/share/licenses/$cu/cudnn-frontend-LICENSE.txt " \
-    "$trt depends: onnxruntime-core=1.29.0-5 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$cu files: ./usr/lib/libonnxruntime_providers_cuda.so $(lic "$cu" cudnn) " \
+    "$trt depends: onnxruntime-core=1.29.0-6 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$trt provides: onnxruntime-provider-tensorrt=1.29.0" \
     "$trt conflicts: onnxruntime-provider-tensorrt" \
     "$trt files: ./usr/lib/libonnxruntime_providers_tensorrt.so $(lic "$trt") " \
-    "$ov depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ openvino openvino>=2026.4 openvino<2026.5" \
+    "$ov depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5" \
     "$ov provides: " "$ov conflicts: " "$ov replaces: " \
     "$ov files: ./usr/lib/libonnxruntime_providers_openvino.so $(lic "$ov") " \
-    "$py depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15" \
+    "$py depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15" \
     "$py provides: python-onnxruntime=1.29.0" \
     "$py conflicts: python-onnxruntime python-onnxruntime-cpu python-onnxruntime-cuda python-onnxruntime-opt-cuda python-onnxruntime-rocm python-onnxruntime-opt-rocm python-onnxruntime-full" \
     "$py replaces: python-onnxruntime-full" \
@@ -1165,6 +1186,50 @@ if ! has_line "$trt FAILED (exit 1):" && ! has_line "$ov FAILED (exit 1):"; then
 else
     fail "a package other than the CUDA one needs cudnn-frontend's licence: $out"
 fi
+# cpuinfo's (BSD-2-Clause) and protobuf's (BSD-3-Clause) licences, the
+# top-level LICENSE of each source archive, in every package: with ONNX
+# Runtime's (MIT), one file per licence identifier of license=() that Arch
+# does not ship in /usr/share/licenses/spdx, as namcap's licensepkg rule
+# counts them (three at least).
+package_run "$conf_all" --
+dep_lic_ok=1
+for p in onnxruntime-core "$cu" "$trt" "$ov" "$py"; do
+    d=$pkgroot/$p/usr/share/licenses/$p
+    n=$(find "$d" -maxdepth 1 -type f | wc -l)
+    if [[ $(<"$d/cpuinfo-LICENSE") != 'pytorch_cpuinfo licence stand-in' ||
+        $(<"$d/protobuf-LICENSE") != 'protobuf licence stand-in' ]] || ((n < 3)); then
+        dep_lic_ok=0
+        echo "$p: $(ls "$d")"
+    fi
+done
+if ((status == 0 && dep_lic_ok == 1)); then
+    ok "every package carries cpuinfo's and protobuf's top-level licences, three licence files at least"
+else
+    fail "the dependencies' licences (exit $status)"
+fi
+for dep in pytorch_cpuinfo protobuf; do
+    FX_NO_DEP_LICENSE=$dep expect_package_fail "a build without $dep's source archive fails on its licence" onnxruntime-core \
+        "src/ortf-dep-$dep.zip not found: $dep's licence, which onnxruntime-core must carry" "$conf_all" --
+done
+# The bare name of a dependency with bounds goes; one without bounds, and
+# one whose name only begins with a bounded one, stay.
+# shellcheck disable=SC2016 # the script expands its own arguments
+out=$(bash -c '
+    set -euo pipefail
+    # shellcheck disable=SC1090
+    . "$1"
+    depends=(onnxruntime-core=1.29.0-6 python python-numpy cuda nvidia-utils "python>=3.14" "python<3.15" "cuda>=13" "cuda<14")
+    _ortf_drop_bare_depends
+    echo "${depends[*]}"
+    depends=()
+    _ortf_drop_bare_depends
+    echo "[${depends[*]}]"
+' _ "$pkgbuild" 2>&1) || out="FAILED: $out"
+if [[ $out == $'onnxruntime-core=1.29.0-6 python-numpy nvidia-utils python>=3.14 python<3.15 cuda>=13 cuda<14\n[]' ]]; then
+    ok "_ortf_drop_bare_depends drops the bare names of bounded dependencies only"
+else
+    fail "_ortf_drop_bare_depends: $out"
+fi
 expect_package_fail "a CUDA provider linking another CUDA major fails" "$cu" \
     'libcudart.so.12 is CUDA 12, the package names say CUDA 13' "$conf_all" \
     'libonnxruntime_providers_cuda.so=libcublas.so.12 libcudart.so.12 libc.so.6' --
@@ -1219,10 +1284,10 @@ if ((status == 0)); then ok "every package function of a migraphx build runs und
     fail "the package functions of a migraphx build (exit $status): $out"; fi
 for line in \
     'onnxruntime-core depends: glibc libgcc libstdc++' \
-    "$mgx depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ migraphx hip-runtime-amd migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" \
+    "$mgx depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" \
     "$mgx provides: " "$mgx conflicts: " "$mgx replaces: " \
     "$mgx files: ./usr/lib/libonnxruntime_providers_migraphx.so ./usr/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime_providers_migraphx.so $(lic "$mgx") " \
-    "$py depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15"; do
+    "$py depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15"; do
     if has_line "$line"; then ok "migraphx package: $line"; else fail "migraphx package: no line [$line] in: $out"; fi
 done
 if [[ $out != *"$cu"* && $out != *"$trt"* && $out != *"$ov "* ]]; then ok "a migraphx build makes no NVIDIA or OpenVINO package"; else
@@ -1230,7 +1295,7 @@ if [[ $out != *"$cu"* && $out != *"$trt"* && $out != *"$ov "* ]]; then ok "a mig
 # ROCm 10.1: the same sonames, the package versions' bounds.
 package_run "${conf_mgx//=7.2.[34]-[17]/=10.1-1}" -- ORTF_EPS=migraphx FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared'
 if ((status == 0)) &&
-    has_line "$mgx depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ migraphx hip-runtime-amd migraphx>=10 migraphx<11 hip-runtime-amd>=10 hip-runtime-amd<11" &&
+    has_line "$mgx depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ migraphx>=10 migraphx<11 hip-runtime-amd>=10 hip-runtime-amd<11" &&
     grep -qxF 'libonnxruntime_providers_migraphx.so needs: libmigraphx_c.so.3 libamdhip64.so.7 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2' \
         "${pkgroot%/pkg}/$mgx.log"; then
     ok "a ROCm 10.1 build: bounds from the package versions (10), the sonames still .so.3 and .so.7"
@@ -1272,9 +1337,9 @@ conf_every=${conf_all/ORTF_EPS=cuda tensorrt openvino/ORTF_EPS=cuda tensorrt ope
 conf_every+=$'\nORTF_MIGRAPHX_VERSION=7.2.3-7\nORTF_HIP_VERSION=7.2.4-1\nORTF_MIGRAPHX_SONAME_MAJOR=3\nORTF_HIP_SONAME_MAJOR=7'
 package_run "$conf_every" -- ORTF_EPS='cuda tensorrt openvino migraphx' FX_STAGE='shared cuda tensorrt openvino migraphx'
 if ((status == 0)) &&
-    has_line "$mgx depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ migraphx hip-runtime-amd migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" &&
-    has_line "$cu depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ cuda cudnn nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" &&
-    has_line "$ov depends: onnxruntime-core=1.29.0-5 glibc libgcc libstdc++ openvino openvino>=2026.4 openvino<2026.5"; then
+    has_line "$mgx depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" &&
+    has_line "$cu depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" &&
+    has_line "$ov depends: onnxruntime-core=1.29.0-6 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5"; then
     ok "a build of every provider: the migraphx package beside the others, each with its own depends"
 else
     fail "a build of every provider (exit $status): $out"
@@ -1389,6 +1454,10 @@ if command -v makepkg >/dev/null 2>&1; then
             /^pkgbase = / || index(keep, " " substr($1 " " $3, length($1) + 2) " ") { print }'
     }
     a=$(srcinfo)
+    # Nothing provides onnxruntime-provider-migraphx unless the build makes
+    # it: the default .SRCINFO names it nowhere.
+    if [[ $a != *FAILED* && $a != *migraphx* ]]; then ok "the default .SRCINFO names no MIGraphX package, optdepends included"; else
+        fail "migraphx in the default .SRCINFO: $(grep -n migraphx <<<"$a")"; fi
     # Only the package names depend on the build inputs (and makedepends
     # on whether the TensorRT package is among them): with fewer providers,
     # the remaining blocks are the same; with other architectures, the same
@@ -1486,17 +1555,22 @@ if command -v makepkg >/dev/null 2>&1; then
     else
         fail "ORTF_EPS='openvino cuda': $d"
     fi
-    # migraphx adds its package and two makedepends, nothing else: with
-    # them taken out, the .SRCINFO is the default one.
+    # migraphx adds its package, two makedepends and the optdepends on it of
+    # onnxruntime-core and python-onnxruntime-core, nothing else: with them
+    # taken out, the .SRCINFO is the default one.
     a_names=$(sed -n 's/^pkgname = //p' <<<"$a" | tr '\n' ' ')
     m=$(srcinfo ORTF_EPS='cuda tensorrt openvino migraphx')
+    mgx_opt=$'\toptdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs, untested)'
     # shellcheck disable=SC2086 # the names are words
-    m_rest=$(only_blocks $a_names <<<"$m" | grep -vxF -e $'\tmakedepends = migraphx' -e $'\tmakedepends = hip-runtime-amd')
+    m_rest=$(only_blocks $a_names <<<"$m" | grep -vxF -e $'\tmakedepends = migraphx' -e $'\tmakedepends = hip-runtime-amd' \
+        -e "$mgx_opt")
     # shellcheck disable=SC2086 # the names are words
     if [[ $m != *FAILED* && $m_rest == "$(only_blocks $a_names <<<"$a")" &&
         $m == *$'\tmakedepends = migraphx\n'* && $m == *$'\tmakedepends = hip-runtime-amd\n'* &&
-        $m == *$'pkgname = onnxruntime-provider-migraphx\n'* ]]; then
-        ok "ORTF_EPS with migraphx adds its package and the migraphx and hip-runtime-amd makedepends only"
+        $m == *$'pkgname = onnxruntime-provider-migraphx\n'* &&
+        $(only_blocks onnxruntime-core <<<"$m" | grep -cxF -- "$mgx_opt") == 1 &&
+        $(only_blocks python-onnxruntime-core <<<"$m" | grep -cxF -- "$mgx_opt") == 1 ]]; then
+        ok "ORTF_EPS with migraphx adds its package, the migraphx and hip-runtime-amd makedepends and its optdepends only"
     else
         fail "ORTF_EPS with migraphx: $(diff <(only_blocks $a_names <<<"$a") <(echo "$m_rest") | head -8)"
     fi
@@ -1504,7 +1578,7 @@ if command -v makepkg >/dev/null 2>&1; then
     mgx_block=$(only_blocks onnxruntime-provider-migraphx <<<"$n")
     if [[ $n != *FAILED* && $(grep -c '^pkgname = ' <<<"$n") == 3 &&
         $mgx_block == *$'\tpkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)\n'* &&
-        $mgx_block == *$'\tdepends = onnxruntime-core=1.29.0-5\n'* && $mgx_block == *$'\tdepends = migraphx\n'* &&
+        $mgx_block == *$'\tdepends = onnxruntime-core=1.29.0-6\n'* && $mgx_block == *$'\tdepends = migraphx\n'* &&
         $mgx_block$'\n' == *$'\tdepends = hip-runtime-amd\n'* && $mgx_block != *'rocm-hip-sdk'* &&
         $(grep -c $'^\t\(provides\|conflicts\) = ' <<<"$mgx_block") == 0 && $n != *cudax* ]]; then
         ok "ORTF_EPS=migraphx: core, the MIGraphX package (no provides, no conflicts) and Python; no CUDA name"

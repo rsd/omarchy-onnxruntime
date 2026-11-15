@@ -21,15 +21,15 @@ With an AUR helper, name the packages of the engines you use (the core is always
 yay -S onnxruntime-core-bin onnxruntime-provider-cuda13-rtx-bin onnxruntime-provider-tensorrt-cuda13-bin onnxruntime-provider-openvino-bin python-onnxruntime-core-bin
 ```
 
-For the `all` preset, name `onnxruntime-provider-cuda13-all-bin` instead of the `rtx` one: they conflict, and one CUDA package is installed at a time. Without a helper, either build the AUR package by hand (`git clone https://aur.archlinux.org/onnxruntime-split-bin.git`, then `makepkg -si` in it), or install the release's files directly. Download the `.pkg.tar.zst` files and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases> (tag `v1.29.0-5`), check them, and install the ones you want in one `pacman -U`:
+For the `all` preset, name `onnxruntime-provider-cuda13-all-bin` instead of the `rtx` one: they conflict, and one CUDA package is installed at a time. Without a helper, either build the AUR package by hand (`git clone https://aur.archlinux.org/onnxruntime-split-bin.git`, then `makepkg -si` in it), or install the release's files directly. Download the `.pkg.tar.zst` files and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases> (tag `v1.29.0-6`), check them, and install the ones you want in one `pacman -U`:
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS
-sudo pacman -U onnxruntime-core-1.29.0-5-x86_64.pkg.tar.zst \
-  onnxruntime-provider-cuda13-rtx-1.29.0-5-x86_64.pkg.tar.zst \
-  onnxruntime-provider-tensorrt-cuda13-1.29.0-5-x86_64.pkg.tar.zst \
-  onnxruntime-provider-openvino-1.29.0-5-x86_64.pkg.tar.zst \
-  python-onnxruntime-core-1.29.0-5-x86_64.pkg.tar.zst
+sudo pacman -U onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst \
+  onnxruntime-provider-cuda13-rtx-1.29.0-6-x86_64.pkg.tar.zst \
+  onnxruntime-provider-tensorrt-cuda13-1.29.0-6-x86_64.pkg.tar.zst \
+  onnxruntime-provider-openvino-1.29.0-6-x86_64.pkg.tar.zst \
+  python-onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst
 ```
 
 The release's files are named without `-bin`, and they carry the same dependencies, so they work with each other; they do not satisfy a `-bin` package's name, so do not mix `pacman -U` of a release file with the AUR's `-bin` of the same package. The MIGraphX provider is not prebuilt: build it from the recipe. The prebuilt packages have the same dependency bounds as a source build ([below](#dependencies-and-version-bounds)): pacman refuses a vendor upgrade that goes past one, and a rebuilt release follows. Then continue at [step 4](#4-verify).
@@ -97,20 +97,20 @@ Install order: update `nvidia-tensorrt-sdk-local` to pkgrel 2 (or install the AU
 ```bash
 cd onnxruntime-split
 MAKEFLAGS=-j8 makepkg -f
-sudo pacman -U onnxruntime-core-1.29.0-5-x86_64.pkg.tar.zst \
-  onnxruntime-provider-cuda13-rtx-1.29.0-5-x86_64.pkg.tar.zst \
-  onnxruntime-provider-tensorrt-cuda13-1.29.0-5-x86_64.pkg.tar.zst \
-  onnxruntime-provider-openvino-1.29.0-5-x86_64.pkg.tar.zst \
-  python-onnxruntime-core-1.29.0-5-x86_64.pkg.tar.zst
+sudo pacman -U onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst \
+  onnxruntime-provider-cuda13-rtx-1.29.0-6-x86_64.pkg.tar.zst \
+  onnxruntime-provider-tensorrt-cuda13-1.29.0-6-x86_64.pkg.tar.zst \
+  onnxruntime-provider-openvino-1.29.0-6-x86_64.pkg.tar.zst \
+  python-onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst
 ```
 
-The install in the `pacman -U` above needs step 2 done first: the TensorRT provider package is refused until an installed package provides `tensorrt` within its bound. Packages of 1.29.0-2 to 1.29.0-4 are replaced by the same names at 1.29.0-5 in that one transaction, except the CUDA package: 1.29.0-4's default build named it `onnxruntime-provider-cuda13-sm120`, and `-rtx` conflicts with it, so pacman offers to remove it. Answer y.
+The install in the `pacman -U` above needs step 2 done first: the TensorRT provider package is refused until an installed package provides `tensorrt` within its bound. Packages of 1.29.0-2 to 1.29.0-6 are replaced by the same names at 1.29.0-6 in that one transaction, except the CUDA package: 1.29.0-4's default build named it `onnxruntime-provider-cuda13-sm120`, and `-rtx` conflicts with it, so pacman offers to remove it. Answer y.
 
 `makepkg` downloads the upstream source and the pinned dependencies as its sources, then builds the library once and writes one package per engine. A full build with one CUDA architecture took 27 minutes on a 24-thread machine ([build.md](build.md#parallelism-memory-and-disk)); it needs tens of GiB of disk, so choose `-jN` for your memory and read that section before the first run. If you installed `ccache` it is used automatically.
 
-Install the packages of one build in a single `pacman -U` that names the exact files. Do not use a glob such as `*onnxruntime-*-1.29.0-5-*`: it also matches packages that an earlier build with other inputs left in the directory (for example `onnxruntime-provider-cuda13-sm120` beside `-cuda13-rtx`), and two CUDA packages conflict, so the transaction fails. `makepkg` names a package `<name>-1.29.0-5-x86_64<PKGEXT>`, with `PKGEXT` from `/etc/makepkg.conf` (`.pkg.tar.zst` on Arch), and `PKGDEST=/an/empty/directory makepkg ...` keeps the packages of one build apart.
+Install the packages of one build in a single `pacman -U` that names the exact files. Do not use a glob such as `*onnxruntime-*-1.29.0-6-*`: it also matches packages that an earlier build with other inputs left in the directory (for example `onnxruntime-provider-cuda13-sm120` beside `-cuda13-rtx`), and two CUDA packages conflict, so the transaction fails. `makepkg` names a package `<name>-1.29.0-6-x86_64<PKGEXT>`, with `PKGEXT` from `/etc/makepkg.conf` (`.pkg.tar.zst` on Arch), and `PKGDEST=/an/empty/directory makepkg ...` keeps the packages of one build apart.
 
-The names above are those of the default build (the CUDA preset `rtx`). A subset is fine: the core alone (`onnxruntime-core`, CPU only), the core and `onnxruntime-provider-openvino`, and so on; the core is always needed, because the others depend on it at the same version (`onnxruntime-core=<pkgver>-<pkgrel>`). The CUDA package's suffix depends on `ORTF_CUDA_ARCHS` (`-cuda13-rtx` for the preset `rtx`, `-cuda13-all` for `all`, `-cuda13-sm89-sm120` for `"89 120"`), and `<M>` in `-cuda<M>` on the CUDA toolkit that built it; [build.md](build.md#cuda-architectures) has the rules. A build with `ORTF_EPS=cpu` writes `onnxruntime-core` and the Python package only. With `migraphx` in `ORTF_EPS` there is also `onnxruntime-provider-migraphx-1.29.0-5-x86_64.pkg.tar.zst` to name in the `pacman -U`; for an AMD-only build use `ORTF_EPS=migraphx makepkg -d -f` after installing `migraphx` and `hip-runtime-amd` ([build.md](build.md#migraphx-amd-gpus)). This package is **untested on AMD hardware**, and the smoke test below has no MIGraphX target. `onnxruntime-core` and `python-onnxruntime-core` list it as an optional dependency, and the package installs a symlink `<site-packages>/onnxruntime/capi/libonnxruntime_providers_migraphx.so` to `/usr/lib/libonnxruntime_providers_migraphx.so`, so the Python module can load it too (only when the build also makes `python-onnxruntime-core`). That is untested on AMD hardware as well.
+The names above are those of the default build (the CUDA preset `rtx`). A subset is fine: the core alone (`onnxruntime-core`, CPU only), the core and `onnxruntime-provider-openvino`, and so on; the core is always needed, because the others depend on it at the same version (`onnxruntime-core=<pkgver>-<pkgrel>`). The CUDA package's suffix depends on `ORTF_CUDA_ARCHS` (`-cuda13-rtx` for the preset `rtx`, `-cuda13-all` for `all`, `-cuda13-sm89-sm120` for `"89 120"`), and `<M>` in `-cuda<M>` on the CUDA toolkit that built it; [build.md](build.md#cuda-architectures) has the rules. A build with `ORTF_EPS=cpu` writes `onnxruntime-core` and the Python package only. With `migraphx` in `ORTF_EPS` there is also `onnxruntime-provider-migraphx-1.29.0-6-x86_64.pkg.tar.zst` to name in the `pacman -U`; for an AMD-only build use `ORTF_EPS=migraphx makepkg -d -f` after installing `migraphx` and `hip-runtime-amd` ([build.md](build.md#migraphx-amd-gpus)). This package is **untested on AMD hardware**, and the smoke test below has no MIGraphX target. `onnxruntime-core` and `python-onnxruntime-core` list it as an optional dependency, and the package installs a symlink `<site-packages>/onnxruntime/capi/libonnxruntime_providers_migraphx.so` to `/usr/lib/libonnxruntime_providers_migraphx.so`, so the Python module can load it too (only when the build also makes `python-onnxruntime-core`). That is untested on AMD hardware as well.
 
 If an Arch ONNX Runtime variant (`onnxruntime`, `onnxruntime-cuda`, `onnxruntime-opt-cuda` and so on, and their `python-` packages) is installed, pacman reports the conflict and offers to remove it; programs built against it keep working, because `onnxruntime-core` provides `onnxruntime` and `libonnxruntime.so`, and `python-onnxruntime-core` provides `python-onnxruntime`, at the same version.
 
@@ -135,7 +135,7 @@ Every package's `depends` cover what its libraries need. `package()` reads the `
 | `onnxruntime-provider-migraphx` (only with `migraphx` in `ORTF_EPS`; untested on AMD hardware) | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `migraphx`, `hip-runtime-amd` (bounded as below; never `rocm-hip-sdk`) |
 | `python-onnxruntime-core` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `python`, `python-numpy`, `python-flatbuffers`, `python-packaging`, `python-protobuf` |
 
-The vendor runtimes and Python carry version bounds where the ABI demands a rebuild after an upgrade:
+The vendor runtimes and Python carry version bounds where the ABI demands a rebuild after an upgrade. A built package lists such a dependency by its bounds alone (`cuda>=13` and `cuda<14`, not also a bare `cuda`); the bare name is in `.SRCINFO`, where the bounds are not known yet:
 
 | Dependency | Bound | Taken from |
 |---|---|---|
@@ -153,7 +153,7 @@ The packages depend on each other only by names that a prebuilt package provides
 #### Checking built packages: `scripts/check-deps.sh`
 
 ```bash
-scripts/check-deps.sh onnxruntime-split/*-1.29.0-5-x86_64.pkg.tar.zst
+scripts/check-deps.sh onnxruntime-split/*-1.29.0-6-x86_64.pkg.tar.zst
 ```
 
 The script takes package files and is read-only: it queries `pacman` and `ldconfig` and writes only under a temporary directory. For each package it unpacks, and for each ELF shared library in it, it prints every needed soname with the path it resolves to (the library's RUNPATH, a library of the package files given, then `ldconfig`'s cache), the package that owns that path with its version, and whether a dependency of the package covers that owner. It then prints every dependency of the package, the installed package (or package file given) that meets it, that package's version, and whether the version is inside the dependency's bounds (compared as `vercmp` does). The rows carry a status; these flag a problem:

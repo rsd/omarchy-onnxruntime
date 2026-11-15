@@ -1,6 +1,6 @@
 # Releasing
 
-The maintainer's procedure for a release: build the packages in a clean chroot, publish them as GitHub release assets, and update the two AUR packages, `onnxruntime-split` (the recipe) and `onnxruntime-split-bin` (the prebuilt packages, which download those assets). Users of the packages need none of this: see [install.md](install.md#prebuilt-packages). The commands below are for the release of version `1.29.0-5`; replace the version for another.
+The maintainer's procedure for a release: build the packages in a clean chroot, publish them as GitHub release assets, and update the two AUR packages, `onnxruntime-split` (the recipe) and `onnxruntime-split-bin` (the prebuilt packages, which download those assets). Users of the packages need none of this: see [install.md](install.md#prebuilt-packages). The commands below are for the release of version `1.29.0-6`; replace the version for another.
 
 ```mermaid
 flowchart LR
@@ -68,7 +68,7 @@ w=$(mktemp -d) && cp onnxruntime-split/PKGBUILD "$w"/ \
   && (cd "$w" && extra-x86_64-build -- -I /path/to/nvidia-tensorrt-sdk-local-<ver>-x86_64.pkg.tar.zst)
 ```
 
-Only its CUDA package, `onnxruntime-provider-cuda13-all-1.29.0-5-x86_64.pkg.tar.zst`, is released. Its other packages are not released: the `rtx` build's own are used with it (the TensorRT package depends on `onnxruntime-provider-cuda13`, a name both CUDA packages provide).
+Only its CUDA package, `onnxruntime-provider-cuda13-all-1.29.0-6-x86_64.pkg.tar.zst`, is released. Its other packages are not released: the `rtx` build's own are used with it (the TensorRT package depends on `onnxruntime-provider-cuda13`, a name both CUDA packages provide).
 
 ## 3. Check
 
@@ -91,7 +91,7 @@ The order matters: `SHA256SUMS` and the `-bin` PKGBUILD come from `gen-bin.sh`, 
 2. Generate:
 
    ```bash
-   scripts/gen-bin.sh <dir> v1.29.0-5
+   scripts/gen-bin.sh <dir> v1.29.0-6
    ```
 
    It writes `<dir>/SHA256SUMS` and `aur/onnxruntime-split-bin/{PKGBUILD,.SRCINFO}`, and prints the `gh release create` command. It refuses, naming the cause, an asset that is not from this recipe at the tag's version, a MIGraphX package, and a dependency a `-bin` package would not meet.
@@ -99,7 +99,7 @@ The order matters: `SHA256SUMS` and the `-bin` PKGBUILD come from `gen-bin.sh`, 
 3. Create the release with that command's form, adding a title and notes:
 
    ```bash
-   gh release create v1.29.0-5 <dir>/*.pkg.tar.zst <dir>/SHA256SUMS \
+   gh release create v1.29.0-6 <dir>/*.pkg.tar.zst <dir>/SHA256SUMS \
      --repo rsd/omarchy-onnxruntime --title '...' --notes '...'
    ```
 
@@ -115,9 +115,9 @@ The source package first, then the prebuilt one, which downloads assets that mus
 
 ```bash
 scripts/srcinfo.sh --aur aur/onnxruntime-split          # checks .SRCINFO is current, then copies PKGBUILD and .SRCINFO
-(cd aur/onnxruntime-split && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-5' && git push)
+(cd aur/onnxruntime-split && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-6' && git push)
 
-(cd aur/onnxruntime-split-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-5' && git push)
+(cd aur/onnxruntime-split-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-6' && git push)
 ```
 
 `scripts/srcinfo.sh --aur` commits nothing and fails when the committed `onnxruntime-split/.SRCINFO` is stale: regenerate it with `scripts/srcinfo.sh --write` after a PKGBUILD change.
@@ -127,7 +127,7 @@ scripts/srcinfo.sh --aur aur/onnxruntime-split          # checks .SRCINFO is cur
 - **A fix to the `-bin` PKGBUILD alone** (a dependency, a description): bump only its `pkgrel`, with the assets and the release as they are:
 
   ```bash
-  scripts/gen-bin.sh --pkgrel 6 <dir> v1.29.0-5
+  scripts/gen-bin.sh --pkgrel 7 <dir> v1.29.0-6
   ```
 
   The assets' version still drives the version check and the `<name>=<pkgver>-<pkgrel>` provides. Verify and push as in [4](#4-collect-generate-publish) and [5](#5-push-to-the-aur), without a new release.

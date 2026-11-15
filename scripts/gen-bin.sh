@@ -3,7 +3,7 @@
 # counterpart of onnxruntime-split, from the packages of a release.
 #
 #   scripts/gen-bin.sh [--base-url URL] [--out DIR] [--pkgrel N] <package dir> <tag>
-#   e.g. scripts/gen-bin.sh ~/release v1.29.0-5
+#   e.g. scripts/gen-bin.sh ~/release v1.29.0-6
 #
 # <package dir> holds the release assets: every *.pkg.tar.zst in it (the
 # packages of the rtx build plus the CUDA package of the `all` build, all
@@ -77,7 +77,7 @@ pkgdir_in=$1 tag=$2
 [[ -d $pkgdir_in ]] || die 2 "$pkgdir_in: not a directory"
 pkgdir_in=$(cd "$pkgdir_in" && pwd)
 if [[ ! $tag =~ ^v([^-]+)-([0-9]+(\.[0-9]+)?)$ ]]; then
-    die 2 "$tag: not a tag v<pkgver>-<pkgrel> (e.g. v1.29.0-5)"
+    die 2 "$tag: not a tag v<pkgver>-<pkgrel> (e.g. v1.29.0-6)"
 fi
 pkgver=${BASH_REMATCH[1]} pkgrel=${BASH_REMATCH[2]}
 version=$pkgver-$pkgrel

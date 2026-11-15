@@ -146,7 +146,7 @@ The packages install:
 | `/usr/lib/libonnxruntime_providers_<provider>.so` | the provider's package | One library per provider built |
 | `/usr/include/onnxruntime/` | `onnxruntime-core` | The C and C++ API headers |
 | `/usr/lib/pkgconfig/libonnxruntime.pc` and the CMake files | `onnxruntime-core` | pkg-config and CMake files |
-| `/usr/share/licenses/<package>/` | every package | ONNX Runtime's licence and third-party notices |
+| `/usr/share/licenses/<package>/` | every package | ONNX Runtime's licence and third-party notices, and cpuinfo's and protobuf's licences (the CUDA package also cudnn-frontend's) |
 
 ### From C and C++
 
