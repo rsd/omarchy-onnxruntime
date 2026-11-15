@@ -55,8 +55,10 @@
 # where the ABI demands a rebuild on an upgrade: cuda by major
 # (from the sonames), cudnn by major (the build-time cuDNN: the CUDA provider
 # dlopen()s it, so no soname says), TensorRT by major.minor, openvino by year.minor and
-# python by minor, these three from the versions installed when prepare()
-# runs (_ortf_resolve records them in src/ortf.conf). pacman then refuses
+# python by minor, these three from the versions prepare() records in
+# src/ortf.conf (_ortf_resolve): TensorRT's from the NvInferVersion.h of
+# the headers it builds with, the other two from the installed packages.
+# pacman then refuses
 # the vendor upgrade that would break a provider until it is rebuilt;
 # scripts/check-deps.sh <package files> shows, for built packages, every
 # library, its owner and whether the installed versions are still inside
@@ -126,12 +128,15 @@
 #   ORTF_NVCC_THREADS  nvcc --threads per CUDA compile job (default: 1).
 #   ORTF_TENSORRT_HOME the TensorRT root, holding include/NvInfer.h and
 #                      lib/libnvinfer.so (default: /opt/nvidia/tensorrt when
-#                      it holds include/NvInfer.h, else /usr). It also
-#                      decides the package the TensorRT provider package
-#                      depends on (_ortf_resolve: nvidia-tensorrt-sdk,
-#                      tensorrt, or the owner of its libnvinfer), which
-#                      prepare() checks is installed, recording the
-#                      version it is installed (or provided) at.
+#                      it holds include/NvInfer.h, else /usr). Its
+#                      include/NvInferVersion.h gives the TensorRT version
+#                      the build records, which the TensorRT provider
+#                      package's dependency on tensorrt is bounded to
+#                      (prepare() warns when no installed package provides
+#                      tensorrt: the AUR's, or nvidia-tensorrt-sdk-local).
+#                      The package's RUNPATH names this root's library
+#                      directory (when not under /usr/lib) before
+#                      /opt/nvidia/tensorrt/lib.
 #   ORTF_PYTHON        1 (default) also builds the Python module and
 #                      python-onnxruntime-core; 0 skips both. prepare()
 #                      records the version of the python that builds it.
@@ -174,14 +179,14 @@
 # packages an earlier build with other inputs left in this directory (e.g.
 # onnxruntime-provider-cuda13-rtx beside -cuda13-sm120, which conflict, and
 # the transaction fails). makepkg writes them as
-# <name>-1.29.0-2-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
+# <name>-1.29.0-3-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
 # (.pkg.tar.zst on Arch); PKGDEST=/an/empty/directory makepkg ... keeps one
 # build's packages apart. For the default build:
-#   sudo pacman -U onnxruntime-core-1.29.0-2-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-cuda13-sm120-1.29.0-2-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-tensorrt-cuda13-1.29.0-2-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-openvino-1.29.0-2-x86_64.pkg.tar.zst \
-#     python-onnxruntime-core-1.29.0-2-x86_64.pkg.tar.zst
+#   sudo pacman -U onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-cuda13-sm120-1.29.0-3-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-tensorrt-cuda13-1.29.0-3-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-openvino-1.29.0-3-x86_64.pkg.tar.zst \
+#     python-onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst
 # Upgrading from 1.29.0-1, the single onnxruntime-full (and its
 # python-onnxruntime-full) of this recipe's first, unsplit version:
 # onnxruntime-core has replaces=(onnxruntime-full) and
@@ -206,8 +211,11 @@
 # in /usr/lib.
 #
 # TensorRT's built-in plugins (libnvinfer_plugin.so.<major>): ONNX Runtime
-# opens that library by name from libonnxruntime.so, which has no RUNPATH,
-# so with TensorRT under /opt/nvidia/tensorrt a program that wants them
+# opens that library by name from libonnxruntime.so (a dlopen() searches the
+# RUNPATH of the object that calls it, and the TensorRT provider's RUNPATH
+# is not that object's), whose RUNPATH is only $ORIGIN (/usr/lib), so with
+# TensorRT under
+# /opt/nvidia/tensorrt a program that wants them
 # runs with that lib/ on LD_LIBRARY_PATH, e.g. by loading
 # /usr/share/nvidia-tensorrt/nvidia-tensorrt.env (systemd EnvironmentFile=,
 # or `set -a; . file; set +a`). Without it the provider still works and
@@ -345,7 +353,10 @@ read -ra _ortf_pkgname <<<"$(_ortf_pkgnames "${ORTF_EPS:-cuda tensorrt openvino}
 pkgname=("${_ortf_pkgname[@]}")
 pkgver=1.29.0
 # 2: the split into one package per engine (1.29.0-1 was one package).
-pkgrel=2
+# 3: the TensorRT provider package depends on tensorrt (the AUR's, or
+# nvidia-tensorrt-sdk-local, which provides it) and has /opt/nvidia/tensorrt/lib
+# in its RUNPATH.
+pkgrel=3
 # Each package sets its own; this one is the pkgbase's (and onnxruntime-core's).
 pkgdesc='Cross-platform inference engine for ONNX models: the C and C++ library with the CPU execution provider'
 arch=('x86_64')
@@ -357,11 +368,12 @@ url='https://github.com/microsoft/onnxruntime'
 # SafeInt, cudnn-frontend (MIT). Their notices are in ThirdPartyNotices.txt.
 # No vendor runtime is contained (see the top of the file).
 license=('MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MPL-2.0')
-# Every build input, whatever ORTF_EPS selects. TensorRT is not listed: no
-# one package name is provided by both the AUR's tensorrt (under /usr) and
-# a local nvidia-tensorrt-sdk package (under /opt/nvidia/tensorrt).
-# prepare() checks the TensorRT headers and library when ORTF_EPS has
-# tensorrt.
+# Every build input, whatever ORTF_EPS selects. TensorRT is not listed:
+# its packages (the AUR's tensorrt under /usr, nvidia-tensorrt-sdk-local under
+# /opt/nvidia/tensorrt) both provide the name tensorrt, but a build can use
+# TensorRT from anywhere (ORTF_TENSORRT_HOME). prepare() checks the TensorRT
+# headers and library when ORTF_EPS has tensorrt, and warns when no
+# installed package provides tensorrt.
 makedepends=(
   'git' 'cmake' 'ninja' 'patchelf'
   'python' 'python-build' 'python-installer' 'python-wheel' 'python-setuptools' 'python-numpy'
@@ -565,11 +577,47 @@ _ortf_minor_bounds() {
     "$name<$epoch${BASH_REMATCH[1]}.$((10#${BASH_REMATCH[2]} + 1))"
 }
 
+# _ortf_tensorrt_version <NvInferVersion.h>: prints the TensorRT version
+# (major.minor.patch.build) the header defines. TensorRT 10 and 11 define
+# TRT_MAJOR_ENTERPRISE, ... and NV_TENSORRT_MAJOR as that name; older
+# releases define NV_TENSORRT_MAJOR ... as numbers. Returns 1 with a message
+# on stderr when the header is missing or gives no numeric major and minor.
+_ortf_tensorrt_version() {
+  local line k v part val ref
+  local -A defs=()
+  if [[ ! -f $1 ]]; then
+    echo "tensorrt: $1 not found (the TensorRT headers give the version the provider package is bounded to)" >&2
+    return 1
+  fi
+  while read -r line; do
+    if [[ $line =~ ^#[[:space:]]*define[[:space:]]+([A-Z_]+)[[:space:]]+([A-Za-z0-9_]+) ]]; then
+      k=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+      defs[$k]=$v
+    fi
+  done <"$1"
+  local -a nums=()
+  for part in MAJOR MINOR PATCH BUILD; do
+    val=${defs[NV_TENSORRT_$part]:-}
+    # One step of indirection: NV_TENSORRT_MAJOR TRT_MAJOR_ENTERPRISE.
+    if [[ -n $val && ! $val =~ ^[0-9]+$ ]]; then ref=$val val=${defs[$ref]:-}; fi
+    if [[ $val =~ ^[0-9]+$ ]]; then
+      nums+=("$val")
+    else
+      break
+    fi
+  done
+  if ((${#nums[@]} < 2)); then
+    echo "tensorrt: $1 gives no numeric NV_TENSORRT_MAJOR and NV_TENSORRT_MINOR" >&2
+    return 1
+  fi
+  local IFS=.
+  printf '%s\n' "${nums[*]}"
+}
+
 # _ortf_installed_version <name>: prints the version of the installed
 # package that is or provides <name> (pacman -Qi, read-only): its own
 # version for its own name, the provided version for a provided one
-# (nvidia-tensorrt-sdk-local 11.4.0.106-1 provides
-# nvidia-tensorrt-sdk=11.4.0.106). Returns 1 when no installed package
+# (openvino-git 2026.5.0.r1-1 provides openvino=2026.5.0). Returns 1 when no installed package
 # is or provides <name>, 2 when one provides it without a version, which a
 # versioned dependency cannot be met by.
 _ortf_installed_version() {
@@ -640,8 +688,8 @@ _ortf_resolve() {
   local out=$1 _ortf_val _ortf_src w
   local -a words lines=()
   local cpu=0 cuda=0 trt=0 ov=0 eps archs='' python=0 python_exe='' nvcc_threads ccache='' jobs
-  local trt_home='' trt_libdir='' trt_pkg='' host_cxx='' cuda_major='' cudnn_major='' cudnn_src nvcc_out cudnn_version
-  local trt_version='' ov_version='' python_version='' bounds rc
+  local trt_home='' trt_libdir='' host_cxx='' cuda_major='' cudnn_major='' cudnn_src nvcc_out cudnn_version
+  local trt_version='' trt_installed='' ov_version='' python_version='' bounds rc
 
   _ortf_pick ORTF_EPS 'cuda tensorrt openvino'
   read -ra words <<<"${_ortf_val//,/ }"
@@ -837,48 +885,23 @@ _ortf_resolve() {
       return 1
     fi
     lines+=("ORTF_TENSORRT_HOME=$trt_home ($_ortf_src; libraries in $trt_libdir)")
-    # The package the TensorRT provider package depends on, decided here
-    # rather than after hours of build. No one name is common to the
-    # TensorRT packages: a local package under /opt/nvidia/tensorrt (e.g.
-    # nvidia-tensorrt-sdk-local from omarchy-nvidia-sdks) provides
-    # nvidia-tensorrt-sdk, the AUR's tensorrt under /usr provides nothing,
-    # and pacman has no "either" dependency. The provider is tied to the
-    # TensorRT it was built with anyway (its RUNPATH), so it depends on the
-    # package of that one: elsewhere, the owner of its libnvinfer.
-    if [[ $trt_home == "$_ortf_tensorrt_default" ]]; then
-      trt_pkg=nvidia-tensorrt-sdk _ortf_src="what a TensorRT package under $_ortf_tensorrt_default provides"
-    elif [[ $trt_home == "$_ortf_tensorrt_usr" ]]; then
-      trt_pkg=tensorrt _ortf_src="the AUR's TensorRT package under $_ortf_tensorrt_usr"
-    else
-      local -a nvinfer=("$trt_libdir"/libnvinfer.so*)
-      if ! trt_pkg=$(pacman -Qqo -- "${nvinfer[0]}" 2>/dev/null) ||
-        [[ ! $trt_pkg =~ ^[a-z0-9@_+][a-z0-9@._+-]*$ ]]; then
-        echo "tensorrt: ${nvinfer[0]} belongs to no package, so the TensorRT provider package could not depend on its TensorRT: install TensorRT as a package (e.g. nvidia-tensorrt-sdk-local, or the AUR's tensorrt)" >&2
-        return 1
-      fi
-      _ortf_src="the owner of ${nvinfer[0]}"
-    fi
+    # The TensorRT provider package depends on tensorrt, bounded to the
+    # major.minor of the headers it is built with (an ABI boundary for
+    # TensorRT): the AUR's tensorrt and nvidia-tensorrt-sdk-local both
+    # provide that name. The version is read from the headers, not from a
+    # package, so a TensorRT that is not installed as a package builds too;
+    # the dependency is only met at install time, hence just a warning.
+    trt_version=$(_ortf_tensorrt_version "$trt_home/include/NvInferVersion.h") || return 1
+    bounds=$(_ortf_minor_bounds tensorrt "$trt_version") || return 1
+    lines+=("ORTF_TENSORRT_VERSION=$trt_version ($trt_home/include/NvInferVersion.h, so ${bounds//$'\n'/ })")
     # Read-only: pacman -T prints the dependencies no installed package
-    # satisfies (exit 127). Without it, the build would end hours later in
-    # a package pacman cannot install.
-    if ! pacman -T -- "$trt_pkg" >/dev/null 2>&1; then
-      echo "tensorrt: no installed package is or provides $trt_pkg ($_ortf_src), which the TensorRT provider package would depend on: install it, or set ORTF_TENSORRT_HOME to the TensorRT of an installed package" >&2
-      return 1
+    # satisfies (exit 127).
+    if ! pacman -T -- tensorrt >/dev/null 2>&1; then
+      echo "warning: tensorrt: no installed package is or provides tensorrt, which the TensorRT provider package depends on: update nvidia-tensorrt-sdk-local or install the AUR tensorrt before installing the provider package" >&2
+    elif trt_installed=$(_ortf_installed_version tensorrt) &&
+      [[ $trt_installed =~ ^([0-9]+)[.]([0-9]+) && $trt_version. != "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}."* ]]; then
+      echo "warning: tensorrt: the installed tensorrt is $trt_installed, the headers in $trt_home are TensorRT $trt_version: the provider package will not install against the former" >&2
     fi
-    # The TensorRT provider depends on the major.minor of the TensorRT it
-    # was built with (an ABI boundary for TensorRT): the version of the
-    # installed package, or the version it provides the name at.
-    rc=0
-    trt_version=$(_ortf_installed_version "$trt_pkg") || rc=$?
-    if ((rc == 2)); then
-      echo "tensorrt: the installed package that provides $trt_pkg provides it without a version, so the TensorRT provider package could not depend on its major.minor: have it provide $trt_pkg=<version>" >&2
-      return 1
-    elif ((rc != 0)) || [[ -z $trt_version ]]; then
-      echo "tensorrt: no version recorded for $trt_pkg (pacman -Qi $trt_pkg gives none), which bounds the TensorRT provider package's dependency" >&2
-      return 1
-    fi
-    bounds=$(_ortf_minor_bounds "$trt_pkg" "$trt_version") || return 1
-    lines+=("ORTF_TENSORRT_PKG=$trt_pkg ($_ortf_src; installed: $trt_version, so ${bounds//$'\n'/ })")
   fi
 
   if ((ov)); then
@@ -948,7 +971,6 @@ _ortf_resolve() {
     printf 'ORTF_NVCC_THREADS=%s\n' "$nvcc_threads"
     printf 'ORTF_TENSORRT_HOME=%s\n' "$trt_home"
     printf 'ORTF_TENSORRT_LIBDIR=%s\n' "$trt_libdir"
-    printf 'ORTF_TENSORRT_PKG=%s\n' "$trt_pkg"
     printf 'ORTF_TENSORRT_VERSION=%s\n' "$trt_version"
     printf 'ORTF_OPENVINO_VERSION=%s\n' "$ov_version"
     printf 'ORTF_PYTHON=%s\n' "$python"
@@ -1025,11 +1047,10 @@ print(sysconfig.get_path("platlib", "posix_prefix", {"base": "/usr", "platbase":
 # _ortf_check_tools: the tools the build runs, checked early (makepkg -d
 # skips the dependency check).
 _ortf_check_tools() {
-  local tool missing=() trt_libdir
+  local tool missing=()
   local -a tools=(cmake ninja git patch readelf)
-  # patchelf only runs for a TensorRT outside the default library path.
-  trt_libdir=$(_ortf_get ORTF_TENSORRT_LIBDIR) || return 1
-  [[ -z $trt_libdir || $trt_libdir == /usr/lib || $trt_libdir == /usr/lib64 ]] || tools+=(patchelf)
+  # patchelf gives the TensorRT provider its RUNPATH.
+  ! _ortf_has tensorrt || tools+=(patchelf)
   for tool in "${tools[@]}"; do
     command -v "$tool" >/dev/null || missing+=("$tool")
   done
@@ -1381,7 +1402,7 @@ package_onnxruntime-core() {
 # (_ortf_check_libs). The
 # caller has set depends.
 _ortf_package_provider() {
-  local ep=$1 name=libonnxruntime_providers_$1.so lib trt_pkg='' trt_home trt_libdir runpath bounds
+  local ep=$1 name=libonnxruntime_providers_$1.so lib trt='' trt_home trt_libdir runpath bounds rpath
   _ortf_check_names || return 1
   if [[ ! -f $srcdir/stage/usr/lib/$name ]]; then
     echo "$srcdir/stage/usr/lib/$name not found (onnxruntime-core is packaged first; a build without $ep?)" >&2
@@ -1392,45 +1413,47 @@ _ortf_package_provider() {
   lib=$pkgdir/usr/lib/$name
 
   if [[ $ep == tensorrt ]]; then
-    # The TensorRT package _ortf_resolve chose for the TensorRT the build
-    # used: not known when makepkg sources this file, so not in .SRCINFO.
-    trt_pkg=$(_ortf_get ORTF_TENSORRT_PKG) || return 1
-    if [[ -z $trt_pkg ]]; then
-      echo "ortf.conf: ORTF_TENSORRT_PKG is empty (run makepkg without -e, so that prepare() runs)" >&2
-      return 1
-    fi
-    bounds=$(_ortf_recorded_bounds ORTF_TENSORRT_VERSION "$trt_pkg") || return 1
-    depends+=("$trt_pkg")
+    # tensorrt, bounded to the major.minor of the TensorRT headers the build
+    # used (_ortf_resolve): not known when makepkg sources this file, so not
+    # in .SRCINFO.
+    trt=tensorrt
+    bounds=$(_ortf_recorded_bounds ORTF_TENSORRT_VERSION tensorrt) || return 1
     mapfile -t -O "${#depends[@]}" depends <<<"$bounds"
     # The TensorRT provider finds libnvinfer and libnvonnxparser, which it
-    # links, through its own RUNPATH when TensorRT is outside the default
-    # library path: no ld.so.conf entry, nothing global. patchelf, after the
-    # install, on this one library: CMAKE_INSTALL_RPATH would give every
-    # library the path. That RUNPATH does not cover libnvinfer_plugin: the
-    # provider has libonnxruntime.so open it by name
-    # (Env::LoadDynamicLibrary, tensorrt_execution_provider_custom_ops.cc),
-    # and a dlopen() searches the RUNPATH of the object that calls it,
-    # which libonnxruntime.so lacks. A program that wants TensorRT's
-    # built-in plugins sets LD_LIBRARY_PATH (the top of this file); without
-    # them the provider still runs.
+    # links, through its own RUNPATH: no ld.so.conf entry, nothing global.
+    # /opt/nvidia/tensorrt/lib always (nvidia-tensorrt-sdk-local), the
+    # library directory of a build against another ORTF_TENSORRT_HOME first
+    # (the one it was built against); the default search then covers /usr/lib
+    # (the AUR's tensorrt). patchelf, after the install, on this one
+    # library: CMAKE_INSTALL_RPATH would give every library the path. That
+    # RUNPATH does not cover libnvinfer_plugin: the provider has
+    # libonnxruntime.so open it by name (Env::LoadDynamicLibrary,
+    # tensorrt_execution_provider_custom_ops.cc), and a dlopen() searches
+    # the RUNPATH of the object that calls it: libonnxruntime.so's is only
+    # $ORIGIN (/usr/lib, where the AUR's tensorrt puts it). A program that wants TensorRT's built-in plugins sets
+    # LD_LIBRARY_PATH (the top of this file), or the provider option
+    # trt_extra_plugin_lib_paths; without them the provider still runs.
     trt_home=$(_ortf_get ORTF_TENSORRT_HOME) || return 1
     trt_libdir=$(_ortf_get ORTF_TENSORRT_LIBDIR) || return 1
-    if [[ $trt_libdir != /usr/lib && $trt_libdir != /usr/lib64 ]]; then
-      patchelf --add-rpath "$trt_libdir" "$lib"
-      runpath=$(readelf -d -- "$lib" | sed -n 's/.*(RUNPATH).*\[\(.*\)\]$/\1/p')
-      if [[ :$runpath: != *":$trt_libdir:"* ]]; then
-        echo "$name: RUNPATH '$runpath' lacks $trt_libdir" >&2
-        return 1
-      fi
-      echo "$name: RUNPATH $runpath (TensorRT in $trt_home)"
+    rpath=$_ortf_tensorrt_default/lib
+    case $trt_libdir in
+      /usr/lib | /usr/lib64 | "$rpath") ;;
+      *) rpath=$trt_libdir:$rpath ;;
+    esac
+    patchelf --set-rpath "$rpath" "$lib"
+    runpath=$(readelf -d -- "$lib" | sed -n 's/.*(RUNPATH).*\[\(.*\)\]$/\1/p')
+    if [[ $runpath != "$rpath" ]]; then
+      echo "$name: RUNPATH '$runpath', not $rpath" >&2
+      return 1
     fi
+    echo "$name: RUNPATH $runpath (TensorRT in $trt_home)"
   fi
   if [[ $ep == openvino ]]; then
     bounds=$(_ortf_recorded_bounds ORTF_OPENVINO_VERSION openvino) || return 1
     mapfile -t -O "${#depends[@]}" depends <<<"$bounds"
   fi
 
-  _ortf_check_libs "$trt_pkg" || return 1
+  _ortf_check_libs "$trt" || return 1
   echo "${pkgname[0]} depends: ${depends[*]}"
 
   _ortf_licenses
@@ -1462,8 +1485,8 @@ eval "package_onnxruntime-provider-cuda$_ortf_cuda_major-$_ortf_sfx() {
 # with the CUDA package of any architectures of its CUDA major, by the name
 # each of them provides. It links CUDA's runtime, cuBLAS and cuDNN itself,
 # hence cuda and cudnn in its depends too; its TensorRT package, with
-# bounds on the major.minor of the installed one, is added at package time
-# (_ortf_package_provider). It provides, and conflicts with,
+# bounds on the major.minor of the headers it was built with, is added at
+# package time (_ortf_package_provider). It provides, and conflicts with,
 # onnxruntime-provider-tensorrt, the name the optdepends use.
 eval "package_onnxruntime-provider-tensorrt-cuda$_ortf_cuda_major() {
   pkgdesc='The TensorRT execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)'

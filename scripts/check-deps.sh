@@ -2,7 +2,7 @@
 # Checks the library dependencies of built packages against this system.
 #
 #   scripts/check-deps.sh <package file>...
-#   e.g. scripts/check-deps.sh onnxruntime-split/*-1.29.0-2-x86_64.pkg.tar.zst
+#   e.g. scripts/check-deps.sh onnxruntime-split/*-1.29.0-3-x86_64.pkg.tar.zst
 #
 # For each package file (unpacked with bsdtar into a temporary directory)
 # and each ELF shared library in it (a regular file named *.so or *.so.*),

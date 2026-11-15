@@ -2,14 +2,14 @@
 # Tests for the build-input logic of onnxruntime-split/PKGBUILD: how
 # prepare() resolves and checks ORTF_EPS, ORTF_CUDA_ARCHS,
 # its presets, ORTF_NVCC_THREADS, ORTF_TENSORRT_HOME (and the TensorRT
-# package it implies, which must be installed), ORTF_PYTHON, ORTF_CCACHE,
+# version its headers give), ORTF_PYTHON, ORTF_CCACHE,
 # MAKEFLAGS, NVCC_CCBIN, the CUDA major (cuda.h against nvcc) and
 # CFLAGS/CXXFLAGS (_ortf_resolve), how it lays out the dependency mirror (_ortf_mirror),
 # which site-packages the Python package goes to under /usr/bin/python and
 # a venv (_ortf_py_site), the package names the inputs give
 # (_ortf_cuda_header_major, _ortf_cuda_suffix, _ortf_pkgnames,
-# _ortf_check_names), the installed TensorRT, openvino and python versions
-# prepare() records and the bounds they give (_ortf_installed_version,
+# _ortf_check_names), the TensorRT header version and the installed openvino
+# and python versions prepare() records and the bounds they give (_ortf_installed_version,
 # _ortf_minor_bounds), the depends a library's DT_NEEDED entries give
 # (_ortf_lib_depends, on the real lists of a 1.29.0 build), the package
 # functions of every package run as makepkg runs them (set -eE) on a stub
@@ -38,12 +38,15 @@ fail() { count=$((count + 1)); echo "FAIL $1"; fails=$((fails + 1)); }
 
 # The vendor fixtures: a CUDA 13.4 (cuda.h, an nvcc that prints its
 # release), a CUDA 12.8 header, a CUDA with nvcc but no cuda.h, a cuDNN, an
-# OpenVINO CMake package, and two TensorRT trees (lib/ and lib64/). Empty
-# files otherwise: only their names count.
+# OpenVINO CMake package, and TensorRT trees (lib/ and lib64/, and ones
+# without or with a bad NvInferVersion.h). Empty files otherwise: only
+# their names count.
 fx=$tmp/fx
 mkdir -p "$fx/cuda/bin" "$fx/cuda/include" "$fx/cuda12/include" "$fx/cuda-nohdr/bin" \
     "$fx/cuda-nodefine/include" "$fx/cudnn/include" "$fx/cudnn-nohdr/include" "$fx/cudnn-nodefine/include" "$fx/cmake/openvino2026.4.1" \
     "$fx/trt/include" "$fx/trt/lib" "$fx/trt64/include" "$fx/trt64/lib64" "$fx/trt-nolib/include" \
+    "$fx/trt-old/include" "$fx/trt-old/lib" "$fx/trt-nover/include" "$fx/trt-nover/lib" \
+    "$fx/trt-badver/include" "$fx/trt-badver/lib" "$fx/trt-relver/include" "$fx/trt-relver/lib" \
     "$fx/empty" "$fx/bin" "$fx/pacbin" "$fx/pkgbin"
 # cuda.h as CUDA's: the version define some way down, after comments and
 # other defines (line 272 in CUDA 13.4).
@@ -86,6 +89,29 @@ cudnn_version_h 9 | grep -v '^#define CUDNN_MAJOR ' >"$fx/cudnn-nodefine/include
 : >"$fx/trt64/include/NvInfer.h"
 : >"$fx/trt64/lib64/libnvinfer.so"
 : >"$fx/trt-nolib/include/NvInfer.h"
+# NvInferVersion.h in both styles: TensorRT 10 and 11 (NV_TENSORRT_MAJOR is
+# TRT_MAJOR_ENTERPRISE, ...), older ones (numbers).
+cat >"$fx/trt/include/NvInferVersion.h" <<'EOF2'
+#define TRT_MAJOR_ENTERPRISE 11
+#define TRT_MINOR_ENTERPRISE 4
+#define TRT_PATCH_ENTERPRISE 0
+#define TRT_BUILD_ENTERPRISE 106
+#define NV_TENSORRT_MAJOR TRT_MAJOR_ENTERPRISE //!< TensorRT major version.
+#define NV_TENSORRT_MINOR TRT_MINOR_ENTERPRISE //!< TensorRT minor version.
+#define NV_TENSORRT_PATCH TRT_PATCH_ENTERPRISE //!< TensorRT patch version.
+#define NV_TENSORRT_BUILD TRT_BUILD_ENTERPRISE //!< TensorRT build number.
+#define NV_TENSORRT_LWS_MAJOR 0 //!< TensorRT LWS major version.
+EOF2
+cp "$fx/trt/include/NvInferVersion.h" "$fx/trt64/include/NvInferVersion.h"
+printf '#define NV_TENSORRT_MAJOR 8\n#define NV_TENSORRT_MINOR 6\n#define NV_TENSORRT_PATCH 1\n#define NV_TENSORRT_BUILD 6\n' \
+    >"$fx/trt-old/include/NvInferVersion.h"
+printf '#define NV_TENSORRT_MAJOR TRT_MAJOR_ENTERPRISE\n#define NV_TENSORRT_MINOR TRT_MINOR_ENTERPRISE\n' \
+    >"$fx/trt-badver/include/NvInferVersion.h"
+printf '#define NV_TENSORRT_MAJOR 10\n#define NV_TENSORRT_MINOR 13\n' >"$fx/trt-relver/include/NvInferVersion.h"
+for d in trt-old trt-nover trt-badver trt-relver; do
+    : >"$fx/$d/include/NvInfer.h"
+    : >"$fx/$d/lib/libnvinfer.so"
+done
 printf "export NVCC_CCBIN='/usr/bin/g++-15'\n" >"$fx/cuda.sh"
 # Stubs found first on PATH by some cases. The python prints its version,
 # FX_PYTHON_VERSION (default 3.14.8), for -I -c.
@@ -97,22 +123,19 @@ EOF2
 printf '#!/bin/sh\nexit 0\n' >"$fx/bin/ccache"
 chmod +x "$fx/bin/python" "$fx/bin/ccache"
 # pacman, read-only queries only:
-#   -Qqo -- <file>: prints FX_OWNER as the owner, or fails as for an
-#     unowned file;
 #   -T -- <dep>...: prints each dependency named in FX_MISSING (as not
 #     satisfied) and exits 127 if there is one, else prints nothing;
 #   -Qi -- <name>: the Name, Version and Provides lines of the installed
 #     package of FX_INSTALLED that is or provides <name> (entries
 #     name|version|provides, space-separated; provides comma-separated),
 #     or fails as for a package not installed. The default: Arch's
-#     openvino, a local TensorRT package that provides nvidia-tensorrt-sdk,
-#     the AUR's tensorrt, and the owner of FX_OWNER's cases.
+#     openvino and cudnn, a local TensorRT package that provides tensorrt.
 cat >"$fx/pacbin/pacman" <<'EOF2'
 #!/bin/sh
 case $1 in
 -Qi)
     [ "$2" = -- ] && shift
-    for e in ${FX_INSTALLED-openvino|2026.4.1-1| cudnn|9.27.0.2-1| nvidia-tensorrt-sdk-local|11.4.0.106-1|nvidia-tensorrt-sdk=11.4.0.106 tensorrt|11.4.0.106-1| my-tensorrt|11.4.0.106-2|}; do
+    for e in ${FX_INSTALLED-openvino|2026.4.1-1| cudnn|9.27.0.2-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106}; do
         n=${e%%|*} r=${e#*|} v=${r%%|*} p=${r#*|}
         hit=0
         [ "$n" = "$2" ] && hit=1
@@ -126,11 +149,6 @@ case $1 in
         fi
     done
     echo "error: package '$2' was not found" >&2
-    exit 1
-    ;;
--Qqo)
-    if [ -n "${FX_OWNER:-}" ]; then printf '%s\n' "$FX_OWNER"; exit 0; fi
-    echo "error: No package owns $3" >&2
     exit 1
     ;;
 -T)
@@ -174,8 +192,7 @@ resolve() {
             set -euo pipefail
             # shellcheck disable=SC1090
             . "$1"
-            # pacman -T for the TensorRT package (the cases that query an
-            # owner put the stub first themselves).
+            # pacman -T and -Qi for tensorrt.
             PATH=$2/pacbin:$PATH
             _ortf_cuda_home=$2/cuda _ortf_cudnn_home=$2/cudnn _ortf_openvino_cmake_dir=$2/cmake
             _ortf_tensorrt_default=$2/trt _ortf_cuda_profile=$2/no-cuda.sh
@@ -231,13 +248,13 @@ expect_fail() {
 echo "== ORTF_EPS"
 expect_ok "the default is every provider" 'ORTF_EPS=cuda tensorrt openvino' \
     "ORTF_TENSORRT_HOME=$fx/trt" "ORTF_TENSORRT_LIBDIR=$fx/trt/lib" \
-    'ORTF_TENSORRT_PKG=nvidia-tensorrt-sdk' 'ORTF_CUDA_MAJOR=13' --
+    'ORTF_TENSORRT_VERSION=11.4.0.106' 'ORTF_CUDA_MAJOR=13' --
 if grep -qF 'ORTF_EPS=cuda tensorrt openvino (default)' <<<"$out"; then
     ok "prepare() prints the providers and their source"
 else
     fail "printed: $out"
 fi
-expect_ok "cpu alone checks no vendor install" 'ORTF_EPS=cpu' 'ORTF_TENSORRT_HOME=' 'ORTF_TENSORRT_PKG=' \
+expect_ok "cpu alone checks no vendor install" 'ORTF_EPS=cpu' 'ORTF_TENSORRT_HOME=' 'ORTF_TENSORRT_VERSION=' \
     'ORTF_CUDA_MAJOR=' -- \
     ORTF_EPS=cpu FX_NO_VENDOR=1
 if grep -qF 'ORTF_EPS=cpu (environment)' <<<"$out"; then ok "an environment value says so"; else
@@ -270,59 +287,68 @@ expect_fail "cuda without cuda.h fails" "no '#define CUDA_VERSION' in $fx/cuda-n
 
 echo "== ORTF_TENSORRT_HOME"
 expect_ok "an explicit home with lib64/" "ORTF_TENSORRT_HOME=$fx/trt64" \
-    "ORTF_TENSORRT_LIBDIR=$fx/trt64/lib64" -- "ORTF_TENSORRT_HOME=$fx/trt64/" \
-    FX_OWNER=my-tensorrt PATH="$fx/pacbin:$PATH"
+    "ORTF_TENSORRT_LIBDIR=$fx/trt64/lib64" -- "ORTF_TENSORRT_HOME=$fx/trt64/"
 expect_fail "a relative home fails" 'not an absolute path' ORTF_TENSORRT_HOME=opt/trt
 expect_fail "a home without NvInfer.h fails" "$fx/empty/include/NvInfer.h not found" \
     "ORTF_TENSORRT_HOME=$fx/empty"
 expect_fail "a home without libnvinfer fails" 'no libnvinfer.so' "ORTF_TENSORRT_HOME=$fx/trt-nolib"
 if [[ -f /usr/include/NvInfer.h ]]; then
     expect_ok "without /opt/nvidia/tensorrt, /usr is used" 'ORTF_TENSORRT_HOME=/usr' \
-        'ORTF_TENSORRT_PKG=tensorrt' -- FX_NO_TRT_DEFAULT=1
+        'ORTF_TENSORRT_HOME=/usr' -- FX_NO_TRT_DEFAULT=1
 else
     expect_fail "without /opt/nvidia/tensorrt, /usr is used (and has no TensorRT here)" \
         '/usr/include/NvInfer.h not found' FX_NO_TRT_DEFAULT=1
 fi
 
-echo "== the TensorRT package (ORTF_TENSORRT_PKG)"
-expect_ok "TensorRT in the default root: nvidia-tensorrt-sdk" 'ORTF_TENSORRT_PKG=nvidia-tensorrt-sdk' -- \
+echo "== the TensorRT version (NvInferVersion.h) and the tensorrt package"
+expect_ok "TensorRT 11: the version from the TRT_*_ENTERPRISE defines" 'ORTF_TENSORRT_VERSION=11.4.0.106' -- \
     ORTF_EPS='cuda tensorrt'
-if grep -qF 'ORTF_TENSORRT_PKG=nvidia-tensorrt-sdk (' <<<"$out"; then ok "prepare() prints the TensorRT package"; else
+if grep -qF 'ORTF_TENSORRT_VERSION=11.4.0.106 (' <<<"$out" && grep -qF 'so tensorrt>=11.4 tensorrt<11.5)' <<<"$out"; then
+    ok "prepare() prints the TensorRT version and bounds"
+else
     fail "printed: $out"; fi
-expect_ok "TensorRT in the AUR's root (/usr): tensorrt" "ORTF_TENSORRT_HOME=$fx/trt64" \
-    'ORTF_TENSORRT_PKG=tensorrt' -- ORTF_EPS='cuda tensorrt' FX_NO_TRT_DEFAULT=1 FX_USR=1
-expect_ok "TensorRT elsewhere: the owner of its libnvinfer" 'ORTF_TENSORRT_PKG=my-tensorrt' -- \
-    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt64" FX_OWNER=my-tensorrt PATH="$fx/pacbin:$PATH"
-expect_fail "TensorRT elsewhere, owned by no package, fails" 'belongs to no package' \
-    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt64" PATH="$fx/pacbin:$PATH"
-expect_fail "an owner that is no package name fails" 'belongs to no package' \
-    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt64" FX_OWNER='two words' PATH="$fx/pacbin:$PATH"
-expect_ok "no TensorRT package without tensorrt" 'ORTF_TENSORRT_PKG=' -- ORTF_EPS='cuda openvino'
-expect_fail "a TensorRT package that is not installed fails before the build" \
-    'no installed package is or provides nvidia-tensorrt-sdk' ORTF_EPS='cuda tensorrt' FX_MISSING=nvidia-tensorrt-sdk
-expect_fail "the AUR's tensorrt not installed fails" 'no installed package is or provides tensorrt' \
-    ORTF_EPS='cuda tensorrt' FX_NO_TRT_DEFAULT=1 FX_USR=1 FX_MISSING=tensorrt
-expect_ok "the other TensorRT package missing does not matter" 'ORTF_TENSORRT_PKG=nvidia-tensorrt-sdk' -- \
+expect_ok "an older TensorRT: the numeric NV_TENSORRT_* defines" 'ORTF_TENSORRT_VERSION=8.6.1.6' -- \
+    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt-old"
+expect_ok "a header with major and minor only: the version is those" 'ORTF_TENSORRT_VERSION=10.13' -- \
+    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt-relver"
+expect_ok "TensorRT in the AUR's root (/usr)" "ORTF_TENSORRT_HOME=$fx/trt64" 'ORTF_TENSORRT_VERSION=11.4.0.106' -- \
+    ORTF_EPS='cuda tensorrt' FX_NO_TRT_DEFAULT=1 FX_USR=1
+expect_fail "a home without NvInferVersion.h fails" "$fx/trt-nover/include/NvInferVersion.h not found" \
+    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt-nover"
+expect_fail "a header without a numeric major.minor fails" 'gives no numeric NV_TENSORRT_MAJOR and NV_TENSORRT_MINOR' \
+    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt-badver"
+expect_ok "no TensorRT version without tensorrt" 'ORTF_TENSORRT_VERSION=' -- ORTF_EPS='cuda openvino'
+expect_ok "no package provides tensorrt: a warning, the build goes on" 'ORTF_TENSORRT_VERSION=11.4.0.106' -- \
     ORTF_EPS='cuda tensorrt' FX_MISSING=tensorrt
+if grep -qF 'warning: tensorrt: no installed package is or provides tensorrt' <<<"$out" &&
+    grep -qF 'update nvidia-tensorrt-sdk-local or install the AUR tensorrt' <<<"$out"; then
+    ok "the warning says what to install"
+else
+    fail "printed: $out"; fi
+expect_ok "a provided tensorrt: no warning" 'ORTF_TENSORRT_VERSION=11.4.0.106' -- ORTF_EPS='cuda tensorrt'
+if ! grep -qF 'warning: tensorrt' <<<"$out"; then ok "a provider of tensorrt at the header's version warns of nothing"; else
+    fail "printed: $out"; fi
+expect_ok "an installed tensorrt of another minor: a warning" 'ORTF_TENSORRT_VERSION=11.4.0.106' -- \
+    ORTF_EPS='cuda tensorrt' FX_INSTALLED='tensorrt|11.5.0.1-1|'
+if grep -qF 'the installed tensorrt is 11.5.0.1-1' <<<"$out"; then ok "the version mismatch is warned of"; else
+    fail "printed: $out"; fi
+expect_ok "an installed tensorrt whose minor only starts the same: a warning" 'ORTF_TENSORRT_VERSION=11.4.0.106' -- \
+    ORTF_EPS='cuda tensorrt' FX_INSTALLED='tensorrt|11.40.0.1-1|'
+if grep -qF 'the installed tensorrt is 11.40.0.1-1' <<<"$out"; then ok "11.40 is not taken for 11.4"; else
+    fail "printed: $out"; fi
+expect_ok "no ORTF_TENSORRT_PKG is recorded" 'ORTF_TENSORRT_VERSION=11.4.0.106' -- ORTF_EPS='cuda tensorrt'
+if ! grep -q 'ORTF_TENSORRT_PKG' <<<"$conf"; then ok "ortf.conf has no ORTF_TENSORRT_PKG"; else fail "ortf.conf: $conf"; fi
 
 echo "== the installed versions the bounds come from"
-expect_ok "the TensorRT version is the one the package provides the name at" \
-    'ORTF_TENSORRT_PKG=nvidia-tensorrt-sdk' 'ORTF_TENSORRT_VERSION=11.4.0.106' 'ORTF_OPENVINO_VERSION=2026.4.1-1' -- \
+expect_ok "the TensorRT version is the header's, openvino's the installed one" \
+    'ORTF_TENSORRT_VERSION=11.4.0.106' 'ORTF_OPENVINO_VERSION=2026.4.1-1' -- \
     ORTF_EPS='cuda tensorrt openvino'
-if grep -qF 'installed: 11.4.0.106, so nvidia-tensorrt-sdk>=11.4 nvidia-tensorrt-sdk<11.5)' <<<"$out" &&
+if grep -qF 'so tensorrt>=11.4 tensorrt<11.5)' <<<"$out" &&
     grep -qF 'openvino 2026.4.1-1 (installed, so openvino>=2026.4 openvino<2026.5)' <<<"$out"; then
     ok "prepare() prints the TensorRT and openvino versions and bounds"
 else
     fail "printed: $out"
 fi
-expect_ok "the AUR's tensorrt: its own version" 'ORTF_TENSORRT_PKG=tensorrt' 'ORTF_TENSORRT_VERSION=11.4.0.106-1' -- \
-    ORTF_EPS='cuda tensorrt' FX_NO_TRT_DEFAULT=1 FX_USR=1
-expect_ok "the owner of libnvinfer: its own version" 'ORTF_TENSORRT_PKG=my-tensorrt' 'ORTF_TENSORRT_VERSION=11.4.0.106-2' -- \
-    ORTF_EPS='cuda tensorrt' "ORTF_TENSORRT_HOME=$fx/trt64" FX_OWNER=my-tensorrt PATH="$fx/pacbin:$PATH"
-expect_fail "a TensorRT package that provides the name without a version fails" 'provides it without a version' \
-    ORTF_EPS='cuda tensorrt' FX_INSTALLED='nvidia-tensorrt-sdk-local|1-1|nvidia-tensorrt-sdk'
-expect_fail "no TensorRT version fails" 'no version recorded for nvidia-tensorrt-sdk' \
-    ORTF_EPS='cuda tensorrt' FX_INSTALLED='openvino|2026.4.1-1|'
 expect_fail "no openvino version fails" 'no version recorded for openvino' ORTF_EPS=openvino FX_INSTALLED=
 expect_ok "openvino provided by another package: the provided version" 'ORTF_OPENVINO_VERSION=2026.5.0' -- \
     ORTF_EPS=openvino FX_INSTALLED='openvino-git|2026.5.0.r1-1|openvino=2026.5.0'
@@ -358,7 +384,7 @@ expect_fail "an installed cudnn of no numeric version fails" 'no CUDNN_MAJOR in'
 # minor_bounds <name> <version>: _ortf_minor_bounds, lines joined by spaces.
 # shellcheck disable=SC2016 # the script expands its own arguments
 minor_bounds() { bash -c 'set -euo pipefail; . "$1"; _ortf_minor_bounds "$2" "$3"' _ "$pkgbuild" "$1" "$2" 2>&1 | tr '\n' ' '; }
-for case in 'nvidia-tensorrt-sdk|11.4.0.106|nvidia-tensorrt-sdk>=11.4 nvidia-tensorrt-sdk<11.5 ' \
+for case in 'tensorrt|11.4.0.106|tensorrt>=11.4 tensorrt<11.5 ' \
     'openvino|2026.4.1-1|openvino>=2026.4 openvino<2026.5 ' 'python|3.14.8|python>=3.14 python<3.15 ' \
     'tensorrt|10.13.3.9-1|tensorrt>=10.13 tensorrt<10.14 ' 'python|3.9.1|python>=3.9 python<3.10 ' \
     'openvino|2026.08.0-1|openvino>=2026.08 openvino<2026.9 ' 'openvino|2026.09.1-1|openvino>=2026.09 openvino<2026.10 ' \
@@ -631,17 +657,17 @@ expect_libs_fail() { # expect_libs_fail <description> <message fragment> <lib_de
 # The static depends of each package, as the PKGBUILD writes them, with
 # what package() adds before the check (the TensorRT package).
 core_deps='glibc libgcc libstdc++'
-cuda_deps='onnxruntime-core=1.29.0-2 glibc libgcc libstdc++ cuda cudnn nvidia-utils'
-trt_deps='onnxruntime-core=1.29.0-2 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils nvidia-tensorrt-sdk'
-ov_deps='onnxruntime-core=1.29.0-2 glibc libgcc libstdc++ openvino'
-py_deps='onnxruntime-core=1.29.0-2 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf'
+cuda_deps='onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ cuda cudnn nvidia-utils'
+trt_deps='onnxruntime-core=1.29.0-3 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt'
+ov_deps='onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ openvino'
+py_deps='onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf'
 cu_pkg=onnxruntime-provider-cuda13-sm120 trt_pkg=onnxruntime-provider-tensorrt-cuda13 ov_pkg=onnxruntime-provider-openvino
 # shellcheck disable=SC2086 # the NEEDED lists are words
 {
     expect_libs "the real CUDA provider: cuda bounds from libcudart" 'cuda>=13 cuda<14' "$cu_pkg" "$cuda_deps" '' 13 '' \
         $needed_cuda
     expect_libs "the real TensorRT provider: cuda and cudnn bounds (TensorRT's come from its version)" \
-        'cuda>=13 cuda<14 cudnn>=9 cudnn<10' "$trt_pkg" "$trt_deps" nvidia-tensorrt-sdk 13 11.4.0.106 $needed_tensorrt
+        'cuda>=13 cuda<14 cudnn>=9 cudnn<10' "$trt_pkg" "$trt_deps" tensorrt 13 11.4.0.106 $needed_tensorrt
     expect_libs "the real OpenVINO provider: no soname bounds" '' "$ov_pkg" "$ov_deps" '' '' '' $needed_openvino
     expect_libs "the real libonnxruntime.so: system libraries only" '' onnxruntime-core "$core_deps" '' '' '' $needed_core
     expect_libs "the real libonnxruntime_providers_shared.so: nothing" '' onnxruntime-core "$core_deps" '' '' '' $needed_shared
@@ -652,7 +678,7 @@ cu_pkg=onnxruntime-provider-cuda13-sm120 trt_pkg=onnxruntime-provider-tensorrt-c
 # shellcheck disable=SC2086 # the NEEDED lists and depends are words
 for case in "onnxruntime-core|$core_deps|glibc libgcc libstdc++|$needed_core" \
     "$cu_pkg|$cuda_deps|glibc libgcc libstdc++ cuda|$needed_cuda" \
-    "$trt_pkg|$trt_deps|glibc libgcc libstdc++ cuda cudnn nvidia-tensorrt-sdk|$needed_tensorrt" \
+    "$trt_pkg|$trt_deps|glibc libgcc libstdc++ cuda cudnn tensorrt|$needed_tensorrt" \
     "$ov_pkg|$ov_deps|glibc libgcc libstdc++ openvino|$needed_openvino" \
     "python-onnxruntime-core|$py_deps|glibc libgcc libstdc++|$needed_python"; do
     IFS='|' read -r self deps drop needed <<<"$case"
@@ -660,7 +686,7 @@ for case in "onnxruntime-core|$core_deps|glibc libgcc libstdc++|$needed_core" \
         less=" $deps "
         less=${less// $d / }
         expect_libs_fail "$self without $d in depends fails" "belongs to $d, which is not in the depends of $self" \
-            "$self" "$less" nvidia-tensorrt-sdk 13 11.4.0.106 $needed
+            "$self" "$less" tensorrt 13 11.4.0.106 $needed
     done
 done
 # A hypothetical libcudnn NEEDED (the real CUDA provider has none; the real
@@ -671,10 +697,10 @@ expect_libs "a library with libcuda, libcudnn and libcufft in its NEEDED (hypoth
 lib_cudnn=9
 # shellcheck disable=SC2086 # the NEEDED list is words
 expect_libs "the real TensorRT provider with the recorded cuDNN major: the same bounds" \
-    'cuda>=13 cuda<14 cudnn>=9 cudnn<10' "$trt_pkg" "$trt_deps" nvidia-tensorrt-sdk 13 11.4.0.106 $needed_tensorrt
+    'cuda>=13 cuda<14 cudnn>=9 cudnn<10' "$trt_pkg" "$trt_deps" tensorrt 13 11.4.0.106 $needed_tensorrt
 expect_libs_fail "a libcudnn of another major than the recorded cuDNN fails" \
     'libcudnn.so.10 is cuDNN 10, the build used cuDNN 9' "$trt_pkg" "$trt_deps" \
-    nvidia-tensorrt-sdk 13 11.4.0.106 libcudnn.so.10
+    tensorrt 13 11.4.0.106 libcudnn.so.10
 lib_cudnn=
 expect_libs "libtbb is onetbb's, as a provider's own depend" '' "$ov_pkg" "$ov_deps onetbb" '' '' '' libtbb.so.12 libopenvino.so.2641
 expect_libs_fail "libtbb without onetbb in depends fails" 'libtbb.so.12 belongs to onetbb, which is not in the depends' \
@@ -701,11 +727,11 @@ expect_libs_fail "libonnxruntime.so needing a vendor library fails" 'libcudart.s
     onnxruntime-core "$core_deps" '' '' '' libstdc++.so.6 libcudart.so.13
 expect_libs_fail "the Python module needing a vendor library fails" 'libopenvino.so.2641 belongs to openvino' \
     python-onnxruntime-core "$py_deps" '' '' '' libopenvino.so.2641
-expect_libs_fail "TensorRT of another package than the depends fails" 'belongs to tensorrt' "$trt_pkg" "$trt_deps" \
-    tensorrt 13 11.4.0.106 libnvinfer.so.11
+expect_libs_fail "TensorRT of another package than the depends fails" 'belongs to nvidia-tensorrt-sdk' "$trt_pkg" "$trt_deps" \
+    nvidia-tensorrt-sdk 13 11.4.0.106 libnvinfer.so.11
 expect_libs_fail "a libnvinfer of another major than the installed TensorRT fails" \
-    'libnvinfer.so.10 is TensorRT 10, the installed nvidia-tensorrt-sdk is TensorRT 11' "$trt_pkg" "$trt_deps" \
-    nvidia-tensorrt-sdk 13 11.4.0.106 libnvinfer.so.10
+    'libnvinfer.so.10 is TensorRT 10, the installed tensorrt is TensorRT 11' "$trt_pkg" "$trt_deps" \
+    tensorrt 13 11.4.0.106 libnvinfer.so.10
 for lib in libcutensor.so.2 libcudss.so.0 libnvjpeg.so.13 libnvshmem_host.so.3 libcusparse.so.12 \
     libOpenCL.so.1 libze_loader.so.1 libsomething.so libonnxruntime_providers_cuda.so; do
     expect_libs_fail "an unknown library fails ($lib)" "$lib is a library no package is known for" \
@@ -784,10 +810,9 @@ exit 0
 EOF2
 cat >"$fx/pkgbin/patchelf" <<'EOF2'
 #!/bin/sh
-[ "$1" = --add-rpath ] || { echo "stub patchelf: unexpected $*" >&2; exit 2; }
+[ "$1" = --set-rpath ] || { echo "stub patchelf: unexpected $*" >&2; exit 2; }
 n=${3##*/}
-if [ -f "$FX_RPATH/$n" ]; then printf '%s:%s' "$(cat "$FX_RPATH/$n")" "$2" >"$FX_RPATH/$n.new" &&
-    mv "$FX_RPATH/$n.new" "$FX_RPATH/$n"; else printf '%s' "$2" >"$FX_RPATH/$n"; fi
+printf '%s' "$2" >"$FX_RPATH/$n"
 EOF2
 chmod +x "$fx/pkgbin/cmake" "$fx/pkgbin/readelf" "$fx/pkgbin/patchelf"
 
@@ -859,7 +884,7 @@ package_run() {
 }
 # has_line <line>: out has that line, exactly.
 has_line() { grep -qxF -- "$1" <<<"$out"; }
-conf_all=$'ORTF_EPS=cuda tensorrt openvino\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=13\nORTF_CUDNN_MAJOR=9\nORTF_PYTHON=1\nORTF_TENSORRT_HOME=/opt/nvidia/tensorrt\nORTF_TENSORRT_LIBDIR=/opt/nvidia/tensorrt/lib\nORTF_TENSORRT_PKG=nvidia-tensorrt-sdk\nORTF_TENSORRT_VERSION=11.4.0.106\nORTF_OPENVINO_VERSION=2026.4.1-1'
+conf_all=$'ORTF_EPS=cuda tensorrt openvino\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=13\nORTF_CUDNN_MAJOR=9\nORTF_PYTHON=1\nORTF_TENSORRT_HOME=/opt/nvidia/tensorrt\nORTF_TENSORRT_LIBDIR=/opt/nvidia/tensorrt/lib\nORTF_TENSORRT_PKG=a-stale-package\nORTF_TENSORRT_VERSION=11.4.0.106\nORTF_OPENVINO_VERSION=2026.4.1-1'
 conf_all+=$'\nORTF_PYTHON_EXE='"$fx/pystub/python"$'\nORTF_PYTHON_VERSION=3.14.8'
 package_run "$conf_all" --
 if ((status == 0)); then ok "every package function of the default build runs under set -eE"; else
@@ -873,18 +898,18 @@ for line in \
     'onnxruntime-core conflicts: onnxruntime onnxruntime-cpu onnxruntime-cuda onnxruntime-opt-cuda onnxruntime-rocm onnxruntime-opt-rocm onnxruntime-git onnxruntime-full' \
     'onnxruntime-core replaces: onnxruntime-full' \
     "onnxruntime-core files: ./usr/include/onnxruntime/onnxruntime_c_api.h ./usr/include/onnxruntime/onnxruntime_cxx_api.h ./usr/lib/cmake/onnxruntime/onnxruntimeConfig.cmake ./usr/lib/libonnxruntime.so ./usr/lib/libonnxruntime.so.1 ./usr/lib/libonnxruntime.so.1.29.0 ./usr/lib/libonnxruntime_providers_shared.so ./usr/lib/pkgconfig/libonnxruntime.pc $(lic onnxruntime-core) " \
-    "$cu depends: onnxruntime-core=1.29.0-2 glibc libgcc libstdc++ cuda cudnn nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$cu depends: onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ cuda cudnn nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$cu provides: onnxruntime-provider-cuda=1.29.0 onnxruntime-provider-cuda13=1.29.0" \
     "$cu conflicts: onnxruntime-provider-cuda onnxruntime-provider-cuda13" \
     "$cu files: ./usr/lib/libonnxruntime_providers_cuda.so $(lic "$cu") " \
-    "$trt depends: onnxruntime-core=1.29.0-2 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils nvidia-tensorrt-sdk nvidia-tensorrt-sdk>=11.4 nvidia-tensorrt-sdk<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$trt depends: onnxruntime-core=1.29.0-3 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$trt provides: onnxruntime-provider-tensorrt=1.29.0" \
     "$trt conflicts: onnxruntime-provider-tensorrt" \
     "$trt files: ./usr/lib/libonnxruntime_providers_tensorrt.so $(lic "$trt") " \
-    "$ov depends: onnxruntime-core=1.29.0-2 glibc libgcc libstdc++ openvino openvino>=2026.4 openvino<2026.5" \
+    "$ov depends: onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ openvino openvino>=2026.4 openvino<2026.5" \
     "$ov provides: " "$ov conflicts: " "$ov replaces: " \
     "$ov files: ./usr/lib/libonnxruntime_providers_openvino.so $(lic "$ov") " \
-    "$py depends: onnxruntime-core=1.29.0-2 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15" \
+    "$py depends: onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15" \
     "$py provides: python-onnxruntime=1.29.0" \
     "$py conflicts: python-onnxruntime python-onnxruntime-cpu python-onnxruntime-cuda python-onnxruntime-opt-cuda python-onnxruntime-rocm python-onnxruntime-opt-rocm python-onnxruntime-full" \
     "$py replaces: python-onnxruntime-full" \
@@ -898,11 +923,29 @@ else
     fail "the packaged files are not the staged ones"
 fi
 if [[ $(<"${pkgroot%/pkg}/rpath/libonnxruntime_providers_tensorrt.so") == /opt/nvidia/tensorrt/lib ]] &&
-    grep -qF 'RUNPATH /opt/nvidia/tensorrt/lib' "${pkgroot%/pkg}/$trt.log"; then
-    ok "the TensorRT provider gets TensorRT's lib/ as its RUNPATH"
+    grep -qF 'RUNPATH /opt/nvidia/tensorrt/lib' "${pkgroot%/pkg}/$trt.log" &&
+    [[ ! -e ${pkgroot%/pkg}/rpath/libonnxruntime_providers_cuda.so ]]; then
+    ok "the TensorRT provider alone gets TensorRT's lib/ as its RUNPATH"
 else
     fail "the TensorRT RUNPATH: $(cat "${pkgroot%/pkg}/$trt.log")"
 fi
+# The RUNPATH of a build against /usr (the AUR's tensorrt) and of one
+# against another root.
+conf_usr=${conf_all//\/opt\/nvidia\/tensorrt\/lib/\/usr\/lib}
+conf_other=${conf_all//\/opt\/nvidia\/tensorrt\/lib/\/srv\/trt\/lib64}
+for case in "usr|/opt/nvidia/tensorrt/lib" "other|/srv/trt/lib64:/opt/nvidia/tensorrt/lib"; do
+    IFS='|' read -r name want <<<"$case"
+    conf=$conf_usr
+    [[ $name != other ]] || conf=$conf_other
+    package_run "$conf" --
+    if ((status == 0)) && [[ $(<"${pkgroot%/pkg}/rpath/libonnxruntime_providers_tensorrt.so") == "$want" ]] &&
+        grep -qF "RUNPATH $want" "${pkgroot%/pkg}/$trt.log"; then
+        ok "a TensorRT build against $name: RUNPATH $want"
+    else
+        fail "the RUNPATH of a $name build (exit $status): $(cat "${pkgroot%/pkg}/$trt.log")"
+    fi
+done
+package_run "$conf_all" --
 if [[ $(readlink "$pkgroot/$py/$site/onnxruntime/capi/libonnxruntime_providers_cuda.so") == /usr/lib/libonnxruntime_providers_cuda.so &&
     $(head -n 1 "$pkgroot/$py/usr/bin/onnxruntime_test") == "#!$fx/pystub/python" ]] &&
     grep -qxF 'onnxruntime_pybind11_state.so needs: libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2' \
@@ -912,7 +955,7 @@ else
     fail "the Python package: $(cat "${pkgroot%/pkg}/$py.log")"
 fi
 
-package_run $'ORTF_EPS=cpu\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=\nORTF_PYTHON=0\nORTF_TENSORRT_HOME=\nORTF_TENSORRT_LIBDIR=\nORTF_TENSORRT_PKG=' \
+package_run $'ORTF_EPS=cpu\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=\nORTF_PYTHON=0\nORTF_TENSORRT_HOME=\nORTF_TENSORRT_LIBDIR=\nORTF_TENSORRT_VERSION=' \
     -- ORTF_EPS=cpu FX_STAGE=
 if ((status == 0)) && [[ $out == 'onnxruntime-core depends: '* ]] &&
     has_line "onnxruntime-core files: ./usr/include/onnxruntime/onnxruntime_c_api.h ./usr/include/onnxruntime/onnxruntime_cxx_api.h ./usr/lib/cmake/onnxruntime/onnxruntimeConfig.cmake ./usr/lib/libonnxruntime.so ./usr/lib/libonnxruntime.so.1 ./usr/lib/libonnxruntime.so.1.29.0 ./usr/lib/pkgconfig/libonnxruntime.pc $(lic onnxruntime-core) "; then
@@ -954,7 +997,7 @@ expect_package_fail "a build recorded with another CUDA major fails by name" onn
 expect_package_fail "the CUDA package of a build without cuda fails" "$cu" \
     'libonnxruntime_providers_cuda.so not found' "$conf_all" -- FX_STAGE='shared tensorrt openvino'
 expect_package_fail "a TensorRT provider linking another TensorRT major fails" "$trt" \
-    'libnvinfer.so.10 is TensorRT 10, the installed nvidia-tensorrt-sdk is TensorRT 11' "$conf_all" \
+    'libnvinfer.so.10 is TensorRT 10, the installed tensorrt is TensorRT 11' "$conf_all" \
     'libonnxruntime_providers_tensorrt.so=libnvinfer.so.10 libcudart.so.13 libc.so.6' --
 expect_package_fail "an empty recorded openvino version fails" "$ov" \
     'ortf.conf: ORTF_OPENVINO_VERSION is empty (run makepkg without -e' \

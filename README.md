@@ -8,7 +8,7 @@ The recipe `onnxruntime-split/PKGBUILD` is one build of the upstream source tag 
 |---|---|---|
 | `onnxruntime-core` | `libonnxruntime.so` with the CPU provider, `libonnxruntime_providers_shared.so` (in a build with any other provider), the C and C++ headers (`/usr/include/onnxruntime`), `libonnxruntime.pc` and the CMake files. It works on its own, on the CPU. Provides `onnxruntime=1.29.0` and `libonnxruntime.so` | `glibc`, `libgcc`, `libstdc++`, `zlib` |
 | `onnxruntime-provider-cuda<M>-<sfx>` | The CUDA provider, `libonnxruntime_providers_cuda.so`. `<M>` is the major version of the CUDA toolkit the build used (`13` today); `<sfx>` names the GPU architectures it was compiled for ([below](#cuda-architecture-presets)). Provides `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>` | `onnxruntime-core`, `cuda`, `cudnn`, `nvidia-utils` |
-| `onnxruntime-provider-tensorrt-cuda<M>` | The TensorRT provider. It has no architecture suffix because it holds no GPU code: TensorRT builds its kernels at run time. Provides `onnxruntime-provider-tensorrt` | `onnxruntime-core`, `onnxruntime-provider-cuda<M>`, `cuda`, `cudnn`, `nvidia-utils`, the TensorRT package found at build time |
+| `onnxruntime-provider-tensorrt-cuda<M>` | The TensorRT provider. It has no architecture suffix because it holds no GPU code: TensorRT builds its kernels at run time. Provides `onnxruntime-provider-tensorrt` | `onnxruntime-core`, `onnxruntime-provider-cuda<M>`, `cuda`, `cudnn`, `nvidia-utils`, `tensorrt` (bounded to the major.minor of the TensorRT headers the build used) |
 | `onnxruntime-provider-openvino` | The OpenVINO provider (Intel CPU, GPU and NPU devices) | `onnxruntime-core`, `openvino` |
 | `python-onnxruntime-core` | The Python module. Its links to the provider libraries dangle until that provider's package is installed. Provides `python-onnxruntime` | `onnxruntime-core`, `python` and its packages |
 
@@ -18,7 +18,7 @@ With the default build and Arch's CUDA 13, the files are `onnxruntime-core`, `on
 
 ### Dependencies and version bounds
 
-Every package depends on the package of each library its own libraries link, so none can be installed without what it needs to run: the build fails when a library maps to no package in `depends`. The providers and the Python module depend on `onnxruntime-core=<pkgver>-<pkgrel>`. Where the ABI demands a rebuild on an upgrade, the dependency carries a bound taken from what was installed when the package was built: `cuda` by major version from the sonames, `cudnn` by major version from the cuDNN installed at build time (the CUDA provider `dlopen()`s cuDNN, so no soname gives it), TensorRT by major.minor, `openvino` by year.minor and `python` by minor version. pacman then refuses a system update that would move one of them past its bound, instead of a provider failing to load; when Arch moves one past a bound, rebuild with a `pkgrel` bump. `scripts/check-deps.sh <package files>` sees only the `DT_NEEDED` entries, so libraries that are `dlopen()`ed at run time are covered by the recipe's recorded bounds instead; it lists every linked library, its owning package and whether the installed versions are still inside the bounds, so it shows when a rebuild is due ([docs/install.md](docs/install.md#dependencies-and-version-bounds)).
+Every package depends on the package of each library its own libraries link, so none can be installed without what it needs to run: the build fails when a library maps to no package in `depends`. The providers and the Python module depend on `onnxruntime-core=<pkgver>-<pkgrel>`. Where the ABI demands a rebuild on an upgrade, the dependency carries a bound taken when the package was built: `cuda` by major version from the sonames, `cudnn` by major version from the cuDNN installed at build time (the CUDA provider `dlopen()`s cuDNN, so no soname gives it), `tensorrt` by major.minor from the TensorRT headers the build used, `openvino` by year.minor and `python` by minor version. pacman then refuses a system update that would move one of them past its bound, instead of a provider failing to load; when Arch moves one past a bound, rebuild with a `pkgrel` bump. `scripts/check-deps.sh <package files>` sees only the `DT_NEEDED` entries, so libraries that are `dlopen()`ed at run time are covered by the recipe's recorded bounds instead; it lists every linked library, its owning package and whether the installed versions are still inside the bounds, so it shows when a rebuild is due ([docs/install.md](docs/install.md#dependencies-and-version-bounds)).
 
 Version 1.29.0 is the release Arch ships, so programs built against Arch's `onnxruntime` see the same API.
 
@@ -47,12 +47,12 @@ Each provider is a separate library, in a separate package, that ONNX Runtime lo
 |---|---|---|---|---|
 | CPU | Any x86_64 CPU | `onnxruntime-core` | none | built in |
 | CUDA | NVIDIA GPU | `onnxruntime-provider-cuda<M>-<sfx>` | `nvidia-utils`, `cuda`, `cudnn` | Arch `extra` |
-| TensorRT | NVIDIA GPU | `onnxruntime-provider-tensorrt-cuda<M>` | TensorRT 11 (and the CUDA package's runtimes) | `nvidia-tensorrt-sdk-local` from the omarchy-nvidia-sdks repository (under `/opt/nvidia/tensorrt`), or the AUR's `tensorrt` (under `/usr`) |
+| TensorRT | NVIDIA GPU | `onnxruntime-provider-tensorrt-cuda<M>` | TensorRT 11 (and the CUDA package's runtimes) | `nvidia-tensorrt-sdk-local` from the omarchy-nvidia-sdks repository (under `/opt/nvidia/tensorrt`, pkgrel 2 or later), or the AUR's `tensorrt` (under `/usr`) |
 | OpenVINO, device `CPU` | Intel CPU | `onnxruntime-provider-openvino` | `openvino` | Arch `extra` |
 | OpenVINO, device `GPU` | Intel graphics | `onnxruntime-provider-openvino` | `openvino-intel-gpu-plugin`, `intel-compute-runtime`, `level-zero-loader` | Arch `extra` |
 | OpenVINO, device `NPU` | Intel NPU | `onnxruntime-provider-openvino` | `openvino-intel-npu-plugin`, `intel-npu-driver`, `level-zero-loader` | Arch `extra` |
 
-`cuda`, `cudnn` and `openvino` (and a TensorRT, if you build that provider) must be installed when you build. Installing a provider package needs its runtime (a hard dependency); the OpenVINO device plugins and drivers are optional dependencies, installed for the devices you use.
+`cuda`, `cudnn` and `openvino` (and TensorRT's headers and libraries, if you build that provider) must be installed when you build. Installing a provider package needs its runtime (a hard dependency); the OpenVINO device plugins and drivers are optional dependencies, installed for the devices you use.
 
 ### CUDA architecture presets
 
@@ -100,16 +100,16 @@ The full procedure, with the prerequisites, is in [docs/install.md](docs/install
 # build tools and the runtimes of the engines you want (docs/install.md has the lists)
 sudo pacman -S --needed base-devel git cmake ninja patchelf python python-numpy python-build python-installer python-wheel python-setuptools cuda cudnn openvino
 
-# TensorRT: nvidia-tensorrt-sdk-local from omarchy-nvidia-sdks, or the AUR's tensorrt
+# TensorRT first: nvidia-tensorrt-sdk-local (pkgrel 2 or later) from omarchy-nvidia-sdks, or the AUR's tensorrt; the provider package depends on tensorrt
 
 cd onnxruntime-split
 MAKEFLAGS=-j8 makepkg -f
 # one transaction, naming the exact files of this build (a glob can catch packages of another build)
-sudo pacman -U onnxruntime-core-1.29.0-2-x86_64.pkg.tar.zst onnxruntime-provider-cuda13-sm120-1.29.0-2-x86_64.pkg.tar.zst onnxruntime-provider-tensorrt-cuda13-1.29.0-2-x86_64.pkg.tar.zst onnxruntime-provider-openvino-1.29.0-2-x86_64.pkg.tar.zst python-onnxruntime-core-1.29.0-2-x86_64.pkg.tar.zst
+sudo pacman -U onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst onnxruntime-provider-cuda13-sm120-1.29.0-3-x86_64.pkg.tar.zst onnxruntime-provider-tensorrt-cuda13-1.29.0-3-x86_64.pkg.tar.zst onnxruntime-provider-openvino-1.29.0-3-x86_64.pkg.tar.zst python-onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst
 cd ..
 
 # optional: the packages' libraries, their owners and the version bounds, against this system
-scripts/check-deps.sh onnxruntime-split/*-1.29.0-2-x86_64.pkg.tar.zst
+scripts/check-deps.sh onnxruntime-split/*-1.29.0-3-x86_64.pkg.tar.zst
 
 scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
 ```

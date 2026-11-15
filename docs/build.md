@@ -4,14 +4,14 @@ The recipe is `onnxruntime-split/PKGBUILD`; its header comment is the reference 
 
 ## Build inputs
 
-Build inputs are environment variables. `prepare()` resolves and checks them, prints each value with where it came from, and records them for `build()` and `package()`, together with the installed versions of TensorRT, OpenVINO and Python from which the packages' dependency bounds are taken ([install.md](install.md#dependencies-and-version-bounds)). Of the package metadata only the package names depend on them (see [Package names](#package-names)); every other field of `makepkg --printsrcinfo` is the same for any inputs. After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
+Build inputs are environment variables. `prepare()` resolves and checks them, prints each value with where it came from, and records them for `build()` and `package()`, together with the TensorRT version in its headers and the installed versions of OpenVINO and Python, from which the packages' dependency bounds are taken ([install.md](install.md#dependencies-and-version-bounds)). Of the package metadata only the package names depend on them (see [Package names](#package-names)); every other field of `makepkg --printsrcinfo` is the same for any inputs. After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `ORTF_EPS` | `cuda tensorrt openvino` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`; or `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. The CPU provider is always built |
 | `ORTF_CUDA_ARCHS` | `120` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
 | `ORTF_NVCC_THREADS` | `1` | `nvcc --threads` per CUDA compile job |
-| `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so` |
+| `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so`. Its `include/NvInferVersion.h` gives the major.minor that the TensorRT provider's `tensorrt` dependency is bounded to |
 | `ORTF_PYTHON` | `1` | `1` also builds the Python module and `python-onnxruntime-core`; `0` skips both |
 | `ORTF_CCACHE` | `auto` | `auto` uses `ccache` as compiler launcher when it is on `PATH`; `1` requires it; `0` disables it |
 | `MAKEFLAGS` | none | `-jN` sets the number of parallel compile jobs. Without it ninja runs `nproc+2` jobs |
@@ -58,7 +58,7 @@ makepkg must know every package name before `prepare()` runs, so the names are r
 
 - **`<M>`** is the major version of the CUDA toolkit: `CUDA_VERSION` in `/opt/cuda/include/cuda.h` (Arch's `cuda`), which `prepare()` checks against `nvcc`. It is never written into the PKGBUILD. CUDA 13.x gives `-cuda13`. A CUDA 12 toolkit would give `-cuda12-` names (and TensorRT 11 needs CUDA 13, so such a build would have no `tensorrt` in `ORTF_EPS`, or use TensorRT 10), but a CUDA 12 variant is on the backlog and is not provided at present.
 - **`<sfx>`** is the preset's name (`rtx`, `all`), or, for a list, the real architectures as `smN` in ascending order without repeats, joined by `-`, then the `-virtual` one as `computeN`: `120` gives `sm120`, `"89 120"` gives `sm89-sm120`, `"89 120 120-virtual"` gives `sm89-sm120-compute120`.
-- **The TensorRT package has no architecture suffix**: its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime. It provides and conflicts with `onnxruntime-provider-tensorrt`.
+- **The TensorRT package has no architecture suffix**: its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime, and on `tensorrt`, bounded to the major.minor of the headers the build used ([install.md](install.md#2-tensorrt)). It provides and conflicts with `onnxruntime-provider-tensorrt`.
 - **CUDA packages of different builds conflict**: each provides and conflicts with `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>`, because all install the same `/usr/lib/libonnxruntime_providers_cuda.so`. One is installed at a time.
 - **`ORTF_EPS=cpu`** gives `onnxruntime-core` (and the Python package) only.
 - **Dependencies.** The providers and the Python package depend on `onnxruntime-core=<pkgver>-<pkgrel>`, and every package on the packages of the libraries it links, with version bounds for the vendor runtimes: [install.md](install.md#dependencies-and-version-bounds).
@@ -77,7 +77,7 @@ The build uses the `CFLAGS` and `CXXFLAGS` of `makepkg.conf`; Arch's `-march=x86
 2. `/opt/nvidia/tensorrt`, when it holds `include/NvInfer.h` (the omarchy-nvidia-sdks package);
 3. `/usr` (the AUR's `tensorrt`).
 
-When TensorRT is not under `/usr/lib` or `/usr/lib64`, `package()` adds its library directory to the TensorRT provider's RUNPATH with `patchelf`; see [engines.md](engines.md#tensorrt).
+`package()` sets the TensorRT provider's RUNPATH with `patchelf` in every build with TensorRT: `/opt/nvidia/tensorrt/lib`, preceded by the build's TensorRT library directory when that is neither `/usr/lib` nor `/usr/lib64`. The RUNPATH is independent of where the build found TensorRT, because the package depends on the name `tensorrt`, which either source provides; see [engines.md](engines.md#tensorrt).
 
 ### Python
 
