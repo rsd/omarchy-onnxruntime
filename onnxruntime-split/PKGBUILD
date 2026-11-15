@@ -1,4 +1,4 @@
-# Maintainer: omarchy-onnxruntime contributors
+# Maintainer: Raul Dias <raul@dias.com.br>
 #
 # ONNX Runtime built from upstream source at a pinned release, with every
 # execution provider this kind of machine can use in one installation: CPU,
@@ -21,8 +21,10 @@
 # A provider package depends on its vendor runtimes, so it cannot be
 # installed without them. <M> is the major version of the CUDA toolkit the
 # build uses: CUDA_VERSION in $_ortf_cuda_home/include/cuda.h (/opt/cuda,
-# Arch's cuda), which prepare() checks against nvcc; never written into
-# this file. Arch's cuda 13.x gives onnxruntime-provider-cuda13-sm120 and
+# Arch's cuda), which prepare() checks against nvcc; 13
+# (_ortf_cuda_major_default) when there is no cuda.h yet, as when an AUR
+# helper reads this file before it installs the makedepends. Arch's cuda
+# 13.x gives onnxruntime-provider-cuda13-rtx and
 # onnxruntime-provider-tensorrt-cuda13. A CUDA 12 toolkit there gives
 # -cuda12 names instead; TensorRT 11 needs CUDA 13, so such a build has
 # ORTF_EPS without tensorrt, or a TensorRT 10. <archs> names the CUDA
@@ -43,12 +45,15 @@
 # libamdhip64.so.7 in both Arch's ROCm 7.2 and ROCm 10.1 (not yet seen in a
 # build's DT_NEEDED entries).
 #
-# Prebuilt (-bin) packages of these, should there be any, follow one
-# convention, the same for every split package: <name>-bin provides
-# <name>=<pkgver>-<pkgrel> and conflicts with <name>, and provides (and
-# conflicts with) the plain virtual names <name> provides, at the same
-# versions (onnxruntime-provider-cuda13-sm120-bin: provides
-# onnxruntime-provider-cuda13-sm120=1.29.0-2,
+# Prebuilt packages: the AUR pkgbase onnxruntime-split-bin, built from this
+# recipe in a clean chroot (the default inputs, CUDA preset rtx, plus the
+# CUDA package of an `all` build), whose packages are the release assets of
+# https://github.com/rsd/omarchy-onnxruntime/releases, tag
+# v<pkgver>-<pkgrel>. They follow one convention, the same for every split
+# package: <name>-bin provides <name>=<pkgver>-<pkgrel> and conflicts with
+# <name>, and provides (and conflicts with) the plain virtual names <name>
+# provides, at the same versions (onnxruntime-provider-cuda13-rtx-bin:
+# provides onnxruntime-provider-cuda13-rtx=1.29.0-5,
 # onnxruntime-provider-cuda=1.29.0 and onnxruntime-provider-cuda13=1.29.0).
 # Every dependency between the packages is therefore on a name such a
 # package provides: on onnxruntime-core=<pkgver>-<pkgrel> (the providers
@@ -83,10 +88,14 @@
 # MIGraphX providers link against the vendors' runtimes installed on the
 # machine that builds the package; those runtimes are not contained in the
 # package, and each engine's licence is its vendor's. Nothing NVIDIA, Intel
-# or AMD is redistributed by this recipe: the package is built locally from
-# the user's own installs (Arch's cuda, cudnn, openvino, migraphx and
-# hip-runtime-amd packages, a TensorRT the user installed) and stays on
-# that machine.
+# or AMD is contained in any package, from source or prebuilt: the vendor
+# runtimes are dependencies, installed from their own packages (Arch's
+# cuda, cudnn, openvino, migraphx and hip-runtime-amd, the AUR's tensorrt
+# or nvidia-tensorrt-sdk-local). Only the packages of this recipe's own
+# builds may be redistributed, never bundled with or alongside vendor
+# libraries. The CUDA package also carries the licence of cudnn-frontend
+# (MIT, NVIDIA's header-only cuDNN C++ API, compiled into the CUDA provider),
+# which ThirdPartyNotices.txt does not list.
 #
 # AMD GPUs: ONNX Runtime removed its ROCm provider in 1.23; MIGraphX is its
 # AMD GPU provider. migraphx in ORTF_EPS builds it, alone or beside cuda,
@@ -102,10 +111,13 @@
 #   - OpenVINO 2026.x: the provider requires OpenVINO >= 2026.0.
 #
 # Build-time inputs, each from the environment variable of that name, else
-# the default. prepare() checks and prints every value and where it came
-# from, and records it for build() and package() (src/ortf.conf). Of the
-# metadata, only the package NAMES (and, for migraphx, makedepends) depend
-# on them, read from the
+# the default. ORTF_EPS, ORTF_CUDA_ARCHS and ORTF_PYTHON take theirs from
+# the _ortf_default_* variables below the header, so that a copy of this
+# file builds other inputs where the environment does not reach makepkg (a
+# clean chroot, see there). prepare() checks and prints every value and
+# where it came from, and records it for build() and package()
+# (src/ortf.conf). Of the metadata, only the package NAMES (and, for
+# tensorrt and migraphx, makedepends) depend on them, read from the
 # environment when makepkg sources this file: ORTF_EPS decides which
 # provider packages exist, ORTF_CUDA_ARCHS the CUDA package's suffix and
 # ORTF_PYTHON whether python-onnxruntime-core does, as makepkg must know
@@ -115,18 +127,19 @@
 # `makepkg -e` or `-R` with another environment, or after a CUDA upgrade),
 # and says what to pass.
 # Every other field of `makepkg --printsrcinfo` is the same for any inputs,
-# but makedepends: with migraphx in ORTF_EPS it adds migraphx and
-# hip-runtime-amd (no other build pulls in ROCm).
+# but makedepends: with tensorrt in ORTF_EPS it has tensorrt, with migraphx
+# migraphx and hip-runtime-amd (no other build pulls in ROCm).
 #   ORTF_EPS           execution providers, space- or comma-separated, from
 #                      cuda, tensorrt, openvino, migraphx; or `cpu` alone for
-#                      a CPU-only build (default: "cuda tensorrt openvino").
+#                      a CPU-only build (default: "cuda tensorrt openvino",
+#                      _ortf_default_eps).
 #                      tensorrt needs cuda; migraphx (AMD GPUs, untested on
 #                      AMD hardware) stands alone or joins the others
 #                      (untested together). The CPU provider is always
 #                      built.
 #   ORTF_CUDA_ARCHS    CUDA architectures (CMAKE_CUDA_ARCHITECTURES): a
 #                      preset, or a list such as 120, sm_120 or "89 120"
-#                      (default: 120, the RTX 50 series). The presets
+#                      (default: rtx, _ortf_default_cuda_archs). The presets
 #                      (_ortf_cuda_preset), each alone:
 #                        rtx  75 86 89 120: the GeForce/RTX lines, Turing
 #                             (RTX 20, GTX 16) to Blackwell (RTX 50)
@@ -160,7 +173,8 @@
 #                      The package's RUNPATH names this root's library
 #                      directory (when not under /usr/lib) before
 #                      /opt/nvidia/tensorrt/lib.
-#   ORTF_PYTHON        1 (default) also builds the Python module and
+#   ORTF_PYTHON        1 (default, _ortf_default_python) also builds the
+#                      Python module and
 #                      python-onnxruntime-core; 0 skips both. prepare()
 #                      records the version of the python that builds it.
 #   ORTF_CCACHE        auto (default: ccache as the C, C++ and CUDA compiler
@@ -208,21 +222,30 @@
 #                                     # the ROCm install)
 #   ORTF_EPS='cuda tensorrt openvino migraphx' MAKEFLAGS=-j8 makepkg -s -f
 #                                     # every provider (untested together)
+# In a clean chroot (devtools: makechrootpkg, extra-x86_64-build) the
+# environment does not reach makepkg, so the PKGBUILD itself carries the
+# inputs: the _ortf_default_* lines below the header. A copy of the
+# recipe directory for another build sets them with one sed, e.g. the
+# `all` preset (the copy's .SRCINFO, if any, no longer matches it):
+#   sed -i 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' PKGBUILD
+# The ORTF_* variables still win where the environment reaches makepkg.
+# A clean chroot has no TensorRT package in its repositories: the AUR's
+# tensorrt is built first and handed over (makechrootpkg -I).
 # Install the packages of one build with one pacman transaction, naming
-# its files: a glob such as ./*onnxruntime-*-1.29.0-2-* also picks up the
+# its files: a glob such as ./*onnxruntime-*-1.29.0-5-* also picks up the
 # packages an earlier build with other inputs left in this directory (e.g.
-# onnxruntime-provider-cuda13-rtx beside -cuda13-sm120, which conflict, and
+# onnxruntime-provider-cuda13-sm120 beside -cuda13-rtx, which conflict, and
 # the transaction fails). makepkg writes them as
-# <name>-1.29.0-4-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
+# <name>-1.29.0-5-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
 # (.pkg.tar.zst on Arch); PKGDEST=/an/empty/directory makepkg ... keeps one
 # build's packages apart. For the default build:
-#   sudo pacman -U onnxruntime-core-1.29.0-4-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-cuda13-sm120-1.29.0-4-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-tensorrt-cuda13-1.29.0-4-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-openvino-1.29.0-4-x86_64.pkg.tar.zst \
-#     python-onnxruntime-core-1.29.0-4-x86_64.pkg.tar.zst
+#   sudo pacman -U onnxruntime-core-1.29.0-5-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-cuda13-rtx-1.29.0-5-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-tensorrt-cuda13-1.29.0-5-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-openvino-1.29.0-5-x86_64.pkg.tar.zst \
+#     python-onnxruntime-core-1.29.0-5-x86_64.pkg.tar.zst
 # (with migraphx in ORTF_EPS, also
-# onnxruntime-provider-migraphx-1.29.0-4-x86_64.pkg.tar.zst).
+# onnxruntime-provider-migraphx-1.29.0-5-x86_64.pkg.tar.zst).
 # Upgrading from 1.29.0-1, the single onnxruntime-full (and its
 # python-onnxruntime-full) of this recipe's first, unsplit version:
 # onnxruntime-core has replaces=(onnxruntime-full) and
@@ -258,6 +281,16 @@
 # logs that the default plugin library was not found.
 
 pkgbase=onnxruntime-split
+
+# The defaults of ORTF_EPS, ORTF_CUDA_ARCHS and ORTF_PYTHON: the values
+# used when the environment variable is unset or empty, by the package
+# names and by prepare() alike (_ortf_resolve). The one place they are
+# spelled. A copy of the recipe for another build (e.g. the `all` preset
+# in a clean chroot, where the environment does not reach makepkg) sets
+# them with one sed (the top of the file).
+_ortf_default_eps='cuda tensorrt openvino'
+_ortf_default_cuda_archs=rtx
+_ortf_default_python=1
 
 # Where the vendor installs are looked for (Arch's cuda, cudnn and openvino
 # packages; a local TensorRT package; Arch's migraphx and hip-runtime-amd,
@@ -379,16 +412,27 @@ _ortf_pkgnames() {
   printf '%s\n' "$names"
 }
 
-# The package names, from the environment with _ortf_resolve's defaults (an
-# empty variable counts as unset, as there), and the CUDA major from the
-# toolkit's cuda.h: x when there is none (it only matters when ORTF_EPS has
-# cuda, and prepare() then fails on the missing CUDA). _ortf_pkgname keeps
-# them for the package functions, in which makepkg sets pkgname to the one
-# package being written.
-_ortf_sfx=$(_ortf_cuda_suffix "${ORTF_CUDA_ARCHS:-120}")
-_ortf_cuda_major=$(_ortf_cuda_header_major "$_ortf_cuda_home") || _ortf_cuda_major=x
-read -ra _ortf_pkgname <<<"$(_ortf_pkgnames "${ORTF_EPS:-cuda tensorrt openvino}" \
-  "${ORTF_CUDA_ARCHS:-120}" "${ORTF_PYTHON:-1}" "$_ortf_cuda_major")"
+# The CUDA major the names carry when there is no cuda.h to read it from:
+# an AUR helper sources this file (and reads the names) before it installs
+# the makedepends, cuda among them, and the names must then be those of
+# the published .SRCINFO, made with Arch's cuda 13.x. A wrong guess cannot
+# reach a package: prepare() reads the major from cuda.h and checks it
+# against nvcc, and _ortf_check_names fails on names that differ from it.
+_ortf_cuda_major_default=13
+# The package names, from the environment with the defaults above (an
+# empty variable counts as unset, as in _ortf_resolve), and the CUDA major
+# from the toolkit's cuda.h, else _ortf_cuda_major_default. _ortf_pkgname
+# keeps them for the package functions, in which makepkg sets pkgname to
+# the one package being written.
+_ortf_sfx=$(_ortf_cuda_suffix "${ORTF_CUDA_ARCHS:-$_ortf_default_cuda_archs}")
+# _ortf_cuda_header_found: 1 when that major came from cuda.h, else 0.
+_ortf_cuda_header_found=1
+_ortf_cuda_major=$(_ortf_cuda_header_major "$_ortf_cuda_home") || {
+  _ortf_cuda_major=$_ortf_cuda_major_default
+  _ortf_cuda_header_found=0
+}
+read -ra _ortf_pkgname <<<"$(_ortf_pkgnames "${ORTF_EPS:-$_ortf_default_eps}" \
+  "${ORTF_CUDA_ARCHS:-$_ortf_default_cuda_archs}" "${ORTF_PYTHON:-$_ortf_default_python}" "$_ortf_cuda_major")"
 pkgname=("${_ortf_pkgname[@]}")
 pkgver=1.29.0
 # 2: the split into one package per engine (1.29.0-1 was one package).
@@ -398,7 +442,12 @@ pkgver=1.29.0
 # 4: adds onnxruntime-provider-migraphx; onnxruntime-core's and
 # python-onnxruntime-core's optdepends name it, and the MIGraphX package links
 # its provider library into the Python module's capi directory.
-pkgrel=4
+# 5: names carry CUDA 13 when no cuda.h is installed yet (an AUR helper
+# reading the names), not x; tensorrt is in makedepends with the TensorRT
+# provider; ORTF_CUDA_ARCHS defaults to the rtx preset (was 120); the CUDA
+# package ships cudnn-frontend's licence; the input defaults are
+# _ortf_default_* lines of this file, for clean-chroot builds.
+pkgrel=5
 # Each package sets its own; this one is the pkgbase's (and onnxruntime-core's).
 pkgdesc='Cross-platform inference engine for ONNX models: the C and C++ library with the CPU execution provider'
 arch=('x86_64')
@@ -407,15 +456,13 @@ url='https://github.com/microsoft/onnxruntime'
 # libraries: abseil, flatbuffers, onnx, dlpack (Apache-2.0); cpuinfo
 # (BSD-2-Clause); protobuf, re2, pybind11, CUTLASS (BSD-3-Clause); Boost.Mp11
 # (BSL-1.0); Eigen, built MPL2-only (MPL-2.0); date, nlohmann json, GSL,
-# SafeInt, cudnn-frontend (MIT). Their notices are in ThirdPartyNotices.txt.
+# SafeInt, cudnn-frontend (MIT). Their notices are in ThirdPartyNotices.txt,
+# but cudnn-frontend's, which the CUDA package carries itself
+# (_ortf_cudnn_frontend_license).
 # No vendor runtime is contained (see the top of the file).
 license=('MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MPL-2.0')
-# Every build input, whatever ORTF_EPS selects. TensorRT is not listed:
-# its packages (the AUR's tensorrt under /usr, nvidia-tensorrt-sdk-local under
-# /opt/nvidia/tensorrt) both provide the name tensorrt, but a build can use
-# TensorRT from anywhere (ORTF_TENSORRT_HOME). prepare() checks the TensorRT
-# headers and library when ORTF_EPS has tensorrt, and warns when no
-# installed package provides tensorrt.
+# Every build input, whatever ORTF_EPS selects; TensorRT and ROCm below,
+# by the package names.
 makedepends=(
   'git' 'cmake' 'ninja' 'patchelf'
   'python' 'python-build' 'python-installer' 'python-wheel' 'python-setuptools' 'python-numpy'
@@ -432,6 +479,14 @@ makedepends=(
 # hip-config.cmake may also need rocm-llvm, rocm-device-libs or rocm-cmake at
 # configure time (unverified until a trial build).
 [[ " ${_ortf_pkgname[*]} " != *' onnxruntime-provider-migraphx '* ]] || makedepends+=('migraphx' 'hip-runtime-amd')
+# tensorrt when the names (as for ROCm) have the TensorRT provider package:
+# both TensorRT packages provide the name, the AUR's tensorrt (under /usr)
+# and nvidia-tensorrt-sdk-local (under /opt/nvidia/tensorrt).
+# ORTF_TENSORRT_HOME still chooses which headers and library the build
+# uses; a TensorRT that no package provides needs makepkg -d. prepare()
+# checks the headers and library, and warns when no installed package
+# provides tensorrt.
+[[ " ${_ortf_pkgname[*]} " != *" onnxruntime-provider-tensorrt-cuda$_ortf_cuda_major "* ]] || makedepends+=('tensorrt')
 # !lto: link-time optimisation of the CUDA provider costs hours and many
 # GiB of RAM (upstream's releases are not LTO builds); !debug: the CUDA
 # provider's debug information alone runs to GiB.
@@ -770,12 +825,18 @@ _ortf_installed_version() {
   return 1
 }
 
-# _ortf_pick <name> <default>: sets _ortf_val to the environment variable
-# <name> when it is set and not empty, else to <default>, and _ortf_src to
-# where the value came from. The caller declares both local.
+# _ortf_pick <name> <default> [<variable>]: sets _ortf_val to the
+# environment variable <name> when it is set and not empty, else to
+# <default>, and _ortf_src to where the value came from: environment,
+# default, or, with <variable> (the PKGBUILD's _ortf_default_* line the
+# default is from, which a copy may have changed), "PKGBUILD default,
+# <variable>".
+# The caller declares both local.
 _ortf_pick() {
   if [[ -n ${!1:-} ]]; then
     _ortf_val=${!1} _ortf_src=environment
+  elif [[ -n ${3:-} ]]; then
+    _ortf_val=$2 _ortf_src="PKGBUILD default, $3"
   else
     _ortf_val=$2 _ortf_src=default
   fi
@@ -809,7 +870,7 @@ _ortf_resolve() {
   local trt_version='' trt_installed='' ov_version='' python_version='' bounds rc
   local mgx_version='' hip_version='' mgx_soname='' hip_soname=''
 
-  _ortf_pick ORTF_EPS 'cuda tensorrt openvino'
+  _ortf_pick ORTF_EPS "$_ortf_default_eps" _ortf_default_eps
   read -ra words <<<"${_ortf_val//,/ }"
   if ((${#words[@]} == 0)); then
     echo "ORTF_EPS: empty; give cpu, or some of cuda, tensorrt, openvino, migraphx" >&2
@@ -844,7 +905,7 @@ _ortf_resolve() {
   eps=${eps# }
   lines+=("ORTF_EPS=$eps ($_ortf_src)")
 
-  _ortf_pick ORTF_CUDA_ARCHS 120
+  _ortf_pick ORTF_CUDA_ARCHS "$_ortf_default_cuda_archs" _ortf_default_cuda_archs
   read -ra words <<<"${_ortf_val//[,;]/ }"
   local virtual='' preset='' list
   # A preset stands alone and expands to its list, which is what is
@@ -1071,7 +1132,7 @@ _ortf_resolve() {
     lines+=("migraphx $mgx_version, hip-runtime-amd $hip_version (installed; $_ortf_rocm_home/lib: libmigraphx_c.so.$mgx_soname, libamdhip64.so.$hip_soname; so ${bounds//$'\n'/ })")
   fi
 
-  _ortf_pick ORTF_PYTHON 1
+  _ortf_pick ORTF_PYTHON "$_ortf_default_python" _ortf_default_python
   case $_ortf_val in
     0 | 1) python=$_ortf_val ;;
     *) echo "ORTF_PYTHON: '$_ortf_val' is neither 0 nor 1" >&2; return 1 ;;
@@ -1178,7 +1239,11 @@ _ortf_check_names() {
     echo "makepkg runs for: ${_ortf_pkgname[*]}" >&2
     echo "the build was made for: $want" >&2
     if [[ -n $major && $major != "$_ortf_cuda_major" ]]; then
-      echo "the build used CUDA $major, $_ortf_cuda_home/include/cuda.h is now CUDA $_ortf_cuda_major: build anew (makepkg without -e/-R)" >&2
+      if ((_ortf_cuda_header_found)); then
+        echo "the build used CUDA $major, $_ortf_cuda_home/include/cuda.h is now CUDA $_ortf_cuda_major: build anew (makepkg without -e/-R)" >&2
+      else
+        echo "the build used CUDA $major, $_ortf_cuda_home/include/cuda.h is absent so the names use _ortf_cuda_major_default ($_ortf_cuda_major_default): build anew (makepkg without -e/-R)" >&2
+      fi
     else
       echo "run makepkg with ORTF_EPS='$eps' ORTF_CUDA_ARCHS='$archs' ORTF_PYTHON=$python, the inputs src/ortf.conf records (or without -e/-R, to build anew)" >&2
     fi
@@ -1432,6 +1497,39 @@ _ortf_licenses() {
     "$srcdir/onnxruntime/LICENSE" "$srcdir/onnxruntime/ThirdPartyNotices.txt"
 }
 
+# _ortf_cudnn_frontend_license: cudnn-frontend's licence (MIT), in the CUDA
+# package's licence directory as cudnn-frontend-LICENSE.txt. The CUDA
+# provider compiles in this header-only library (ortf-dep-cudnn_frontend),
+# which ThirdPartyNotices.txt has no entry for. The file is the LICENSE.txt
+# of the mirrored source archive ($srcdir/ortf-dep-cudnn_frontend.zip, the
+# one the build tree is fed from; entry <top directory>/LICENSE.txt), not
+# of FetchContent's copy; fails when the archive is missing or has not
+# exactly one such entry.
+_ortf_cudnn_frontend_license() {
+  local zip=$srcdir/ortf-dep-cudnn_frontend.zip entries dest
+  local -a found
+  if [[ ! -f $zip ]]; then
+    echo "$zip not found: cudnn-frontend's licence, which the CUDA package must carry, is read from it" >&2
+    return 1
+  fi
+  if ! entries=$(bsdtar -tf "$zip"); then
+    echo "$zip: cannot list it" >&2
+    return 1
+  fi
+  mapfile -t found < <(grep -E '^[^/]+/LICENSE\.txt$' <<<"$entries" || true)
+  if ((${#found[@]} != 1)); then
+    echo "$zip: ${#found[@]} entries match */LICENSE.txt, want exactly one" >&2
+    return 1
+  fi
+  dest=$pkgdir/usr/share/licenses/${pkgname[0]}/cudnn-frontend-LICENSE.txt
+  install -dm755 -- "${dest%/*}"
+  if ! bsdtar -xOf "$zip" "${found[0]}" >"$dest" || [[ ! -s $dest ]]; then
+    echo "$zip: cannot extract ${found[0]}" >&2
+    return 1
+  fi
+  chmod 644 -- "$dest"
+}
+
 # _ortf_check_libs [<tensorrt package>]: checks the DT_NEEDED entries of
 # every library of the package being written (each regular file named
 # *.so or *.so.*; links are checked as their targets) against its depends
@@ -1520,6 +1618,8 @@ package_onnxruntime-core() {
     'onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)'
     'onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs, untested)'
   )
+  # libonnxruntime.so: makepkg turns a listed soname into the versioned
+  # provide (libonnxruntime.so=1-64 in the .PKGINFO); it adds none unlisted.
   provides=("onnxruntime=$pkgver" 'libonnxruntime.so')
   # onnxruntime-full: this recipe's unsplit 1.29.0-1, which held every
   # provider library. replaces= acts on a sync upgrade only; with pacman -U
@@ -1682,6 +1782,7 @@ eval "package_onnxruntime-provider-cuda$_ortf_cuda_major-$_ortf_sfx() {
   provides=(\"onnxruntime-provider-cuda=\$pkgver\" \"onnxruntime-provider-cuda$_ortf_cuda_major=\$pkgver\")
   conflicts=('onnxruntime-provider-cuda' 'onnxruntime-provider-cuda$_ortf_cuda_major')
   _ortf_package_provider cuda
+  _ortf_cudnn_frontend_license
 }"
 
 # The TensorRT package has no architecture suffix: its library holds no

@@ -4,12 +4,12 @@ The recipe is `onnxruntime-split/PKGBUILD`; its header comment is the reference 
 
 ## Build inputs
 
-Build inputs are environment variables. `prepare()` resolves and checks them, prints each value with where it came from, and records them for `build()` and `package()`, together with the TensorRT version in its headers and the installed versions of OpenVINO, Python and (for MIGraphX) `migraphx` and `hip-runtime-amd`, from which the packages' dependency bounds are taken ([install.md](install.md#dependencies-and-version-bounds)). Of the package metadata only the package names depend on them (see [Package names](#package-names)), and `makedepends`, which gains `migraphx` and `hip-runtime-amd` when `migraphx` is selected; every other field of `makepkg --printsrcinfo` is the same for any inputs. After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
+Build inputs are environment variables. `prepare()` resolves and checks them, prints each value with where it came from, and records them for `build()` and `package()`, together with the TensorRT version in its headers and the installed versions of OpenVINO, Python and (for MIGraphX) `migraphx` and `hip-runtime-amd`, from which the packages' dependency bounds are taken ([install.md](install.md#dependencies-and-version-bounds)). Of the package metadata only the package names depend on them (see [Package names](#package-names)), and `makedepends`, which gains `tensorrt` when the TensorRT provider is built (the AUR's `tensorrt` and `nvidia-tensorrt-sdk-local` both provide it) and `migraphx` and `hip-runtime-amd` when `migraphx` is selected; every other field of `makepkg --printsrcinfo` is the same for any inputs. After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `ORTF_EPS` | `cuda tensorrt openvino` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`, `migraphx`; or `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. `migraphx` (AMD GPUs, **untested on AMD hardware**) is not in the default; it stands alone or joins the others (untested together). The CPU provider is always built |
-| `ORTF_CUDA_ARCHS` | `120` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
+| `ORTF_CUDA_ARCHS` | `rtx` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
 | `ORTF_NVCC_THREADS` | `1` | `nvcc --threads` per CUDA compile job |
 | `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so`. Its `include/NvInferVersion.h` gives the major.minor that the TensorRT provider's `tensorrt` dependency is bounded to |
 | `ORTF_PYTHON` | `1` | `1` also builds the Python module and `python-onnxruntime-core`; `0` skips both |
@@ -17,11 +17,13 @@ Build inputs are environment variables. `prepare()` resolves and checks them, pr
 | `MAKEFLAGS` | none | `-jN` sets the number of parallel compile jobs. Without it ninja runs `nproc+2` jobs |
 | `CFLAGS`, `CXXFLAGS` | `makepkg.conf`'s | Arch's `-march=x86-64 -mtune=generic` is the portable baseline; see [Portable baseline](#portable-baseline) |
 
+The defaults of `ORTF_EPS`, `ORTF_CUDA_ARCHS` and `ORTF_PYTHON` are the `_ortf_default_eps`, `_ortf_default_cuda_archs` and `_ortf_default_python` lines of the PKGBUILD (`cuda tensorrt openvino`, `rtx`, `1`); a set, non-empty `ORTF_*` environment variable wins. The lines let a copy of the PKGBUILD build other inputs where the environment does not reach makepkg, as in a clean chroot (`extra-x86_64-build`): [release.md](release.md) builds the `all` preset that way, with `sed -i 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' PKGBUILD` on a copy.
+
 Examples:
 
 ```bash
-MAKEFLAGS=-j8 makepkg -f                                  # all engines, RTX 50 series
-ORTF_CUDA_ARCHS=rtx MAKEFLAGS=-j8 makepkg -f              # RTX 20 to 50 series: package -cuda13-rtx
+MAKEFLAGS=-j8 makepkg -f                                  # all engines, RTX 20 to 50 series: package -cuda13-rtx
+ORTF_CUDA_ARCHS=120 MAKEFLAGS=-j8 makepkg -f              # RTX 50 series only: -cuda13-sm120
 ORTF_CUDA_ARCHS=all MAKEFLAGS=-j8 makepkg -f              # every x86 GPU CUDA 13 supports: -cuda13-all
 ORTF_EPS="cuda tensorrt" ORTF_CUDA_ARCHS="89 120" MAKEFLAGS=-j8 makepkg -f
 ORTF_EPS=openvino MAKEFLAGS=-j8 makepkg -f                # OpenVINO only
@@ -39,7 +41,7 @@ ORTF_TENSORRT_HOME=/usr MAKEFLAGS=-j8 makepkg -f          # the AUR's tensorrt
 
 ### CUDA architectures
 
-`ORTF_CUDA_ARCHS` is a preset, alone, or a list of numbers, optionally with an `sm_` prefix, separated by spaces, commas or semicolons. ONNX Runtime turns a bare number into machine code for that GPU only: `120` becomes `120a-real`. That is the smallest and fastest build, with no PTX to JIT-compile on another GPU. The default `120` is `sm_120`, the RTX 50 series; for another GPU give its compute capability without the dot (for example `89` for an RTX 40 series card).
+`ORTF_CUDA_ARCHS` is a preset, alone, or a list of numbers, optionally with an `sm_` prefix, separated by spaces, commas or semicolons. ONNX Runtime turns a bare number into machine code for that GPU only: `120` becomes `120a-real`. That is the smallest and fastest build, with no PTX to JIT-compile on another GPU. The default is the preset `rtx`; a bare `120` is `sm_120`, the RTX 50 series alone, the smallest build; for another GPU give its compute capability without the dot (for example `89` for an RTX 40 series card).
 
 | Preset | Architectures | Package |
 |---|---|---|
@@ -66,7 +68,7 @@ makepkg must know every package name before `prepare()` runs, so the names are r
 | MIGraphX | `ORTF_EPS` has `migraphx` | `onnxruntime-provider-migraphx` |
 | Python | `ORTF_PYTHON` is not `0` | `python-onnxruntime-core` |
 
-- **`<M>`** is the major version of the CUDA toolkit: `CUDA_VERSION` in `/opt/cuda/include/cuda.h` (Arch's `cuda`), which `prepare()` checks against `nvcc`. It is never written into the PKGBUILD. CUDA 13.x gives `-cuda13`. A CUDA 12 toolkit would give `-cuda12-` names (and TensorRT 11 needs CUDA 13, so such a build would have no `tensorrt` in `ORTF_EPS`, or use TensorRT 10), but a CUDA 12 variant is on the backlog and is not provided at present.
+- **`<M>`** is the major version of the CUDA toolkit: `CUDA_VERSION` in `/opt/cuda/include/cuda.h` (Arch's `cuda`), which `prepare()` checks against `nvcc`. It is never written into the PKGBUILD. CUDA 13.x gives `-cuda13`. Where `cuda.h` does not exist yet when makepkg reads the PKGBUILD (an AUR helper reads it before it installs the makedepends), the name uses major 13, never `-cudax-`. A CUDA 12 toolkit would give `-cuda12-` names (and TensorRT 11 needs CUDA 13, so such a build would have no `tensorrt` in `ORTF_EPS`, or use TensorRT 10), but a CUDA 12 variant is on the backlog and is not provided at present.
 - **`<sfx>`** is the preset's name (`rtx`, `all`), or, for a list, the real architectures as `smN` in ascending order without repeats, joined by `-`, then the `-virtual` one as `computeN`: `120` gives `sm120`, `"89 120"` gives `sm89-sm120`, `"89 120 120-virtual"` gives `sm89-sm120-compute120`.
 - **The TensorRT package has no architecture suffix**: its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime, and on `tensorrt`, bounded to the major.minor of the headers the build used ([install.md](install.md#2-tensorrt)). It provides and conflicts with `onnxruntime-provider-tensorrt`.
 - **CUDA packages of different builds conflict**: each provides and conflicts with `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>`, because all install the same `/usr/lib/libonnxruntime_providers_cuda.so`. One is installed at a time.
@@ -78,7 +80,7 @@ Each package function checks that the inputs recorded by `prepare()` in `src/ort
 
 ### Portable baseline
 
-The build uses the `CFLAGS` and `CXXFLAGS` of `makepkg.conf`; Arch's `-march=x86-64 -mtune=generic` makes a package for any x86-64 CPU, and the recipe passes `onnxruntime_BUILD_FOR_NATIVE_MACHINE=OFF`. `-march=native` and `-mtune=native` are refused, as they make a package for the building CPU only. Flags such as `-march=x86-64-v3` are the builder's choice, and the package then needs such a CPU. ONNX Runtime's MLAS library chooses its AVX2 or AVX-512 kernels at run time, so the baseline does not remove them. The presets' fixed package names keep one build distinguishable from another. Prebuilt (`-bin`) packages, if any are ever made, follow the convention in the PKGBUILD header (`<name>-bin` provides `<name>=<pkgver>-<pkgrel>` and conflicts with `<name>`); none is promised.
+The build uses the `CFLAGS` and `CXXFLAGS` of `makepkg.conf`; Arch's `-march=x86-64 -mtune=generic` makes a package for any x86-64 CPU, and the recipe passes `onnxruntime_BUILD_FOR_NATIVE_MACHINE=OFF`. `-march=native` and `-mtune=native` are refused, as they make a package for the building CPU only. Flags such as `-march=x86-64-v3` are the builder's choice, and the package then needs such a CPU. ONNX Runtime's MLAS library chooses its AVX2 or AVX-512 kernels at run time, so the baseline does not remove them. The presets' fixed package names keep one build distinguishable from another. The official prebuilt (`-bin`) packages (AUR `onnxruntime-split-bin`) follow the convention in the PKGBUILD header (`<name>-bin` provides `<name>=<pkgver>-<pkgrel>` and conflicts with `<name>`); [install.md](install.md#prebuilt-packages) installs them and [release.md](release.md) says how they are made.
 
 ### TensorRT location
 

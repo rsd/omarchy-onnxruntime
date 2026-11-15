@@ -25,7 +25,7 @@ flowchart TD
 
 ## CUDA
 
-Package `onnxruntime-provider-cuda<M>-<sfx>`, which depends on the NVIDIA driver (`nvidia-utils`), `cuda` and `cudnn`, and provides `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>` (and so conflicts with them: CUDA packages of different builds install the same library). The recipe targets CUDA 13.x, which is upstream's main GPU line and what Arch's `cuda` ships, and `<M>` in the name is the CUDA major version of the toolkit that built it (`13`). The provider is compiled for the GPU architectures in `ORTF_CUDA_ARCHS` (default `120`, package `-cuda13-sm120`; the presets `rtx` and `all` give `-cuda13-rtx` and `-cuda13-all`): a GPU outside that list is not targeted, unless you built a `-virtual` entry for PTX ([build.md](build.md#cuda-architectures); sizes in the [README](../README.md#cuda-architecture-presets)). A CUDA 12 variant is on the backlog and not provided at present.
+Package `onnxruntime-provider-cuda<M>-<sfx>`, which depends on the NVIDIA driver (`nvidia-utils`), `cuda` and `cudnn`, and provides `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>` (and so conflicts with them: CUDA packages of different builds install the same library). The recipe targets CUDA 13.x, which is upstream's main GPU line and what Arch's `cuda` ships, and `<M>` in the name is the CUDA major version of the toolkit that built it (`13`). The provider is compiled for the GPU architectures in `ORTF_CUDA_ARCHS` (default the preset `rtx`, `75 86 89 120`, package `-cuda13-rtx`; the preset `all` gives `-cuda13-all`, and a list such as `120` gives `-cuda13-sm120`): a GPU outside that list is not targeted, unless you built a `-virtual` entry for PTX ([build.md](build.md#cuda-architectures); sizes in the [README](../README.md#cuda-architecture-presets)). A CUDA 12 variant is on the backlog and not provided at present.
 
 ## TensorRT
 
@@ -69,7 +69,7 @@ Which hardware each engine covers, what is deliberately left out, and why. Statu
 
 ### NVIDIA
 
-The CUDA provider is built with CUDA 13, which is what Arch's `cuda` ships. CUDA 13 dropped GPUs older than Turing, so the architecture presets start at `sm_75`: `120` (default), `rtx` (`75 86 89 120`) and `all` (`75 80 86 89 90 100 103 120`), or a list of your own ([presets and sizes](../README.md#cuda-architecture-presets), [build input](build.md#cuda-architectures)).
+The CUDA provider is built with CUDA 13, which is what Arch's `cuda` ships. CUDA 13 dropped GPUs older than Turing, so the architecture presets start at `sm_75`: `rtx` (`75 86 89 120`, the default) and `all` (`75 80 86 89 90 100 103 120`), or a list of your own, such as `120` for the RTX 50 series alone ([presets and sizes](../README.md#cuda-architecture-presets), [build input](build.md#cuda-architectures)).
 
 Cards older than Turing, namely Maxwell (`sm_50`, `sm_52`), Pascal (`sm_60`, `sm_61`) and Volta (`sm_70`), need a CUDA 12 build. A variant `onnxruntime-provider-cuda12-<preset>` is planned and **not built yet**; there is no estimate for it. It needs:
 

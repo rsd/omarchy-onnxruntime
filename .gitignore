@@ -13,6 +13,11 @@ onnxruntime-split/ortf-dep-*.zip
 *.pkg.tar*
 *.src.tar*
 
+# The AUR git clones (aur/onnxruntime-split, aur/onnxruntime-split-bin):
+# separate repositories, whose PKGBUILD and .SRCINFO are copied or
+# generated (scripts/gen-bin.sh) from this one.
+/aur/
+
 # Other build output (CMake build trees, Python wheels and dists).
 build/
 target/
