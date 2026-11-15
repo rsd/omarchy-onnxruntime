@@ -8,12 +8,16 @@
 # which site-packages the Python package goes to under /usr/bin/python and
 # a venv (_ortf_py_site), the package names the inputs give
 # (_ortf_cuda_header_major, _ortf_cuda_suffix, _ortf_pkgnames,
-# _ortf_check_names), the TensorRT header version and the installed openvino
-# and python versions prepare() records and the bounds they give (_ortf_installed_version,
-# _ortf_minor_bounds), the depends a library's DT_NEEDED entries give
-# (_ortf_lib_depends, on the real lists of a 1.29.0 build), the package
+# _ortf_check_names), the TensorRT header version, the installed openvino,
+# python, migraphx and hip-runtime-amd versions and the ROCm sonames
+# prepare() records and the bounds they give (_ortf_installed_version,
+# _ortf_minor_bounds, _ortf_major_bounds, _ortf_rocm_soname_major), the
+# depends a library's DT_NEEDED entries give
+# (_ortf_lib_depends, on the real lists of a 1.29.0 build; the MIGraphX
+# provider's is a stand-in), the package
 # functions of every package run as makepkg runs them (set -eE) on a stub
-# install, that of `makepkg --printsrcinfo` only the package names depend
+# install, that of `makepkg --printsrcinfo` only the package names (and,
+# with migraphx, two makedepends) depend
 # on the inputs, and that every dependency between the packages is met by
 # the packages' names and provides, and by those of their -bin
 # counterparts (the convention at the top of the PKGBUILD).
@@ -22,7 +26,8 @@
 # subshell per case, with its other vendor locations pointed at fixtures
 # under mktemp and pacman, python, cmake, readelf and patchelf replaced by
 # stubs (pacman's vercmp, read-only, is the real one):
-# no CUDA, TensorRT or OpenVINO is needed, nothing is downloaded or built.
+# no CUDA, TensorRT, OpenVINO or ROCm is needed, nothing is downloaded or
+# built.
 # Usage: scripts/tests/pkgbuild-settings-test.sh. Exits non-zero on any failure.
 set -euo pipefail
 
@@ -113,6 +118,32 @@ for d in trt-old trt-nover trt-badver trt-relver; do
     : >"$fx/$d/lib/libnvinfer.so"
 done
 printf "export NVCC_CCBIN='/usr/bin/g++-15'\n" >"$fx/cuda.sh"
+# ROCm roots as Arch's migraphx and hip-runtime-amd lay them out under
+# /opt/rocm: the CMake packages and the libraries with their runtime links
+# (libmigraphx_c.so.3, libamdhip64.so.7, the sonames of ROCm 7.2 and 10.1).
+# rocm-nocmake has the libraries only, rocm-nohip no HIP CMake package,
+# rocm-twohip two HIP majors, rocm-nolib the CMake packages only.
+rocm_tree() { # rocm_tree <dir> [cmake] [libs] [hip cmake]
+    mkdir -p "$1/lib/cmake/migraphx" "$1/lib/cmake/hip"
+    [[ ${2:-1} == 0 ]] || : >"$1/lib/cmake/migraphx/migraphx-config.cmake"
+    [[ ${2:-1} == 0 || ${4:-1} == 0 ]] || : >"$1/lib/cmake/hip/hip-config.cmake"
+    if [[ ${3:-1} == 1 ]]; then
+        : >"$1/lib/libmigraphx_c.so.3.2007000"
+        ln -s libmigraphx_c.so.3.2007000 "$1/lib/libmigraphx_c.so.3"
+        ln -s libmigraphx_c.so.3 "$1/lib/libmigraphx_c.so"
+        : >"$1/lib/libamdhip64.so.7.2.70204"
+        ln -s libamdhip64.so.7.2.70204 "$1/lib/libamdhip64.so.7"
+        ln -s libamdhip64.so.7 "$1/lib/libamdhip64.so"
+    fi
+}
+rocm_tree "$fx/rocm"
+rocm_tree "$fx/rocm-nocmake" 0
+rocm_tree "$fx/rocm-nohip" 1 1 0
+rocm_tree "$fx/rocm-nolib" 1 0
+rocm_tree "$fx/rocm-twohip"
+: >"$fx/rocm-twohip/lib/libamdhip64.so.6"
+rocm_tree "$fx/rocm-stale"
+: >"$fx/rocm-stale/lib/libamdhip64.so.6.4.60400"
 # Stubs found first on PATH by some cases. The python prints its version,
 # FX_PYTHON_VERSION (default 3.14.8), for -I -c.
 cat >"$fx/bin/python" <<'EOF2'
@@ -129,13 +160,14 @@ chmod +x "$fx/bin/python" "$fx/bin/ccache"
 #     package of FX_INSTALLED that is or provides <name> (entries
 #     name|version|provides, space-separated; provides comma-separated),
 #     or fails as for a package not installed. The default: Arch's
-#     openvino and cudnn, a local TensorRT package that provides tensorrt.
+#     openvino and cudnn, a local TensorRT package that provides tensorrt,
+#     and Arch's migraphx and hip-runtime-amd of ROCm 7.2.
 cat >"$fx/pacbin/pacman" <<'EOF2'
 #!/bin/sh
 case $1 in
 -Qi)
     [ "$2" = -- ] && shift
-    for e in ${FX_INSTALLED-openvino|2026.4.1-1| cudnn|9.27.0.2-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106}; do
+    for e in ${FX_INSTALLED-openvino|2026.4.1-1| cudnn|9.27.0.2-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106 migraphx|7.2.3-7| hip-runtime-amd|7.2.4-1|hip=7.2.4}; do
         n=${e%%|*} r=${e#*|} v=${r%%|*} p=${r#*|}
         hit=0
         [ "$n" = "$2" ] && hit=1
@@ -195,14 +227,15 @@ resolve() {
             # pacman -T and -Qi for tensorrt.
             PATH=$2/pacbin:$PATH
             _ortf_cuda_home=$2/cuda _ortf_cudnn_home=$2/cudnn _ortf_openvino_cmake_dir=$2/cmake
-            _ortf_tensorrt_default=$2/trt _ortf_cuda_profile=$2/no-cuda.sh
+            _ortf_tensorrt_default=$2/trt _ortf_cuda_profile=$2/no-cuda.sh _ortf_rocm_home=$2/${FX_ROCM_HOME:-rocm}
             [[ -z ${FX_CUDA_NOHDR:-} ]] || _ortf_cuda_home=$2/cuda-nohdr
             [[ -z ${FX_CUDNN_HOME:-} ]] || _ortf_cudnn_home=$2/$FX_CUDNN_HOME
             [[ -z ${FX_PROFILE:-} ]] || _ortf_cuda_profile=$2/cuda.sh
             [[ -z ${FX_NO_TRT_DEFAULT:-} ]] || _ortf_tensorrt_default=$2/empty
             [[ -z ${FX_USR:-} ]] || _ortf_tensorrt_usr=$2/trt64
             [[ -z ${FX_NO_VENDOR:-} ]] ||
-                _ortf_cuda_home=$2/empty _ortf_cudnn_home=$2/empty _ortf_openvino_cmake_dir=$2/empty
+                _ortf_cuda_home=$2/empty _ortf_cudnn_home=$2/empty _ortf_openvino_cmake_dir=$2/empty \
+                    _ortf_rocm_home=$2/empty
             _ortf_resolve "$3/ortf.conf"
         ' _ "$pkgbuild" "$fx" "$dir" 2>&1) || status=$?
     conf=''
@@ -269,6 +302,56 @@ expect_fail "only separators fail" 'ORTF_EPS: empty' ORTF_EPS=' , '
 expect_fail "cuda without nvcc fails" 'nvcc not found' ORTF_EPS=cuda FX_NO_VENDOR=1
 expect_fail "openvino without its CMake package fails" 'OpenVINOConfig.cmake' ORTF_EPS=openvino \
     FX_NO_VENDOR=1
+expect_fail "an unknown provider names migraphx among the known ones" \
+    "unknown provider 'rocm' (known: cpu, cuda, tensorrt, openvino, migraphx)" ORTF_EPS='migraphx rocm'
+expect_fail "cpu with migraphx fails" 'cpu stands alone' ORTF_EPS='cpu migraphx'
+
+echo "== ORTF_EPS with migraphx (AMD GPUs; the ROCm root is a fixture)"
+expect_ok "migraphx alone: no CUDA, TensorRT or OpenVINO" 'ORTF_EPS=migraphx' 'ORTF_CUDA_MAJOR=' 'ORTF_CUDNN_MAJOR=' \
+    'ORTF_TENSORRT_VERSION=' 'ORTF_OPENVINO_VERSION=' 'ORTF_MIGRAPHX_VERSION=7.2.3-7' 'ORTF_HIP_VERSION=7.2.4-1' \
+    'ORTF_MIGRAPHX_SONAME_MAJOR=3' 'ORTF_HIP_SONAME_MAJOR=7' -- ORTF_EPS=migraphx FX_INSTALLED='migraphx|7.2.3-7| hip-runtime-amd|7.2.4-1|hip=7.2.4'
+if grep -qF "migraphx 7.2.3-7, hip-runtime-amd 7.2.4-1 (installed; $fx/rocm/lib: libmigraphx_c.so.3, libamdhip64.so.7; so migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8)" <<<"$out"; then
+    ok "prepare() prints the ROCm versions, sonames and bounds"
+else
+    fail "printed: $out"
+fi
+expect_ok "migraphx with every other provider, in any order, comes out canonical" \
+    'ORTF_EPS=cuda tensorrt openvino migraphx' 'ORTF_CUDA_MAJOR=13' 'ORTF_TENSORRT_VERSION=11.4.0.106' \
+    'ORTF_OPENVINO_VERSION=2026.4.1-1' 'ORTF_MIGRAPHX_VERSION=7.2.3-7' 'ORTF_HIP_VERSION=7.2.4-1' -- \
+    ORTF_EPS='migraphx,openvino tensorrt cuda'
+expect_ok "migraphx with openvino" 'ORTF_EPS=openvino migraphx' -- ORTF_EPS='openvino migraphx'
+expect_ok "ROCm 10.1 (testing): the package versions, the same sonames" 'ORTF_MIGRAPHX_VERSION=10.1-1' \
+    'ORTF_HIP_VERSION=10.1-1' 'ORTF_MIGRAPHX_SONAME_MAJOR=3' 'ORTF_HIP_SONAME_MAJOR=7' -- \
+    ORTF_EPS=migraphx FX_INSTALLED='migraphx|10.1-1| hip-runtime-amd|10.1-1|hip=10.1'
+if grep -qF 'libamdhip64.so.7; so migraphx>=10 migraphx<11 hip-runtime-amd>=10 hip-runtime-amd<11)' <<<"$out"; then
+    ok "the ROCm bounds follow the package versions, not the sonames"
+else
+    fail "printed: $out"
+fi
+expect_ok "without migraphx, no ROCm is looked at" 'ORTF_EPS=cuda tensorrt openvino' 'ORTF_MIGRAPHX_VERSION=' \
+    'ORTF_HIP_VERSION=' 'ORTF_MIGRAPHX_SONAME_MAJOR=' 'ORTF_HIP_SONAME_MAJOR=' -- FX_ROCM_HOME=empty \
+    FX_INSTALLED='openvino|2026.4.1-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106'
+if ! grep -qiE 'migraphx|hip|rocm' <<<"$out"; then ok "and prints nothing of it"; else fail "printed: $out"; fi
+expect_fail "migraphx without MIGraphX's CMake package fails" \
+    "no $fx/rocm-nocmake/lib/cmake/migraphx/migraphx-config.cmake (install migraphx and hip-runtime-amd)" \
+    ORTF_EPS=migraphx FX_ROCM_HOME=rocm-nocmake
+expect_fail "migraphx without HIP's CMake package fails" \
+    "no $fx/rocm-nohip/lib/cmake/hip/hip-config.cmake (install migraphx and hip-runtime-amd)" \
+    ORTF_EPS=migraphx FX_ROCM_HOME=rocm-nohip
+expect_fail "migraphx without a ROCm root fails" 'install migraphx and hip-runtime-amd' ORTF_EPS=migraphx \
+    FX_NO_VENDOR=1
+expect_fail "no installed migraphx version fails" 'no version recorded for migraphx' ORTF_EPS=migraphx \
+    FX_INSTALLED='hip-runtime-amd|7.2.4-1|'
+expect_fail "no installed hip-runtime-amd version fails" 'no version recorded for hip-runtime-amd' ORTF_EPS=migraphx \
+    FX_INSTALLED='migraphx|7.2.3-7|'
+expect_fail "a migraphx version without a numeric major fails" "version 'git-1' has no numeric major" \
+    ORTF_EPS=migraphx FX_INSTALLED='migraphx|git-1| hip-runtime-amd|7.2.4-1|'
+expect_fail "no libmigraphx_c.so.N in the ROCm root fails" "no $fx/rocm-nolib/lib/libmigraphx_c.so.N" \
+    ORTF_EPS=migraphx FX_ROCM_HOME=rocm-nolib
+expect_fail "two libamdhip64 majors fail" 'has libamdhip64.so.6 and libamdhip64.so.7' ORTF_EPS=migraphx \
+    FX_ROCM_HOME=rocm-twohip
+expect_fail "a stale libamdhip64.so.6.x.y without its .so.6 link counts as a second ROCm" \
+    'has libamdhip64.so.6 and libamdhip64.so.7' ORTF_EPS=migraphx FX_ROCM_HOME=rocm-stale
 
 echo "== the CUDA major (cuda.h and nvcc)"
 expect_ok "cuda records the toolkit's major" 'ORTF_CUDA_MAJOR=13' -- ORTF_EPS=cuda
@@ -394,16 +477,30 @@ for case in 'tensorrt|11.4.0.106|tensorrt>=11.4 tensorrt<11.5 ' \
     if [[ $got == "$wanted" ]]; then ok "$name $version is bounded by $wanted"; else
         fail "$name $version: '$got', not '$wanted'"; fi
 done
+# major_bounds <name> <version>: _ortf_major_bounds, lines joined by spaces.
+# shellcheck disable=SC2016 # the script expands its own arguments
+major_bounds() { bash -c 'set -euo pipefail; . "$1"; _ortf_major_bounds "$2" "$3"' _ "$pkgbuild" "$1" "$2" 2>&1 | tr '\n' ' '; }
+for case in 'migraphx|7.2.3-7|migraphx>=7 migraphx<8 ' 'hip-runtime-amd|7.2.4-1|hip-runtime-amd>=7 hip-runtime-amd<8 ' \
+    'migraphx|10.1-1|migraphx>=10 migraphx<11 ' 'hip-runtime-amd|10.1-1|hip-runtime-amd>=10 hip-runtime-amd<11 ' \
+    'migraphx|1:7.2.3-7|migraphx>=1:7 migraphx<1:8 ' 'migraphx|07.2-1|migraphx>=07 migraphx<8 ' \
+    "migraphx|git-1|migraphx: version 'git-1' has no numeric major to bound the dependency with "; do
+    IFS='|' read -r name version wanted <<<"$case"
+    # The git-1 case fails, with its message.
+    got=$(major_bounds "$name" "$version") || true
+    if [[ $got == "$wanted" ]]; then ok "$name $version is major-bounded by $wanted"; else
+        fail "$name $version: '$got', not '$wanted'"; fi
+done
 # pacman's own comparison: the installed version is inside its bounds, and
 # the next minor is not.
 if command -v vercmp >/dev/null 2>&1; then
     for case in '11.4.0.106 11.4 11.5' '11.4.0.106-1 11.4 11.5' '2026.4.1-1 2026.4 2026.5' '3.14.8-1 3.14 3.15' \
-        '1:2026.4.1-1 1:2026.4 1:2026.5'; do
+        '1:2026.4.1-1 1:2026.4 1:2026.5' '7.2.3-7 7 8' '7.2.4-1 7 8' '7.14.0-1 7 8' '10.1-1 10 11'; do
         read -r v lo hi <<<"$case"
         if (($(vercmp "$v" "$lo") >= 0 && $(vercmp "$v" "$hi") < 0)); then ok "vercmp: $lo <= $v < $hi"; else
             fail "vercmp: $v is not in [$lo, $hi)"; fi
     done
-    for case in '11.5.0.1 11.4 11.5' '2026.5.0-1 2026.4 2026.5' '3.15.0-1 3.14 3.15' '11.3.9 11.4 11.5'; do
+    for case in '11.5.0.1 11.4 11.5' '2026.5.0-1 2026.4 2026.5' '3.15.0-1 3.14 3.15' '11.3.9 11.4 11.5' \
+        '10.1-1 7 8' '8.0-1 7 8' '6.4.3-1 7 8'; do
         read -r v lo hi <<<"$case"
         if (($(vercmp "$v" "$lo") >= 0 && $(vercmp "$v" "$hi") < 0)); then fail "vercmp: $v is in [$lo, $hi)"; else
             ok "vercmp: $v is outside [$lo, $hi)"; fi
@@ -543,6 +640,11 @@ expect_names 'onnxruntime-core onnxruntime-provider-cuda12-sm89 onnxruntime-prov
 expect_names 'onnxruntime-core onnxruntime-provider-cudax-sm120 onnxruntime-provider-tensorrt-cudax onnxruntime-provider-openvino python-onnxruntime-core' \
     FX_CUDA_HOME="$fx/empty"
 expect_names 'onnxruntime-core onnxruntime-provider-openvino' FX_CUDA_HOME="$fx/empty" ORTF_EPS=openvino ORTF_PYTHON=0
+# The MIGraphX package: no CUDA major, no architecture, no ROCm version.
+expect_names 'onnxruntime-core onnxruntime-provider-migraphx python-onnxruntime-core' ORTF_EPS=migraphx
+expect_names 'onnxruntime-core onnxruntime-provider-migraphx' FX_CUDA_HOME="$fx/empty" ORTF_EPS=migraphx ORTF_PYTHON=0
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-sm120 onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-migraphx python-onnxruntime-core' \
+    ORTF_EPS='migraphx,cuda tensorrt openvino'
 
 # check_names <ortf.conf lines> <env...>: _ortf_check_names with the
 # recorded values and the environment's names. Sets status, out.
@@ -604,6 +706,15 @@ if ((status != 0)) && grep -qF 'ortf.conf: no ORTF_CUDA_PRESET' <<<"$out"; then
 else
     fail "check_names (exit $status): $out"
 fi
+check_names $'ORTF_EPS=migraphx\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=\nORTF_PYTHON=0' \
+    ORTF_EPS=migraphx ORTF_PYTHON=0 FX_CUDA_HOME="$fx/empty"
+if ((status == 0)); then ok "a recorded migraphx build gives makepkg's names"; else fail "check_names: $out"; fi
+check_names $'ORTF_EPS=cuda tensorrt openvino migraphx\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=13\nORTF_PYTHON=1'
+if ((status != 0)) && grep -qF "ORTF_EPS='cuda tensorrt openvino migraphx'" <<<"$out"; then
+    ok "makepkg -e without the migraphx the build had fails and says what to pass"
+else
+    fail "check_names (exit $status): $out"
+fi
 check_names $'ORTF_EPS=cpu'
 if ((status != 0)) && grep -qF 'ortf.conf: no ORTF_CUDA_ARCHS' <<<"$out"; then ok "an incomplete ortf.conf fails"; else
     fail "check_names (exit $status): $out"; fi
@@ -621,11 +732,15 @@ needed_cuda='libcublasLt.so.13 libcublas.so.13 libcudart.so.13 libstdc++.so.6 li
 needed_tensorrt='libcublas.so.13 libnvinfer.so.11 libnvonnxparser.so.11 libcudart.so.13 libcudnn.so.9 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2'
 needed_openvino='libopenvino.so.2641 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2'
 needed_python='libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2'
+# The MIGraphX provider's list is not from a real build (none was made
+# here): what its CMake target links (migraphx::c, hip::host) and the
+# system libraries every provider links.
+needed_migraphx='libmigraphx_c.so.3 libamdhip64.so.7 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2'
 # lib_depends <package> <depends> <trt> <CUDA major> <TensorRT version>
 # <NEEDED...>: runs _ortf_lib_depends for a library of <package> with
 # depends=(<depends>, space-separated) on those NEEDED entries, with the
-# cuDNN major lib_cudnn (a global, empty when unset). Sets
-# status, out (stdout and stderr).
+# cuDNN major lib_cudnn and the ROCm soname majors lib_mgx and lib_hip
+# (globals, empty when unset). Sets status, out (stdout and stderr).
 lib_depends() {
     local self=$1 deps=$2 trt=$3 major=$4 trt_version=$5
     shift 5
@@ -636,10 +751,11 @@ lib_depends() {
         # shellcheck disable=SC1090
         . "$1"
         read -ra depends <<<"$3"
-        self=$2 trt=$4 major=$5 trt_version=$6 cudnn=$7
-        shift 7
-        printf "%s\n" "$@" | _ortf_lib_depends "$self" "$self: lib" "$trt" "$major" "$trt_version" "$cudnn"
-    ' _ "$pkgbuild" "$self" "$deps" "$trt" "$major" "$trt_version" "${lib_cudnn:-}" "$@" 2>&1) || status=$?
+        self=$2 trt=$4 major=$5 trt_version=$6 cudnn=$7 mgx=$8 hip=$9
+        shift 9
+        printf "%s\n" "$@" | _ortf_lib_depends "$self" "$self: lib" "$trt" "$major" "$trt_version" "$cudnn" "$mgx" "$hip"
+    ' _ "$pkgbuild" "$self" "$deps" "$trt" "$major" "$trt_version" "${lib_cudnn:-}" "${lib_mgx:-}" "${lib_hip:-}" \
+        "$@" 2>&1) || status=$?
 }
 expect_libs() { # expect_libs <description> <want stdout, lines joined by spaces> <lib_depends arguments...>
     local desc=$1 wanted=$2
@@ -657,11 +773,13 @@ expect_libs_fail() { # expect_libs_fail <description> <message fragment> <lib_de
 # The static depends of each package, as the PKGBUILD writes them, with
 # what package() adds before the check (the TensorRT package).
 core_deps='glibc libgcc libstdc++'
-cuda_deps='onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ cuda cudnn nvidia-utils'
-trt_deps='onnxruntime-core=1.29.0-3 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt'
-ov_deps='onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ openvino'
-py_deps='onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf'
+cuda_deps='onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ cuda cudnn nvidia-utils'
+trt_deps='onnxruntime-core=1.29.0-4 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt'
+ov_deps='onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ openvino'
+py_deps='onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf'
+mgx_deps='onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ migraphx hip-runtime-amd'
 cu_pkg=onnxruntime-provider-cuda13-sm120 trt_pkg=onnxruntime-provider-tensorrt-cuda13 ov_pkg=onnxruntime-provider-openvino
+mgx_pkg=onnxruntime-provider-migraphx
 # shellcheck disable=SC2086 # the NEEDED lists are words
 {
     expect_libs "the real CUDA provider: cuda bounds from libcudart" 'cuda>=13 cuda<14' "$cu_pkg" "$cuda_deps" '' 13 '' \
@@ -672,6 +790,8 @@ cu_pkg=onnxruntime-provider-cuda13-sm120 trt_pkg=onnxruntime-provider-tensorrt-c
     expect_libs "the real libonnxruntime.so: system libraries only" '' onnxruntime-core "$core_deps" '' '' '' $needed_core
     expect_libs "the real libonnxruntime_providers_shared.so: nothing" '' onnxruntime-core "$core_deps" '' '' '' $needed_shared
     expect_libs "the real Python module: system libraries only" '' python-onnxruntime-core "$py_deps" '' '' '' $needed_python
+    expect_libs "the MIGraphX provider: no soname bounds (the package versions give them)" '' \
+        "$mgx_pkg" "$mgx_deps" '' '' '' $needed_migraphx
 }
 # Every depend a library's package is mapped to is needed: without it, the
 # check fails (each package, each system or vendor package it links).
@@ -680,7 +800,8 @@ for case in "onnxruntime-core|$core_deps|glibc libgcc libstdc++|$needed_core" \
     "$cu_pkg|$cuda_deps|glibc libgcc libstdc++ cuda|$needed_cuda" \
     "$trt_pkg|$trt_deps|glibc libgcc libstdc++ cuda cudnn tensorrt|$needed_tensorrt" \
     "$ov_pkg|$ov_deps|glibc libgcc libstdc++ openvino|$needed_openvino" \
-    "python-onnxruntime-core|$py_deps|glibc libgcc libstdc++|$needed_python"; do
+    "python-onnxruntime-core|$py_deps|glibc libgcc libstdc++|$needed_python" \
+    "$mgx_pkg|$mgx_deps|glibc libgcc libstdc++ migraphx hip-runtime-amd|$needed_migraphx"; do
     IFS='|' read -r self deps drop needed <<<"$case"
     for d in $drop; do
         less=" $deps "
@@ -702,6 +823,35 @@ expect_libs_fail "a libcudnn of another major than the recorded cuDNN fails" \
     'libcudnn.so.10 is cuDNN 10, the build used cuDNN 9' "$trt_pkg" "$trt_deps" \
     tensorrt 13 11.4.0.106 libcudnn.so.10
 lib_cudnn=
+lib_mgx=3 lib_hip=7
+# shellcheck disable=SC2086 # the NEEDED list is words
+expect_libs "the MIGraphX provider with the sonames prepare() found: no bounds" '' "$mgx_pkg" "$mgx_deps" '' '' '' \
+    $needed_migraphx
+expect_libs "MIGraphX's other libraries are migraphx's" '' "$mgx_pkg" "$mgx_deps" '' '' '' \
+    libmigraphx_c.so.3 libmigraphx.so.2 libmigraphx_onnx.so.2 libamdhip64.so.7
+expect_libs_fail "a libamdhip64 of another major than the build's fails" \
+    'libamdhip64.so.6 is not libamdhip64.so.7, the one the build linked (ORTF_HIP_SONAME_MAJOR)' \
+    "$mgx_pkg" "$mgx_deps" '' '' '' libmigraphx_c.so.3 libamdhip64.so.6
+expect_libs_fail "a libmigraphx_c of another major than the build's fails" \
+    'libmigraphx_c.so.4 is not libmigraphx_c.so.3, the one the build linked (ORTF_MIGRAPHX_SONAME_MAJOR)' \
+    "$mgx_pkg" "$mgx_deps" '' '' '' libmigraphx_c.so.4 libamdhip64.so.7
+expect_libs_fail "an unversioned libamdhip64 fails" 'libamdhip64.so is not libamdhip64.so.7' \
+    "$mgx_pkg" "$mgx_deps" '' '' '' libamdhip64.so
+lib_mgx='' lib_hip=''
+for lib in libamd_comgr.so.3 libhiprtc.so.7 libhsa-runtime64.so.1 librocblas.so.5 libMIOpen.so.1 libroctx64.so.4; do
+    expect_libs_fail "an unknown ROCm library fails ($lib)" "$lib is a library no package is known for" \
+        "$mgx_pkg" "$mgx_deps" '' '' '' libmigraphx_c.so.3 "$lib"
+done
+expect_libs_fail "the CUDA provider needing libmigraphx_c fails" \
+    'libmigraphx_c.so.3 belongs to migraphx, which is not in the depends' "$cu_pkg" "$cuda_deps" '' 13 '' \
+    libcudart.so.13 libmigraphx_c.so.3
+expect_libs_fail "the MIGraphX provider needing libcudart fails" 'libcudart.so.13 belongs to cuda' \
+    "$mgx_pkg" "$mgx_deps" '' '' '' libmigraphx_c.so.3 libcudart.so.13
+expect_libs_fail "libonnxruntime.so needing libamdhip64 fails" \
+    'libamdhip64.so.7 belongs to hip-runtime-amd, which is not in the depends of onnxruntime-core' \
+    onnxruntime-core "$core_deps" '' '' '' libstdc++.so.6 libamdhip64.so.7
+expect_libs_fail "the Python module needing libmigraphx_c fails" 'libmigraphx_c.so.3 belongs to migraphx' \
+    python-onnxruntime-core "$py_deps" '' '' '' libmigraphx_c.so.3
 expect_libs "libtbb is onetbb's, as a provider's own depend" '' "$ov_pkg" "$ov_deps onetbb" '' '' '' libtbb.so.12 libopenvino.so.2641
 expect_libs_fail "libtbb without onetbb in depends fails" 'libtbb.so.12 belongs to onetbb, which is not in the depends' \
     "$ov_pkg" "$ov_deps" '' '' '' libtbb.so.12
@@ -841,6 +991,7 @@ package_run() {
     tr ' ' '\n' <<<"$needed_cuda" >"$dir/needed/libonnxruntime_providers_cuda.so"
     tr ' ' '\n' <<<"$needed_tensorrt" >"$dir/needed/libonnxruntime_providers_tensorrt.so"
     tr ' ' '\n' <<<"$needed_openvino" >"$dir/needed/libonnxruntime_providers_openvino.so"
+    tr ' ' '\n' <<<"$needed_migraphx" >"$dir/needed/libonnxruntime_providers_migraphx.so"
     tr ' ' '\n' <<<"$needed_python" >"$dir/needed/onnxruntime_pybind11_state.so"
     while (($#)) && [[ $1 != -- ]]; do
         kv=$1
@@ -898,18 +1049,18 @@ for line in \
     'onnxruntime-core conflicts: onnxruntime onnxruntime-cpu onnxruntime-cuda onnxruntime-opt-cuda onnxruntime-rocm onnxruntime-opt-rocm onnxruntime-git onnxruntime-full' \
     'onnxruntime-core replaces: onnxruntime-full' \
     "onnxruntime-core files: ./usr/include/onnxruntime/onnxruntime_c_api.h ./usr/include/onnxruntime/onnxruntime_cxx_api.h ./usr/lib/cmake/onnxruntime/onnxruntimeConfig.cmake ./usr/lib/libonnxruntime.so ./usr/lib/libonnxruntime.so.1 ./usr/lib/libonnxruntime.so.1.29.0 ./usr/lib/libonnxruntime_providers_shared.so ./usr/lib/pkgconfig/libonnxruntime.pc $(lic onnxruntime-core) " \
-    "$cu depends: onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ cuda cudnn nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$cu depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ cuda cudnn nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$cu provides: onnxruntime-provider-cuda=1.29.0 onnxruntime-provider-cuda13=1.29.0" \
     "$cu conflicts: onnxruntime-provider-cuda onnxruntime-provider-cuda13" \
     "$cu files: ./usr/lib/libonnxruntime_providers_cuda.so $(lic "$cu") " \
-    "$trt depends: onnxruntime-core=1.29.0-3 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$trt depends: onnxruntime-core=1.29.0-4 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$trt provides: onnxruntime-provider-tensorrt=1.29.0" \
     "$trt conflicts: onnxruntime-provider-tensorrt" \
     "$trt files: ./usr/lib/libonnxruntime_providers_tensorrt.so $(lic "$trt") " \
-    "$ov depends: onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ openvino openvino>=2026.4 openvino<2026.5" \
+    "$ov depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ openvino openvino>=2026.4 openvino<2026.5" \
     "$ov provides: " "$ov conflicts: " "$ov replaces: " \
     "$ov files: ./usr/lib/libonnxruntime_providers_openvino.so $(lic "$ov") " \
-    "$py depends: onnxruntime-core=1.29.0-3 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15" \
+    "$py depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15" \
     "$py provides: python-onnxruntime=1.29.0" \
     "$py conflicts: python-onnxruntime python-onnxruntime-cpu python-onnxruntime-cuda python-onnxruntime-opt-cuda python-onnxruntime-rocm python-onnxruntime-opt-rocm python-onnxruntime-full" \
     "$py replaces: python-onnxruntime-full" \
@@ -1012,6 +1163,107 @@ expect_package_fail "the Python module linking a vendor library fails" "$py" \
 expect_package_fail "a library of the wheel that no other package holds fails" "$py" \
     'libonnxruntime_providers_rocm.so is in the wheel but in no other package' "$conf_all" -- \
     FX_WHEEL_LIBS='core shared rocm'
+
+echo "== the package functions of a migraphx build"
+# Upstream's setup.py leaves the MIGraphX provider out of the wheel (it
+# packages it only with --use_migraphx): the stub wheel has core and shared.
+conf_mgx=$'ORTF_EPS=migraphx\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=\nORTF_CUDNN_MAJOR=\nORTF_PYTHON=1\nORTF_TENSORRT_HOME=\nORTF_TENSORRT_LIBDIR=\nORTF_TENSORRT_VERSION=\nORTF_OPENVINO_VERSION='
+conf_mgx+=$'\nORTF_MIGRAPHX_VERSION=7.2.3-7\nORTF_HIP_VERSION=7.2.4-1\nORTF_MIGRAPHX_SONAME_MAJOR=3\nORTF_HIP_SONAME_MAJOR=7'
+conf_mgx+=$'\nORTF_PYTHON_EXE='"$fx/pystub/python"$'\nORTF_PYTHON_VERSION=3.14.8'
+mgx=onnxruntime-provider-migraphx
+package_run "$conf_mgx" -- ORTF_EPS=migraphx FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared'
+if ((status == 0)); then ok "every package function of a migraphx build runs under set -eE"; else
+    fail "the package functions of a migraphx build (exit $status): $out"; fi
+for line in \
+    'onnxruntime-core depends: glibc libgcc libstdc++' \
+    "$mgx depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ migraphx hip-runtime-amd migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" \
+    "$mgx provides: " "$mgx conflicts: " "$mgx replaces: " \
+    "$mgx files: ./usr/lib/libonnxruntime_providers_migraphx.so ./usr/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime_providers_migraphx.so $(lic "$mgx") " \
+    "$py depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python>=3.14 python<3.15"; do
+    if has_line "$line"; then ok "migraphx package: $line"; else fail "migraphx package: no line [$line] in: $out"; fi
+done
+if [[ $out != *"$cu"* && $out != *"$trt"* && $out != *"$ov "* ]]; then ok "a migraphx build makes no NVIDIA or OpenVINO package"; else
+    fail "a migraphx build: $out"; fi
+# ROCm 10.1: the same sonames, the package versions' bounds.
+package_run "${conf_mgx//=7.2.[34]-[17]/=10.1-1}" -- ORTF_EPS=migraphx FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared'
+if ((status == 0)) &&
+    has_line "$mgx depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ migraphx hip-runtime-amd migraphx>=10 migraphx<11 hip-runtime-amd>=10 hip-runtime-amd<11" &&
+    grep -qxF 'libonnxruntime_providers_migraphx.so needs: libmigraphx_c.so.3 libamdhip64.so.7 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2' \
+        "${pkgroot%/pkg}/$mgx.log"; then
+    ok "a ROCm 10.1 build: bounds from the package versions (10), the sonames still .so.3 and .so.7"
+else
+    fail "a ROCm 10.1 build (exit $status): $out"
+fi
+# The MIGraphX package links its library into the Python module's capi
+# directory (the wheel has none), to its own file in /usr/lib.
+package_run "$conf_mgx" -- ORTF_EPS=migraphx FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared'
+mgx_link=$pkgroot/$mgx/usr/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime_providers_migraphx.so
+if ((status == 0)) && [[ -L $mgx_link && $(readlink "$mgx_link") == /usr/lib/libonnxruntime_providers_migraphx.so ]] &&
+    [[ ! -e $pkgroot/$py/usr/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime_providers_migraphx.so ]]; then
+    ok "the migraphx package links its library into the Python module's capi directory; the Python package has none"
+else
+    fail "the migraphx package's Python link (exit $status): $out"
+fi
+# Without the Python package in the build, no link.
+package_run "${conf_mgx/ORTF_PYTHON=1/ORTF_PYTHON=0}" -- ORTF_EPS=migraphx ORTF_PYTHON=0 FX_STAGE='shared migraphx'
+if ((status == 0)) &&
+    has_line "$mgx files: ./usr/lib/libonnxruntime_providers_migraphx.so $(lic "$mgx") " &&
+    [[ ! -e $pkgroot/$mgx/usr/lib/python3.14 ]]; then
+    ok "without python-onnxruntime-core in the build, the migraphx package has no Python link"
+else
+    fail "a migraphx build without Python (exit $status): $out"
+fi
+# A wheel with the MIGraphX provider (setup.py --use_migraphx): the Python
+# package drops its copy, so that only the migraphx package owns the path.
+package_run "$conf_mgx" -- ORTF_EPS=migraphx FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared migraphx'
+if ((status == 0)) &&
+    [[ ! -e $pkgroot/$py/usr/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime_providers_migraphx.so &&
+    ! -L $pkgroot/$py/usr/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime_providers_migraphx.so ]] &&
+    [[ -L $mgx_link ]]; then
+    ok "a wheel's MIGraphX provider library is dropped from the Python package: the migraphx package owns that path"
+else
+    fail "a wheel with the MIGraphX provider (exit $status): $out"
+fi
+# Every provider together (untested on hardware): each package as alone.
+conf_every=${conf_all/ORTF_EPS=cuda tensorrt openvino/ORTF_EPS=cuda tensorrt openvino migraphx}
+conf_every+=$'\nORTF_MIGRAPHX_VERSION=7.2.3-7\nORTF_HIP_VERSION=7.2.4-1\nORTF_MIGRAPHX_SONAME_MAJOR=3\nORTF_HIP_SONAME_MAJOR=7'
+package_run "$conf_every" -- ORTF_EPS='cuda tensorrt openvino migraphx' FX_STAGE='shared cuda tensorrt openvino migraphx'
+if ((status == 0)) &&
+    has_line "$mgx depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ migraphx hip-runtime-amd migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" &&
+    has_line "$cu depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ cuda cudnn nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" &&
+    has_line "$ov depends: onnxruntime-core=1.29.0-4 glibc libgcc libstdc++ openvino openvino>=2026.4 openvino<2026.5"; then
+    ok "a build of every provider: the migraphx package beside the others, each with its own depends"
+else
+    fail "a build of every provider (exit $status): $out"
+fi
+mgx_run=(-- ORTF_EPS=migraphx FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared')
+expect_package_fail "a MIGraphX provider linking another libamdhip64 major fails" "$mgx" \
+    'libamdhip64.so.6 is not libamdhip64.so.7, the one the build linked (ORTF_HIP_SONAME_MAJOR)' "$conf_mgx" \
+    'libonnxruntime_providers_migraphx.so=libmigraphx_c.so.3 libamdhip64.so.6 libc.so.6' "${mgx_run[@]}"
+expect_package_fail "a MIGraphX provider linking an unknown ROCm library fails" "$mgx" \
+    'libamd_comgr.so.3 is a library no package is known for' "$conf_mgx" \
+    'libonnxruntime_providers_migraphx.so=libmigraphx_c.so.3 libamdhip64.so.7 libamd_comgr.so.3 libc.so.6' "${mgx_run[@]}"
+expect_package_fail "a MIGraphX provider not linking libmigraphx_c fails" "$mgx" \
+    'libmigraphx_c.so.3 (ORTF_MIGRAPHX_SONAME_MAJOR) is not in its NEEDED entries' "$conf_mgx" \
+    'libonnxruntime_providers_migraphx.so=libamdhip64.so.7 libc.so.6' "${mgx_run[@]}"
+expect_package_fail "a MIGraphX provider not linking libamdhip64 fails" "$mgx" \
+    'libamdhip64.so.7 (ORTF_HIP_SONAME_MAJOR) is not in its NEEDED entries' "$conf_mgx" \
+    'libonnxruntime_providers_migraphx.so=libmigraphx_c.so.3 libc.so.6' "${mgx_run[@]}"
+expect_package_fail "an empty recorded hip-runtime-amd version fails" "$mgx" \
+    'ortf.conf: ORTF_HIP_VERSION is empty (run makepkg without -e' "${conf_mgx/ORTF_HIP_VERSION=7.2.4-1/ORTF_HIP_VERSION=}" \
+    "${mgx_run[@]}"
+expect_package_fail "an ortf.conf without the migraphx version fails" "$mgx" 'ortf.conf: no ORTF_MIGRAPHX_VERSION' \
+    "${conf_mgx/ORTF_MIGRAPHX_VERSION=7.2.3-7/}" "${mgx_run[@]}"
+expect_package_fail "an ortf.conf without the libmigraphx_c soname major fails" "$mgx" \
+    'ortf.conf: no ORTF_MIGRAPHX_SONAME_MAJOR' "${conf_mgx/ORTF_MIGRAPHX_SONAME_MAJOR=3/}" "${mgx_run[@]}"
+expect_package_fail "an empty recorded libamdhip64 soname major fails" "$mgx" \
+    "ortf.conf: ORTF_HIP_SONAME_MAJOR is '', not a soname major" "${conf_mgx/ORTF_HIP_SONAME_MAJOR=7/ORTF_HIP_SONAME_MAJOR=}" \
+    "${mgx_run[@]}"
+expect_package_fail "the migraphx package of a build without migraphx fails" "$mgx" \
+    'libonnxruntime_providers_migraphx.so not found' "$conf_mgx" -- ORTF_EPS=migraphx FX_STAGE='shared' \
+    FX_WHEEL_LIBS='core shared'
+expect_package_fail "a recorded migraphx build packaged without migraphx in ORTF_EPS fails by name" onnxruntime-core \
+    "ORTF_EPS='migraphx'" "$conf_mgx" -- ORTF_EPS=cpu FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared'
 
 echo "== the dependency mirror"
 mirror_case() { # mirror_case <deps.txt editor (sed script)>: sets status, out
@@ -1153,6 +1405,31 @@ if command -v makepkg >/dev/null 2>&1; then
     else
         fail "ORTF_EPS='openvino cuda': $d"
     fi
+    # migraphx adds its package and two makedepends, nothing else: with
+    # them taken out, the .SRCINFO is the default one.
+    a_names=$(sed -n 's/^pkgname = //p' <<<"$a" | tr '\n' ' ')
+    m=$(srcinfo ORTF_EPS='cuda tensorrt openvino migraphx')
+    # shellcheck disable=SC2086 # the names are words
+    m_rest=$(only_blocks $a_names <<<"$m" | grep -vxF -e $'\tmakedepends = migraphx' -e $'\tmakedepends = hip-runtime-amd')
+    # shellcheck disable=SC2086 # the names are words
+    if [[ $m != *FAILED* && $m_rest == "$(only_blocks $a_names <<<"$a")" &&
+        $m == *$'\tmakedepends = migraphx\n'* && $m == *$'\tmakedepends = hip-runtime-amd\n'* &&
+        $m == *$'pkgname = onnxruntime-provider-migraphx\n'* ]]; then
+        ok "ORTF_EPS with migraphx adds its package and the migraphx and hip-runtime-amd makedepends only"
+    else
+        fail "ORTF_EPS with migraphx: $(diff <(only_blocks $a_names <<<"$a") <(echo "$m_rest") | head -8)"
+    fi
+    n=$(srcinfo ORTF_EPS=migraphx FX_CUDA_HOME="$fx/empty")
+    mgx_block=$(only_blocks onnxruntime-provider-migraphx <<<"$n")
+    if [[ $n != *FAILED* && $(grep -c '^pkgname = ' <<<"$n") == 3 &&
+        $mgx_block == *$'\tpkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)\n'* &&
+        $mgx_block == *$'\tdepends = onnxruntime-core=1.29.0-4\n'* && $mgx_block == *$'\tdepends = migraphx\n'* &&
+        $mgx_block$'\n' == *$'\tdepends = hip-runtime-amd\n'* && $mgx_block != *'rocm-hip-sdk'* &&
+        $(grep -c $'^\t\(provides\|conflicts\) = ' <<<"$mgx_block") == 0 && $n != *cudax* ]]; then
+        ok "ORTF_EPS=migraphx: core, the MIGraphX package (no provides, no conflicts) and Python; no CUDA name"
+    else
+        fail "ORTF_EPS=migraphx: $n"
+    fi
 
     # The dependencies between the packages (the -bin convention at the top
     # of the PKGBUILD). Each package of a build is installed either as
@@ -1239,7 +1516,7 @@ if command -v makepkg >/dev/null 2>&1; then
             return "$bad"
         }
         for view in source bin; do
-            for variant in a e g; do
+            for variant in a e g m n; do
                 if [[ ${!variant} != *FAILED* ]] && msg=$(chain "${!variant}" "$view"); then
                     ok "every dependency between the packages is met ($view packages, .SRCINFO \$$variant)"
                 else

@@ -2,7 +2,7 @@
 # Tests for scripts/check-no-vendor.sh and the hooks in .githooks/. Each case
 # runs in a throwaway git repository under mktemp (its own index and
 # history, never this repository's), with fake files generated here: nothing
-# from NVIDIA or Intel is involved. The hook cases set core.hooksPath of the
+# from NVIDIA, Intel or AMD is involved. The hook cases set core.hooksPath of the
 # throwaway repository to this repository's .githooks/ and run real git
 # commit, merge and push commands there (the push goes to a bare repository
 # under mktemp).
@@ -102,6 +102,7 @@ elf() { printf '\177ELF\002\001\001\000'; }
 # The marker texts are put together at run time, so this file carries none.
 corp() { printf '%s %s' NVIDIA CORPORATION; }
 intel_corp() { printf '%s %s' Intel Corporation; }
+amd_corp() { printf '%s %s %s' Advanced Micro Devices; }
 
 # refused <description> <repo> <git args...>: the git command must fail and
 # HEAD must not move.
@@ -114,7 +115,7 @@ refused() {
         fail "$desc: git $* succeeded"
     elif [[ $(git -C "$repo" rev-parse -q --verify HEAD || true) != "$before" ]]; then
         fail "$desc: HEAD moved"
-    elif ! grep -qF 'NVIDIA and Intel files must never be committed' <<<"$out"; then
+    elif ! grep -qF 'NVIDIA, Intel and AMD files must never be committed' <<<"$out"; then
         fail "$desc: git failed, but not through the guard: $out"
     else
         ok "$desc"
@@ -172,6 +173,24 @@ done
 stage_case fail "an OpenVINO header under openvino/ fails" include/openvino/runtime/core.hpp printf '// x\n'
 stage_case fail "an OpenVINO C header under openvino/ fails" include/openvino/c/openvino.h printf '// x\n'
 stage_case fail "openvino.hpp fails" src/openvino.hpp printf '// x\n'
+for f in migraphx/migraphx.h migraphx/migraphx.hpp migraphx/onnx.hpp migraphx.h; do
+    stage_case fail "the MIGraphX header $f fails" "include/$f" printf '// x\n'
+done
+for f in hip/hip_runtime.h hip/hip_runtime_api.h hip/hip_version.h hip/hiprtc.h hip/hip_fp16.h \
+    hip/amd_detail/amd_hip_runtime.h hip_runtime.h amd_hip_fp16.h; do
+    stage_case fail "the HIP header $f fails" "include/$f" printf '// x\n'
+done
+for f in rocblas.h rocblas/rocblas.h rocblas/internal/rocblas-types.h rocblas/rocblas-functions.h miopen/miopen.h \
+    miopen/version.h miopen.h hipblas/hipblas.h hipblas.h hipblas-version.h hipblaslt/hipblaslt.h hipblaslt.h \
+    hipblaslt-version.h rocm_version.h rocm/rocm_version.h; do
+    stage_case fail "the ROCm library header $f fails" "include/$f" printf '// x\n'
+done
+stage_case pass "docs/rocblas.md is not a ROCm header" docs/rocblas.md printf '# notes\n'
+stage_case pass "a rocblas/ directory outside headers holds no ROCm header" tools/rocblas/notes.txt printf 'plain\n'
+stage_case fail "a ROCm tree fails" opt/rocm/share/doc/notes.txt printf 'plain text\n'
+stage_case pass "docs/migraphx.md is not a MIGraphX header" docs/migraphx.md printf '# notes\n'
+stage_case pass "docs/rocm-7-notes.md is not a ROCm tree" docs/rocm-7-notes.md printf '# notes\n'
+stage_case pass "a hip/ directory outside include/ holds no HIP header" tools/hip/notes.h printf '// x\n'
 stage_case fail "an unpacked TensorRT-11.4.0.106/ fails" TensorRT-11.4.0.106/notes.txt printf 'plain text\n'
 stage_case fail "a nested TensorRT-*/ fails" onnxruntime-split/TensorRT-11.4/doc/a.txt printf 'plain text\n'
 stage_case fail "an OpenVINO toolkit tree fails" l_openvino_toolkit_ubuntu24_2026.4.0/readme.txt printf 'x\n'
@@ -219,6 +238,8 @@ copyright_header() { printf '/*\n * Copyright (c) 2024 %s.  All rights reserved.
 stage_case fail "an NVIDIA copyright line under an innocent name fails" include/engine.h copyright_header
 stage_case fail "a mixed-case NVIDIA copyright line fails" src/proxy.cpp \
     printf '# Copyright 2024 NVIDIA %s\n' Corporation
+stage_case fail "an AMD copyright line fails" src/kernel.hpp \
+    printf '// Copyright (c) 2015 - 2026 %s, Inc. All rights reserved.\n// SPDX-License-Identifier: MIT\n' "$(amd_corp)"
 stage_case fail "an Intel copyright line fails" src/plugin.cpp \
     printf '// Copyright (C) 2018-2026 %s\n// SPDX-License-Identifier: Apache-2.0\n' "$(intel_corp)"
 stage_case fail "the NVIDIA licence agreement's title on its own line fails" terms.txt \

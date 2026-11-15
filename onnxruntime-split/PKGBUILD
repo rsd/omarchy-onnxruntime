@@ -2,8 +2,9 @@
 #
 # ONNX Runtime built from upstream source at a pinned release, with every
 # execution provider this kind of machine can use in one installation: CPU,
-# CUDA, TensorRT and OpenVINO (its CPU, Intel GPU and Intel NPU devices).
-# Arch's own variants each carry one GPU vendor and no TensorRT or OpenVINO.
+# CUDA, TensorRT and OpenVINO (its CPU, Intel GPU and Intel NPU devices);
+# MIGraphX (AMD GPUs) on request, untested on AMD hardware. Arch's own
+# variants each carry one GPU vendor and no TensorRT or OpenVINO.
 #
 # One build (pkgbase onnxruntime-split), split into one package per engine:
 #   onnxruntime-core                        libonnxruntime.so with the CPU
@@ -13,6 +14,9 @@
 #   onnxruntime-provider-cuda<M>-<archs>    the CUDA provider
 #   onnxruntime-provider-tensorrt-cuda<M>   the TensorRT provider
 #   onnxruntime-provider-openvino           the OpenVINO provider
+#   onnxruntime-provider-migraphx           the MIGraphX provider (AMD GPUs;
+#                                           only with migraphx in ORTF_EPS;
+#                                           untested on AMD hardware)
 #   python-onnxruntime-core                 the Python module
 # A provider package depends on its vendor runtimes, so it cannot be
 # installed without them. <M> is the major version of the CUDA toolkit the
@@ -32,7 +36,12 @@
 # runtime) and provides and conflicts with onnxruntime-provider-tensorrt,
 # the name the other packages' optdepends use. It has no architecture
 # suffix: its library holds no CUDA GPU code (TensorRT builds its kernels
-# at run time).
+# at run time). The MIGraphX package has no suffix either, and no ROCm
+# version in its name: its library is host C++ only (MIGraphX compiles the
+# model for the GPU it finds at run time), and its CMake target links
+# MIGraphX's C API and the HIP runtime, libmigraphx_c.so.3 and
+# libamdhip64.so.7 in both Arch's ROCm 7.2 and ROCm 10.1 (not yet seen in a
+# build's DT_NEEDED entries).
 #
 # Prebuilt (-bin) packages of these, should there be any, follow one
 # convention, the same for every split package: <name>-bin provides
@@ -54,10 +63,15 @@
 # cannot map to a package in depends, see _ortf_lib_pkg), with bounds
 # where the ABI demands a rebuild on an upgrade: cuda by major
 # (from the sonames), cudnn by major (the build-time cuDNN: the CUDA provider
-# dlopen()s it, so no soname says), TensorRT by major.minor, openvino by year.minor and
-# python by minor, these three from the versions prepare() records in
+# dlopen()s it, so no soname says), TensorRT by major.minor, openvino by year.minor,
+# python by minor, and migraphx and hip-runtime-amd by the major of their
+# package versions, these from the versions prepare() records in
 # src/ortf.conf (_ortf_resolve): TensorRT's from the NvInferVersion.h of
-# the headers it builds with, the other two from the installed packages.
+# the headers it builds with, the others from the installed packages.
+# The ROCm bounds follow the package version, not the soname: ROCm 10.1
+# keeps libamdhip64.so.7 and libmigraphx_c.so.3, so a soname-derived bound
+# would admit a ROCm the provider was never built against; the sonames are
+# checked against those prepare() found in $_ortf_rocm_home/lib instead.
 # pacman then refuses
 # the vendor upgrade that would break a provider until it is rebuilt;
 # scripts/check-deps.sh <package files> shows, for built packages, every
@@ -65,16 +79,19 @@
 # the bounds.
 #
 # ONNX Runtime is MIT-licensed; license=() adds the bundled dependencies
-# compiled into its libraries (see there). The CUDA, TensorRT and OpenVINO
-# providers link against the vendors' runtimes installed on the machine that
-# builds the package; those runtimes are not contained in the package, and
-# each engine's licence is its vendor's. Nothing NVIDIA or
-# Intel is redistributed by this recipe: the package is built locally from
-# the user's own installs (Arch's cuda, cudnn and openvino packages, a
-# TensorRT the user installed) and stays on that machine.
+# compiled into its libraries (see there). The CUDA, TensorRT, OpenVINO and
+# MIGraphX providers link against the vendors' runtimes installed on the
+# machine that builds the package; those runtimes are not contained in the
+# package, and each engine's licence is its vendor's. Nothing NVIDIA, Intel
+# or AMD is redistributed by this recipe: the package is built locally from
+# the user's own installs (Arch's cuda, cudnn, openvino, migraphx and
+# hip-runtime-amd packages, a TensorRT the user installed) and stays on
+# that machine.
 #
-# AMD GPUs: ROCm and CUDA cannot be combined in one ONNX Runtime build.
-# Use Arch's onnxruntime-rocm (or onnxruntime-opt-rocm) instead.
+# AMD GPUs: ONNX Runtime removed its ROCm provider in 1.23; MIGraphX is its
+# AMD GPU provider. migraphx in ORTF_EPS builds it, alone or beside cuda,
+# tensorrt and openvino (nothing in ONNX Runtime's CMake excludes the
+# combination, but it is untested, as is the provider on AMD hardware).
 #
 # Version: 1.29.0, the release Arch ships, so consumers built against Arch's
 # onnxruntime see the same API. It covers the three engines:
@@ -87,7 +104,8 @@
 # Build-time inputs, each from the environment variable of that name, else
 # the default. prepare() checks and prints every value and where it came
 # from, and records it for build() and package() (src/ortf.conf). Of the
-# metadata, only the package NAMES depend on them, read from the
+# metadata, only the package NAMES (and, for migraphx, makedepends) depend
+# on them, read from the
 # environment when makepkg sources this file: ORTF_EPS decides which
 # provider packages exist, ORTF_CUDA_ARCHS the CUDA package's suffix and
 # ORTF_PYTHON whether python-onnxruntime-core does, as makepkg must know
@@ -96,11 +114,16 @@
 # recorded in src/ortf.conf give the same names (they would not under
 # `makepkg -e` or `-R` with another environment, or after a CUDA upgrade),
 # and says what to pass.
-# Every other field of `makepkg --printsrcinfo` is the same for any inputs.
+# Every other field of `makepkg --printsrcinfo` is the same for any inputs,
+# but makedepends: with migraphx in ORTF_EPS it adds migraphx and
+# hip-runtime-amd (no other build pulls in ROCm).
 #   ORTF_EPS           execution providers, space- or comma-separated, from
-#                      cuda, tensorrt, openvino; or `cpu` alone for a CPU-only
-#                      build (default: "cuda tensorrt openvino"). tensorrt
-#                      needs cuda. The CPU provider is always built.
+#                      cuda, tensorrt, openvino, migraphx; or `cpu` alone for
+#                      a CPU-only build (default: "cuda tensorrt openvino").
+#                      tensorrt needs cuda; migraphx (AMD GPUs, untested on
+#                      AMD hardware) stands alone or joins the others
+#                      (untested together). The CPU provider is always
+#                      built.
 #   ORTF_CUDA_ARCHS    CUDA architectures (CMAKE_CUDA_ARCHITECTURES): a
 #                      preset, or a list such as 120, sm_120 or "89 120"
 #                      (default: 120, the RTX 50 series). The presets
@@ -174,19 +197,32 @@
 #                                     # (-d: no CUDA, TensorRT or OpenVINO);
 #                                     # it makes onnxruntime-core (and the
 #                                     # Python package) only
+#   ORTF_EPS=migraphx makepkg -d -f   # AMD GPUs only: onnxruntime-core,
+#                                     # onnxruntime-provider-migraphx (and
+#                                     # the Python package). makedepends
+#                                     # lists cuda, cudnn and openvino for
+#                                     # every build, so -s would install
+#                                     # them too: install migraphx and
+#                                     # hip-runtime-amd first, and -d skips
+#                                     # the check (prepare() still checks
+#                                     # the ROCm install)
+#   ORTF_EPS='cuda tensorrt openvino migraphx' MAKEFLAGS=-j8 makepkg -s -f
+#                                     # every provider (untested together)
 # Install the packages of one build with one pacman transaction, naming
 # its files: a glob such as ./*onnxruntime-*-1.29.0-2-* also picks up the
 # packages an earlier build with other inputs left in this directory (e.g.
 # onnxruntime-provider-cuda13-rtx beside -cuda13-sm120, which conflict, and
 # the transaction fails). makepkg writes them as
-# <name>-1.29.0-3-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
+# <name>-1.29.0-4-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
 # (.pkg.tar.zst on Arch); PKGDEST=/an/empty/directory makepkg ... keeps one
 # build's packages apart. For the default build:
-#   sudo pacman -U onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-cuda13-sm120-1.29.0-3-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-tensorrt-cuda13-1.29.0-3-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-openvino-1.29.0-3-x86_64.pkg.tar.zst \
-#     python-onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst
+#   sudo pacman -U onnxruntime-core-1.29.0-4-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-cuda13-sm120-1.29.0-4-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-tensorrt-cuda13-1.29.0-4-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-openvino-1.29.0-4-x86_64.pkg.tar.zst \
+#     python-onnxruntime-core-1.29.0-4-x86_64.pkg.tar.zst
+# (with migraphx in ORTF_EPS, also
+# onnxruntime-provider-migraphx-1.29.0-4-x86_64.pkg.tar.zst).
 # Upgrading from 1.29.0-1, the single onnxruntime-full (and its
 # python-onnxruntime-full) of this recipe's first, unsplit version:
 # onnxruntime-core has replaces=(onnxruntime-full) and
@@ -224,9 +260,11 @@
 pkgbase=onnxruntime-split
 
 # Where the vendor installs are looked for (Arch's cuda, cudnn and openvino
-# packages; a local TensorRT package). Variables, so that the tests can
-# point them at a fixture.
+# packages; a local TensorRT package; Arch's migraphx and hip-runtime-amd,
+# under the ROCm root). Variables, so that the tests can point them at a
+# fixture.
 _ortf_cuda_home=/opt/cuda
+_ortf_rocm_home=/opt/rocm
 _ortf_cudnn_home=/usr
 _ortf_openvino_cmake_dir=/usr/lib/cmake
 _ortf_tensorrt_default=/opt/nvidia/tensorrt
@@ -336,6 +374,7 @@ _ortf_pkgnames() {
   [[ $eps != *' cuda '* ]] || names+=" onnxruntime-provider-cuda$4-$sfx"
   [[ $eps != *' tensorrt '* ]] || names+=" onnxruntime-provider-tensorrt-cuda$4"
   [[ $eps != *' openvino '* ]] || names+=" onnxruntime-provider-openvino"
+  [[ $eps != *' migraphx '* ]] || names+=" onnxruntime-provider-migraphx"
   [[ $3 == 0 ]] || names+=" python-onnxruntime-core"
   printf '%s\n' "$names"
 }
@@ -356,7 +395,10 @@ pkgver=1.29.0
 # 3: the TensorRT provider package depends on tensorrt (the AUR's, or
 # nvidia-tensorrt-sdk-local, which provides it) and has /opt/nvidia/tensorrt/lib
 # in its RUNPATH.
-pkgrel=3
+# 4: adds onnxruntime-provider-migraphx; onnxruntime-core's and
+# python-onnxruntime-core's optdepends name it, and the MIGraphX package links
+# its provider library into the Python module's capi directory.
+pkgrel=4
 # Each package sets its own; this one is the pkgbase's (and onnxruntime-core's).
 pkgdesc='Cross-platform inference engine for ONNX models: the C and C++ library with the CPU execution provider'
 arch=('x86_64')
@@ -380,6 +422,16 @@ makedepends=(
   'cuda' 'cudnn'
   'openvino'
 )
+# ROCm only when ORTF_EPS (from the environment, as for pkgname: the names
+# it gave above) selects migraphx: its install runs to GiB, and no other
+# build needs it. migraphx
+# brings MIGraphX's CMake package and headers, hip-runtime-amd HIP's (the
+# provider's find_package(hip)); never rocm-hip-sdk, which the provider
+# does not need. Whether the build needs more (rocm-cmake, a package
+# providing further HIP headers) is unverified until a trial build
+# hip-config.cmake may also need rocm-llvm, rocm-device-libs or rocm-cmake at
+# configure time (unverified until a trial build).
+[[ " ${_ortf_pkgname[*]} " != *' onnxruntime-provider-migraphx '* ]] || makedepends+=('migraphx' 'hip-runtime-amd')
 # !lto: link-time optimisation of the CUDA provider costs hours and many
 # GiB of RAM (upstream's releases are not LTO builds); !debug: the CUDA
 # provider's debug information alone runs to GiB.
@@ -475,6 +527,10 @@ _ortf_lib_pkg() {
     libcudnn*) printf 'cudnn\n' ;;
     libnvinfer* | libnvonnxparser) printf '%s\n' "${2:-a TensorRT package}" ;;
     libopenvino*) printf 'openvino\n' ;;
+    # Arch's ROCm, under /opt/rocm/lib: MIGraphX's libraries are migraphx's,
+    # the HIP runtime is hip-runtime-amd's.
+    libmigraphx*) printf 'migraphx\n' ;;
+    libamdhip64) printf 'hip-runtime-amd\n' ;;
     # oneTBB's own package (not openvino's, which only depends on it): a
     # provider that links libtbb depends on onetbb itself.
     libtbb*) printf 'onetbb\n' ;;
@@ -482,20 +538,26 @@ _ortf_lib_pkg() {
 }
 
 # _ortf_lib_depends <package> <label> <tensorrt package> [<CUDA major>]
-# [<TensorRT version>] [<cuDNN major>]: reads the DT_NEEDED entries of a library of
+# [<TensorRT version>] [<cuDNN major>] [<libmigraphx_c major>]
+# [<libamdhip64 major>]: reads the DT_NEEDED entries of a library of
 # <package> on stdin and checks that each one maps (_ortf_lib_pkg) to
 # <package> itself or to a package in depends (the caller's array); prints
 # the version bounds to add to depends, one per line, from the major
 # version in the soname: libcudart.so.N gives cuda>=N and cuda<N+1,
 # libcudnn.so.N cudnn's (the CUDA provider has no such NEEDED entry: its cudnn
-# bound is the recorded one). TensorRT, openvino and python get their bounds
-# from the installed versions prepare() recorded instead
-# (_ortf_minor_bounds): a soname major is too coarse for TensorRT, and
-# openvino's soname (libopenvino.so.2641) is no package version. With
+# bound is the recorded one). TensorRT, openvino, python, migraphx and
+# hip-runtime-amd get their bounds from the installed versions prepare()
+# recorded instead (_ortf_minor_bounds, _ortf_major_bounds): a soname major
+# is too coarse for TensorRT, openvino's soname (libopenvino.so.2641) is no
+# package version, and ROCm's sonames outlast its majors (libamdhip64.so.7
+# and libmigraphx_c.so.3 in ROCm 7.2 and 10.1 alike). With
 # <CUDA major>, a libcudart.so.N must have N equal to it, the major the
 # package names carry; with <TensorRT version>, a libnvinfer.so.N must have
 # its major, and with <cuDNN major>, a libcudnn.so.N must have N equal to
-# it (the one the CUDA package is bounded to, _ortf_check_libs). Returns 1
+# it (the one the CUDA package is bounded to, _ortf_check_libs); with
+# <libmigraphx_c major> and <libamdhip64 major>, a libmigraphx_c.so.N and a
+# libamdhip64.so.N must have the N of the library prepare() found in
+# $_ortf_rocm_home/lib (the one the build linked). Returns 1
 # with a message on stderr, prefixed <label>, for a
 # library mapped to no package, for one whose package is not in depends
 # (the library of another engine, such as libnvinfer in the CUDA provider,
@@ -515,6 +577,7 @@ _ortf_lib_pkg() {
 # bound needs a rebuild (pkgrel bump); until then pacman refuses it.
 _ortf_lib_depends() {
   local self=$1 label=$2 trt=$3 cuda_major=${4:-} trt_major=${5:-} cudnn_major=${6:-} soname pkg dep major bad=0
+  local migraphx_major=${7:-} hip_major=${8:-}
   local -a have=() bounds=()
   trt_major=${trt_major#*:}
   trt_major=${trt_major%%.*}
@@ -534,7 +597,18 @@ _ortf_lib_depends() {
       continue
     fi
     major=''
-    [[ ! $soname =~ ^lib(cudart|cudnn|nvinfer)[.]so[.]([0-9]+) ]] || major=${BASH_REMATCH[2]}
+    [[ ! $soname =~ ^lib(cudart|cudnn|nvinfer|migraphx_c|amdhip64)[.]so[.]([0-9]+) ]] || major=${BASH_REMATCH[2]}
+    # ROCm: the soname is checked, and gives no bound (the package's
+    # version does, _ortf_package_provider).
+    if [[ $soname == libmigraphx_c.so* || $soname == libamdhip64.so* ]]; then
+      local want=$migraphx_major what=libmigraphx_c key=ORTF_MIGRAPHX_SONAME_MAJOR
+      [[ $soname != libamdhip64.so* ]] || want=$hip_major what=libamdhip64 key=ORTF_HIP_SONAME_MAJOR
+      if [[ -n $want && $major != "$want" ]]; then
+        echo "$label: $soname is not $what.so.$want, the one the build linked ($key)" >&2
+        bad=1
+      fi
+      continue
+    fi
     if [[ -n $cuda_major && $soname == libcudart.so.* && $major != "$cuda_major" ]]; then
       echo "$label: $soname is CUDA ${major:-?}, the package names say CUDA $cuda_major (ORTF_CUDA_MAJOR)" >&2
       bad=1
@@ -575,6 +649,49 @@ _ortf_minor_bounds() {
   fi
   printf '%s\n' "$name>=$epoch${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" \
     "$name<$epoch${BASH_REMATCH[1]}.$((10#${BASH_REMATCH[2]} + 1))"
+}
+
+# _ortf_major_bounds <name> <version>: prints the dependencies that hold
+# <name> to the major of <version> ([epoch:]A[.B...][-pkgrel]), one per
+# line: 7.2.3-7 gives <name>>=7 and <name><8, 10.1-1 <name>>=10 and
+# <name><11 (pacman's vercmp orders 7.2.3-7 between the two). Returns 1
+# with a message on stderr when <version> has no numeric major.
+_ortf_major_bounds() {
+  local name=$1 v=$2 epoch=''
+  if [[ $v == *:* ]]; then epoch=${v%%:*}: v=${v#*:}; fi
+  if [[ ! $v =~ ^([0-9]+)([.+_-]|$) ]]; then
+    echo "$name: version '$2' has no numeric major to bound the dependency with" >&2
+    return 1
+  fi
+  printf '%s\n' "$name>=$epoch${BASH_REMATCH[1]}" "$name<$epoch$((10#${BASH_REMATCH[1]} + 1))"
+}
+
+# _ortf_rocm_soname_major <library>: prints the soname major N of
+# $_ortf_rocm_home/lib/<library>.so.N, the library the MIGraphX provider
+# links (libmigraphx_c, libamdhip64), from the file names there (each
+# library's runtime link, .so.N, and its .so.N.M... files, whose N counts
+# too). Returns 1 with a
+# message on stderr when there is none, or more than one major.
+_ortf_rocm_soname_major() {
+  local f n found=''
+  for f in "$_ortf_rocm_home/lib/$1".so.*; do
+    [[ -e $f || -L $f ]] || continue
+    # .so.N and .so.N.x.y alike: a stale .so.6.x.y without its .so.6 link
+    # still counts as a ROCm there.
+    if [[ ${f##*/} =~ ^$1[.]so[.]([0-9]+)([.].*)?$ ]]; then
+      n=${BASH_REMATCH[1]}
+      if [[ -n $found && $found != "$n" ]]; then
+        echo "migraphx: $_ortf_rocm_home/lib has $1.so.$found and $1.so.$n: one ROCm, please" >&2
+        return 1
+      fi
+      found=$n
+    fi
+  done
+  if [[ -z $found ]]; then
+    echo "migraphx: no $_ortf_rocm_home/lib/$1.so.N (install migraphx and hip-runtime-amd)" >&2
+    return 1
+  fi
+  printf '%s\n' "$found"
 }
 
 # _ortf_tensorrt_version <NvInferVersion.h>: prints the TensorRT version
@@ -687,14 +804,15 @@ _ortf_jobs() {
 _ortf_resolve() {
   local out=$1 _ortf_val _ortf_src w
   local -a words lines=()
-  local cpu=0 cuda=0 trt=0 ov=0 eps archs='' python=0 python_exe='' nvcc_threads ccache='' jobs
+  local cpu=0 cuda=0 trt=0 ov=0 mgx=0 eps archs='' python=0 python_exe='' nvcc_threads ccache='' jobs
   local trt_home='' trt_libdir='' host_cxx='' cuda_major='' cudnn_major='' cudnn_src nvcc_out cudnn_version
   local trt_version='' trt_installed='' ov_version='' python_version='' bounds rc
+  local mgx_version='' hip_version='' mgx_soname='' hip_soname=''
 
   _ortf_pick ORTF_EPS 'cuda tensorrt openvino'
   read -ra words <<<"${_ortf_val//,/ }"
   if ((${#words[@]} == 0)); then
-    echo "ORTF_EPS: empty; give cpu, or some of cuda, tensorrt, openvino" >&2
+    echo "ORTF_EPS: empty; give cpu, or some of cuda, tensorrt, openvino, migraphx" >&2
     return 1
   fi
   for w in "${words[@]}"; do
@@ -703,10 +821,13 @@ _ortf_resolve() {
       cuda) cuda=1 ;;
       tensorrt) trt=1 ;;
       openvino) ov=1 ;;
-      *) echo "ORTF_EPS: unknown provider '$w' (known: cpu, cuda, tensorrt, openvino)" >&2; return 1 ;;
+      # Alone or with the others: nothing in ONNX Runtime's CMake excludes
+      # the combination (untested together, and on AMD hardware).
+      migraphx) mgx=1 ;;
+      *) echo "ORTF_EPS: unknown provider '$w' (known: cpu, cuda, tensorrt, openvino, migraphx)" >&2; return 1 ;;
     esac
   done
-  if ((cpu && cuda + trt + ov > 0)); then
+  if ((cpu && cuda + trt + ov + mgx > 0)); then
     echo "ORTF_EPS: cpu stands alone (the CPU provider is always built); drop it or the others" >&2
     return 1
   fi
@@ -719,6 +840,7 @@ _ortf_resolve() {
   ((cuda)) && eps+=' cuda'
   ((trt)) && eps+=' tensorrt'
   ((ov)) && eps+=' openvino'
+  ((mgx)) && eps+=' migraphx'
   eps=${eps# }
   lines+=("ORTF_EPS=$eps ($_ortf_src)")
 
@@ -919,6 +1041,36 @@ _ortf_resolve() {
     lines+=("openvino $ov_version (installed, so ${bounds//$'\n'/ })")
   fi
 
+  if ((mgx)); then
+    # The CMake packages the provider's find_package(hip) and
+    # find_package(migraphx) look for under the ROCm root.
+    for w in migraphx hip; do
+      if [[ ! -f $_ortf_rocm_home/lib/cmake/$w/$w-config.cmake && ! -f $_ortf_rocm_home/lib/cmake/$w/${w}Config.cmake ]]; then
+        echo "migraphx: no $_ortf_rocm_home/lib/cmake/$w/$w-config.cmake (install migraphx and hip-runtime-amd)" >&2
+        return 1
+      fi
+    done
+    # The MIGraphX provider depends on the major of the migraphx and
+    # hip-runtime-amd it was built with: the package versions, as the
+    # sonames stay across ROCm majors (libamdhip64.so.7 in ROCm 7.2 and
+    # 10.1). The sonames found here are what package() checks the
+    # provider's NEEDED entries against.
+    if ! mgx_version=$(_ortf_installed_version migraphx) || [[ -z $mgx_version ]]; then
+      echo "migraphx: no version recorded for migraphx (pacman -Qi migraphx gives none), which bounds the MIGraphX provider package's dependency: install migraphx and hip-runtime-amd" >&2
+      return 1
+    fi
+    if ! hip_version=$(_ortf_installed_version hip-runtime-amd) || [[ -z $hip_version ]]; then
+      echo "migraphx: no version recorded for hip-runtime-amd (pacman -Qi hip-runtime-amd gives none), which bounds the MIGraphX provider package's dependency: install migraphx and hip-runtime-amd" >&2
+      return 1
+    fi
+    mgx_soname=$(_ortf_rocm_soname_major libmigraphx_c) || return 1
+    hip_soname=$(_ortf_rocm_soname_major libamdhip64) || return 1
+    bounds=$(_ortf_major_bounds migraphx "$mgx_version") || return 1
+    w=$(_ortf_major_bounds hip-runtime-amd "$hip_version") || return 1
+    bounds+=$'\n'$w
+    lines+=("migraphx $mgx_version, hip-runtime-amd $hip_version (installed; $_ortf_rocm_home/lib: libmigraphx_c.so.$mgx_soname, libamdhip64.so.$hip_soname; so ${bounds//$'\n'/ })")
+  fi
+
   _ortf_pick ORTF_PYTHON 1
   case $_ortf_val in
     0 | 1) python=$_ortf_val ;;
@@ -973,6 +1125,10 @@ _ortf_resolve() {
     printf 'ORTF_TENSORRT_LIBDIR=%s\n' "$trt_libdir"
     printf 'ORTF_TENSORRT_VERSION=%s\n' "$trt_version"
     printf 'ORTF_OPENVINO_VERSION=%s\n' "$ov_version"
+    printf 'ORTF_MIGRAPHX_VERSION=%s\n' "$mgx_version"
+    printf 'ORTF_HIP_VERSION=%s\n' "$hip_version"
+    printf 'ORTF_MIGRAPHX_SONAME_MAJOR=%s\n' "$mgx_soname"
+    printf 'ORTF_HIP_SONAME_MAJOR=%s\n' "$hip_soname"
     printf 'ORTF_PYTHON=%s\n' "$python"
     printf 'ORTF_PYTHON_EXE=%s\n' "$python_exe"
     printf 'ORTF_PYTHON_VERSION=%s\n' "$python_version"
@@ -1237,6 +1393,14 @@ build() {
     # (CPU, GPU, NPU, AUTO:...) picks it per session.
     args+=(-Donnxruntime_USE_OPENVINO=ON)
   fi
+  if _ortf_has migraphx; then
+    # Host C++ only, and no GPU architecture is fixed at build time:
+    # MIGraphX compiles each model for the GPU it finds at run time. ONNX
+    # Runtime 1.29 has no ROCm provider, so Arch's HIP architecture, HIP
+    # flag, NCCL/RCCL, composable-kernel and ROCM_HOME settings would be
+    # inert here and are not passed.
+    args+=(-Donnxruntime_USE_MIGRAPHX=ON -Donnxruntime_MIGRAPHX_HOME="$_ortf_rocm_home")
+  fi
   args+=(-DCMAKE_C_COMPILER="$cc" -DCMAKE_CXX_COMPILER="$cxx")
   if [[ -n $ccache ]]; then
     args+=(-DCMAKE_C_COMPILER_LAUNCHER="$ccache" -DCMAKE_CXX_COMPILER_LAUNCHER="$ccache")
@@ -1273,9 +1437,12 @@ _ortf_licenses() {
 # *.so or *.so.*; links are checked as their targets) against its depends
 # (_ortf_lib_depends), and adds the cuda bounds they give, and the cudnn
 # ones of the recorded cuDNN major, to depends, each once. Fails on any library whose package is not in
-# depends.
+# depends. A package that depends on migraphx or hip-runtime-amd has its
+# libmigraphx_c and libamdhip64 sonames checked against the majors
+# prepare() found (ORTF_MIGRAPHX_SONAME_MAJOR, ORTF_HIP_SONAME_MAJOR).
 _ortf_check_libs() {
   local trt=${1:-} cuda_major cudnn_major='' trt_version='' lib needed bounds b bad=0
+  local mgx_soname='' hip_soname='' key
   local -a libs found=()
   # The CUDA major the names carry, and the TensorRT version prepare()
   # recorded: the libcudart and libnvinfer linked must be of these.
@@ -1292,12 +1459,21 @@ _ortf_check_libs() {
       return 1
     fi
   fi
+  for key in migraphx:ORTF_MIGRAPHX_SONAME_MAJOR hip-runtime-amd:ORTF_HIP_SONAME_MAJOR; do
+    [[ " ${depends[*]} " == *" ${key%%:*} "* ]] || continue
+    b=$(_ortf_get "${key#*:}") || return 1
+    if [[ ! $b =~ ^[0-9]+$ ]]; then
+      echo "ortf.conf: ${key#*:} is '$b', not a soname major (run makepkg without -e, so that prepare() runs)" >&2
+      return 1
+    fi
+    if [[ ${key%%:*} == migraphx ]]; then mgx_soname=$b; else hip_soname=$b; fi
+  done
   mapfile -t libs < <(find "$pkgdir" -type f \( -name '*.so' -o -name '*.so.*' \) | LC_ALL=C sort)
   for lib in "${libs[@]}"; do
     needed=$(_ortf_needed "$lib") || return 1
     echo "${lib##*/} needs: ${needed//$'\n'/ }"
     if ! bounds=$(_ortf_lib_depends "${pkgname[0]}" "${pkgname[0]}: ${lib##*/}" "$trt" "$cuda_major" \
-      "$trt_version" "$cudnn_major" <<<"$needed"); then
+      "$trt_version" "$cudnn_major" "$mgx_soname" "$hip_soname" <<<"$needed"); then
       bad=1
       continue
     fi
@@ -1310,9 +1486,10 @@ _ortf_check_libs() {
   done
 }
 
-# _ortf_recorded_bounds <ortf.conf key> <package>: prints the major.minor
-# bounds on <package> from the installed version prepare() recorded under
-# <key> (_ortf_minor_bounds).
+# _ortf_recorded_bounds <ortf.conf key> <package> [major]: prints the
+# major.minor bounds on <package> from the installed version prepare()
+# recorded under <key> (_ortf_minor_bounds); with major, the major bounds
+# (_ortf_major_bounds).
 _ortf_recorded_bounds() {
   local version
   version=$(_ortf_get "$1") || return 1
@@ -1320,7 +1497,11 @@ _ortf_recorded_bounds() {
     echo "ortf.conf: $1 is empty (run makepkg without -e, so that prepare() runs)" >&2
     return 1
   fi
-  _ortf_minor_bounds "$2" "$version"
+  if [[ ${3:-} == major ]]; then
+    _ortf_major_bounds "$2" "$version"
+  else
+    _ortf_minor_bounds "$2" "$version"
+  fi
 }
 
 package_onnxruntime-core() {
@@ -1337,6 +1518,7 @@ package_onnxruntime-core() {
     'onnxruntime-provider-cuda: the CUDA execution provider'
     'onnxruntime-provider-tensorrt: the TensorRT execution provider'
     'onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)'
+    'onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs, untested)'
   )
   provides=("onnxruntime=$pkgver" 'libonnxruntime.so')
   # onnxruntime-full: this recipe's unsplit 1.29.0-1, which held every
@@ -1397,9 +1579,9 @@ package_onnxruntime-core() {
 # _ortf_package_provider <provider>: writes the package of
 # libonnxruntime_providers_<provider>.so, from the stage onnxruntime-core's
 # package() installed, and adds the version bounds of its vendor runtimes
-# to depends: TensorRT's and openvino's from the versions prepare()
-# recorded, cuda's from the sonames and cudnn's from the build-time cuDNN
-# (_ortf_check_libs). The
+# to depends: TensorRT's, openvino's, migraphx's and hip-runtime-amd's from
+# the versions prepare() recorded, cuda's from the sonames and cudnn's from
+# the build-time cuDNN (_ortf_check_libs). The
 # caller has set depends.
 _ortf_package_provider() {
   local ep=$1 name=libonnxruntime_providers_$1.so lib trt='' trt_home trt_libdir runpath bounds rpath
@@ -1452,8 +1634,30 @@ _ortf_package_provider() {
     bounds=$(_ortf_recorded_bounds ORTF_OPENVINO_VERSION openvino) || return 1
     mapfile -t -O "${#depends[@]}" depends <<<"$bounds"
   fi
+  if [[ $ep == migraphx ]]; then
+    # By the package versions' major, not the sonames' (the top of the
+    # file): libamdhip64.so.7 is also ROCm 10.1's.
+    bounds=$(_ortf_recorded_bounds ORTF_MIGRAPHX_VERSION migraphx major) || return 1
+    mapfile -t -O "${#depends[@]}" depends <<<"$bounds"
+    bounds=$(_ortf_recorded_bounds ORTF_HIP_VERSION hip-runtime-amd major) || return 1
+    mapfile -t -O "${#depends[@]}" depends <<<"$bounds"
+  fi
 
   _ortf_check_libs "$trt" || return 1
+  if [[ $ep == migraphx ]]; then
+    # _ortf_check_libs checks the majors of the sonames a library has; the
+    # provider must link both, or a build that linked neither would pass.
+    local want_lib want_key want_major needed
+    needed=$(_ortf_needed "$lib") || return 1
+    for want_lib in libmigraphx_c:ORTF_MIGRAPHX_SONAME_MAJOR libamdhip64:ORTF_HIP_SONAME_MAJOR; do
+      want_key=${want_lib#*:} want_lib=${want_lib%%:*}
+      want_major=$(_ortf_get "$want_key") || return 1
+      if ! grep -qxF -- "$want_lib.so.$want_major" <<<"$needed"; then
+        echo "$name: $want_lib.so.$want_major ($want_key) is not in its NEEDED entries (${needed//$'\n'/ })" >&2
+        return 1
+      fi
+    done
+  fi
   echo "${pkgname[0]} depends: ${depends[*]}"
 
   _ortf_licenses
@@ -1512,6 +1716,35 @@ package_onnxruntime-provider-openvino() {
   _ortf_package_provider openvino
 }
 
+# The MIGraphX package (AMD GPUs; built and checked here, never run on AMD
+# hardware). Its library is host C++ only (no per-GPU code, so no suffix):
+# MIGraphX compiles each model for the GPU it finds at run time, with the
+# GPU kernels of Arch's ROCm libraries it depends on. migraphx and
+# hip-runtime-amd are what it links (libmigraphx_c, libamdhip64), never
+# rocm-hip-sdk; their bounds on the major of the installed package
+# versions are added at package time (_ortf_package_provider). Like the
+# OpenVINO package, it provides nothing: its own name is the one the
+# optdepends use.
+package_onnxruntime-provider-migraphx() {
+  pkgdesc='The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)'
+  depends=("onnxruntime-core=$pkgver-$pkgrel" 'glibc' 'libgcc' 'libstdc++' 'migraphx' 'hip-runtime-amd')
+  _ortf_package_provider migraphx
+  # The wheel of a migraphx build has no MIGraphX provider library
+  # (upstream's setup.py bundles it only with --use_migraphx), so the Python
+  # module could not load that provider. This package therefore links its
+  # own library into the module's capi directory, where the module looks for
+  # its providers, when the build also makes python-onnxruntime-core. The
+  # link points at this package's own file, so it never dangles. No python
+  # in depends: without python the link is inert.
+  if [[ " ${_ortf_pkgname[*]} " == *' python-onnxruntime-core '* ]]; then
+    local site
+    site=$(_ortf_py_site "$_ortf_system_python") || return 1
+    install -d -- "$pkgdir$site/onnxruntime/capi"
+    ln -sf -- /usr/lib/libonnxruntime_providers_migraphx.so \
+      "$pkgdir$site/onnxruntime/capi/libonnxruntime_providers_migraphx.so"
+  fi
+}
+
 package_python-onnxruntime-core() {
   pkgdesc='The Python module of ONNX Runtime, the cross-platform inference engine for ONNX models (onnxruntime-core)'
   # import onnxruntime needs numpy (onnxruntime/__init__.py and
@@ -1528,6 +1761,7 @@ package_python-onnxruntime-core() {
     'onnxruntime-provider-cuda: the CUDA execution provider'
     'onnxruntime-provider-tensorrt: the TensorRT execution provider'
     'onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)'
+    'onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs, untested)'
     'python-onnx: the quantization, transformers optimisation and model tools'
     'python-ml-dtypes: 4-bit and float8 quantization (the wheel'"'"'s quantization extra)'
     'python-sympy: symbolic shape inference (onnxruntime.tools)'
@@ -1582,7 +1816,17 @@ package_python-onnxruntime-core() {
   # against the package directory makepkg already wrote it to (this
   # package comes last). The link of a provider whose package is not
   # installed dangles; ONNX Runtime then reports that the provider library
-  # failed to load, and the other providers still work.
+  # failed to load, and the other providers still work. Upstream's setup.py
+  # puts libonnxruntime_providers_migraphx.so into the wheel only when run
+  # with --use_migraphx (which leaves the TensorRT one out), so the wheel of
+  # a migraphx build has no MIGraphX provider library: the MIGraphX package
+  # itself links its library into this directory (package_onnxruntime-
+  # provider-migraphx). (On Linux, setup.py copies no ROCm library into the
+  # wheel either.) Should a wheel ever carry that library, this package
+  # drops it, so that the two packages never own the same path.
+  if [[ " ${_ortf_pkgname[*]} " == *' onnxruntime-provider-migraphx '* ]]; then
+    rm -f -- "$pkgdir$site"/onnxruntime/capi/libonnxruntime_providers_migraphx.so
+  fi
   for lib in "$pkgdir$site"/onnxruntime/capi/libonnxruntime.so* \
     "$pkgdir$site"/onnxruntime/capi/libonnxruntime_providers_*.so; do
     [[ -e $lib ]] || continue

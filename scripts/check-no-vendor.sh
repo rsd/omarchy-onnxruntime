@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The licence guard: fails when a file that must never be committed is about
-# to be. This repository holds recipes only; nothing NVIDIA or Intel ships
+# to be. This repository holds recipes only; nothing NVIDIA, Intel or AMD ships
 # (libraries, headers, archives, wheels, packages, models, engine caches,
 # licence documents) and no build output may enter it.
 #
@@ -24,15 +24,16 @@
 #     .dll), packages and archives (.pkg.tar*, .tar*, .tgz, .zip, .deb,
 #     .rpm, .whl), models and engine caches (.onnx, .engine, .trt, .plan,
 #     .trtpkg, .cubin, .fatbin, .blob, .bin, which includes OpenVINO IR
-#     weights), PDFs, logs, TensorRT, cuDNN, CUDA and OpenVINO headers, a
-#     TensorRT-<version>/ or OpenVINO toolkit directory, a CUDA targets/
-#     tree, build output or makepkg's work directories and sources;
+#     weights), PDFs, logs, TensorRT, cuDNN, CUDA, OpenVINO, MIGraphX and
+#     HIP headers, a TensorRT-<version>/ or OpenVINO toolkit directory, a
+#     CUDA targets/ tree, an opt/rocm/ tree, build output or makepkg's work
+#     directories and sources;
 #   - it is a submodule (gitlink), or, in --all, a nested repository;
 #   - it is a symbolic link whose target is absolute or leaves the repository;
 #   - its content is larger than 1 MiB, starts with a binary or archive magic
 #     number (ELF, gzip, zip, PDF, xz, zstd, bzip2, ar, POSIX tar), has a NUL
 #     byte in its first 8 KiB, or carries a marker of a vendor file: an
-#     NVIDIA or Intel copyright line, a vendor licence agreement's title on
+#     NVIDIA, Intel or AMD copyright line, a vendor licence agreement's title on
 #     a line of its own, or the root element of an OpenVINO IR model (.xml).
 # Staged and committed content is read from the object database with git
 # cat-file (read-only), so what is checked is what would be committed or
@@ -92,6 +93,13 @@ path_reason() {
             echo "NVIDIA header"; return ;;
         openvino.hpp | ie_core.hpp | inference_engine.hpp)
             echo "OpenVINO header"; return ;;
+        migraphx.h | migraphx.hpp)
+            echo "MIGraphX header"; return ;;
+        hip_runtime*.h | hip_version.h | hiprtc.h | amd_hip_*.h)
+            echo "HIP header"; return ;;
+        # hipblas*.h covers hipblaslt*.h.
+        rocblas*.h | rocm_version.h | hipblas*.h | miopen*.h)
+            echo "ROCm library header"; return ;;
     esac
 
     # Binary, package, model and archive extensions (case-insensitive).
@@ -113,6 +121,11 @@ path_reason() {
     # Vendor trees: any directory component.
     case /${path,,}/ in
         */openvino/*.hpp/ | */openvino/*.h/) echo "OpenVINO header"; return ;;
+        */migraphx/*.hpp/ | */migraphx/*.h/) echo "MIGraphX header"; return ;;
+        */include/hip/*.h/ | */include/hip/*.hpp/) echo "HIP header"; return ;;
+        */rocblas/*.h/ | */miopen/*.h/ | */hipblas/*.h/ | */hipblaslt/*.h/ | */rocm/*.h/)
+            echo "ROCm library header"; return ;;
+        */opt/rocm/*) echo "ROCm tree"; return ;;
         */targets/x86_64-linux/*) echo "CUDA toolkit tree"; return ;;
     esac
     rest=''
@@ -160,8 +173,8 @@ link_reason() {
 hex() { od -An -v -tx1 | tr -d ' \n'; }
 
 # Text that marks a vendor file under any name (extended regular
-# expressions, matched case-insensitively): copyright lines of NVIDIA and
-# Intel headers, sources and licence files; a vendor licence agreement's
+# expressions, matched case-insensitively): copyright lines of NVIDIA,
+# Intel and AMD headers, sources and licence files; a vendor licence agreement's
 # title on a line of its own (prose that names the agreement is fine); the
 # root element of an OpenVINO IR model. The bracketed spaces keep this
 # script from matching its own patterns.
@@ -169,6 +182,7 @@ markers=(
     -e 'copyright.*nvidia[ ]corporation'
     -e 'nvidia[ ]corporation.*all[ ]rights[ ]reserved'
     -e 'copyright.*intel[ ]corporation'
+    -e 'copyright.*advanced[ ]micro[ ]devices'
     -e '^[[:space:]]*nvidia[ ]software[ ]license[ ]agreement[[:space:]]*$'
     -e '^[[:space:]]*(nvidia[ ])?tensorrt[ ]license[ ]agreement[[:space:]]*$'
     -e '^[[:space:]]*(nvidia[ ])?(cudnn|cuda)[ ](supplement[ ]to[ ])?(software[ ])?license[ ]agreement[[:space:]]*$'
@@ -305,7 +319,7 @@ case $mode in
 esac
 
 if ((failures > 0)); then
-    echo "This repository holds recipes only; NVIDIA and Intel files must never be committed (README, licence rules)." >&2
+    echo "This repository holds recipes only; NVIDIA, Intel and AMD files must never be committed (README, licence rules)." >&2
     exit 1
 fi
 echo "ok: no vendor or binary files ($mode)"

@@ -25,7 +25,7 @@ sudo pacman -S --needed base-devel git cmake ninja patchelf python python-numpy 
 sudo pacman -S --needed ccache
 ```
 
-The PKGBUILD's `makedepends` also lists `cuda`, `cudnn` and `openvino`, because the default build has the CUDA, TensorRT and OpenVINO providers. TensorRT is not listed; see step 2.
+The PKGBUILD's `makedepends` also lists `cuda`, `cudnn` and `openvino`, because the default build has the CUDA, TensorRT and OpenVINO providers. TensorRT is not listed; see step 2. With `migraphx` in `ORTF_EPS` it also lists `migraphx` and `hip-runtime-amd`.
 
 Runtimes. Install the ones for the engines you build and use (vendor licences apply: see the [README](../README.md#licence-and-personal-use)):
 
@@ -35,9 +35,12 @@ sudo pacman -S --needed nvidia-utils cuda cudnn
 
 # OpenVINO provider: CPU, Intel GPU and Intel NPU devices
 sudo pacman -S --needed openvino openvino-intel-gpu-plugin openvino-intel-npu-plugin intel-compute-runtime level-zero-loader intel-npu-driver
+
+# MIGraphX provider (AMD GPUs; untested on AMD hardware, built only with ORTF_EPS=migraphx)
+sudo pacman -S --needed migraphx hip-runtime-amd
 ```
 
-`nvidia-utils` is the NVIDIA driver's user-space part; you need it at run time, not to build. The provider packages depend on these runtimes: `onnxruntime-provider-cuda<M>-<sfx>` on `cuda`, `cudnn` and `nvidia-utils`, `onnxruntime-provider-tensorrt-cuda<M>` on the same plus `tensorrt` (step 2), and `onnxruntime-provider-openvino` on `openvino`. A provider package cannot be installed without its runtimes, so install them before step 3. Their dependencies carry version bounds, so that pacman holds back a vendor upgrade that would break the provider until the packages are rebuilt ([Dependencies and version bounds](#dependencies-and-version-bounds)). The OpenVINO device plugins and drivers (`openvino-intel-gpu-plugin`, `openvino-intel-npu-plugin`, `intel-compute-runtime`, `level-zero-loader`, `intel-npu-driver`) are optional dependencies of `onnxruntime-provider-openvino`, because each device needs only its own.
+`nvidia-utils` is the NVIDIA driver's user-space part; you need it at run time, not to build. The provider packages depend on these runtimes: `onnxruntime-provider-cuda<M>-<sfx>` on `cuda`, `cudnn` and `nvidia-utils`, `onnxruntime-provider-tensorrt-cuda<M>` on the same plus `tensorrt` (step 2), `onnxruntime-provider-openvino` on `openvino`, and `onnxruntime-provider-migraphx` on `migraphx` and `hip-runtime-amd`. A provider package cannot be installed without its runtimes, so install them before step 3. Their dependencies carry version bounds, so that pacman holds back a vendor upgrade that would break the provider until the packages are rebuilt ([Dependencies and version bounds](#dependencies-and-version-bounds)). The OpenVINO device plugins and drivers (`openvino-intel-gpu-plugin`, `openvino-intel-npu-plugin`, `intel-compute-runtime`, `level-zero-loader`, `intel-npu-driver`) are optional dependencies of `onnxruntime-provider-openvino`, because each device needs only its own.
 
 For the Intel NPU, check that the kernel's `intel_vpu` driver is loaded and that your user can open `/dev/accel/accel0` (look at the device's group with `ls -l /dev/accel/accel0`; on many systems it is `render`, so your user would need to be in that group). Check the Intel GPU device's render node, `/dev/dri/renderD*`, in the same way.
 
@@ -71,20 +74,20 @@ Install order: update `nvidia-tensorrt-sdk-local` to pkgrel 2 (or install the AU
 ```bash
 cd onnxruntime-split
 MAKEFLAGS=-j8 makepkg -f
-sudo pacman -U onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst \
-  onnxruntime-provider-cuda13-sm120-1.29.0-3-x86_64.pkg.tar.zst \
-  onnxruntime-provider-tensorrt-cuda13-1.29.0-3-x86_64.pkg.tar.zst \
-  onnxruntime-provider-openvino-1.29.0-3-x86_64.pkg.tar.zst \
-  python-onnxruntime-core-1.29.0-3-x86_64.pkg.tar.zst
+sudo pacman -U onnxruntime-core-1.29.0-4-x86_64.pkg.tar.zst \
+  onnxruntime-provider-cuda13-sm120-1.29.0-4-x86_64.pkg.tar.zst \
+  onnxruntime-provider-tensorrt-cuda13-1.29.0-4-x86_64.pkg.tar.zst \
+  onnxruntime-provider-openvino-1.29.0-4-x86_64.pkg.tar.zst \
+  python-onnxruntime-core-1.29.0-4-x86_64.pkg.tar.zst
 ```
 
-The install in the `pacman -U` above needs step 2 done first: the TensorRT provider package is refused until an installed package provides `tensorrt` within its bound. Packages of 1.29.0-2 are replaced by the same names at 1.29.0-3 in that one transaction.
+The install in the `pacman -U` above needs step 2 done first: the TensorRT provider package is refused until an installed package provides `tensorrt` within its bound. Packages of 1.29.0-2 or 1.29.0-3 are replaced by the same names at 1.29.0-4 in that one transaction.
 
 `makepkg` downloads the upstream source and the pinned dependencies as its sources, then builds the library once and writes one package per engine. A full build with one CUDA architecture took 27 minutes on a 24-thread machine ([build.md](build.md#parallelism-memory-and-disk)); it needs tens of GiB of disk, so choose `-jN` for your memory and read that section before the first run. If you installed `ccache` it is used automatically.
 
-Install the packages of one build in a single `pacman -U` that names the exact files. Do not use a glob such as `*onnxruntime-*-1.29.0-3-*`: it also matches packages that an earlier build with other inputs left in the directory (for example `onnxruntime-provider-cuda13-rtx` beside `-cuda13-sm120`), and two CUDA packages conflict, so the transaction fails. `makepkg` names a package `<name>-1.29.0-3-x86_64<PKGEXT>`, with `PKGEXT` from `/etc/makepkg.conf` (`.pkg.tar.zst` on Arch), and `PKGDEST=/an/empty/directory makepkg ...` keeps the packages of one build apart.
+Install the packages of one build in a single `pacman -U` that names the exact files. Do not use a glob such as `*onnxruntime-*-1.29.0-4-*`: it also matches packages that an earlier build with other inputs left in the directory (for example `onnxruntime-provider-cuda13-rtx` beside `-cuda13-sm120`), and two CUDA packages conflict, so the transaction fails. `makepkg` names a package `<name>-1.29.0-4-x86_64<PKGEXT>`, with `PKGEXT` from `/etc/makepkg.conf` (`.pkg.tar.zst` on Arch), and `PKGDEST=/an/empty/directory makepkg ...` keeps the packages of one build apart.
 
-The names above are those of the default build. A subset is fine: the core alone (`onnxruntime-core`, CPU only), the core and `onnxruntime-provider-openvino`, and so on; the core is always needed, because the others depend on it at the same version (`onnxruntime-core=<pkgver>-<pkgrel>`). The CUDA package's suffix depends on `ORTF_CUDA_ARCHS` (`-cuda13-rtx` for the preset `rtx`, `-cuda13-all` for `all`, `-cuda13-sm89-sm120` for `"89 120"`), and `<M>` in `-cuda<M>` on the CUDA toolkit that built it; [build.md](build.md#cuda-architectures) has the rules. A build with `ORTF_EPS=cpu` writes `onnxruntime-core` and the Python package only.
+The names above are those of the default build. A subset is fine: the core alone (`onnxruntime-core`, CPU only), the core and `onnxruntime-provider-openvino`, and so on; the core is always needed, because the others depend on it at the same version (`onnxruntime-core=<pkgver>-<pkgrel>`). The CUDA package's suffix depends on `ORTF_CUDA_ARCHS` (`-cuda13-rtx` for the preset `rtx`, `-cuda13-all` for `all`, `-cuda13-sm89-sm120` for `"89 120"`), and `<M>` in `-cuda<M>` on the CUDA toolkit that built it; [build.md](build.md#cuda-architectures) has the rules. A build with `ORTF_EPS=cpu` writes `onnxruntime-core` and the Python package only. With `migraphx` in `ORTF_EPS` there is also `onnxruntime-provider-migraphx-1.29.0-4-x86_64.pkg.tar.zst` to name in the `pacman -U`; for an AMD-only build use `ORTF_EPS=migraphx makepkg -d -f` after installing `migraphx` and `hip-runtime-amd` ([build.md](build.md#migraphx-amd-gpus)). This package is **untested on AMD hardware**, and the smoke test below has no MIGraphX target. `onnxruntime-core` and `python-onnxruntime-core` list it as an optional dependency, and the package installs a symlink `<site-packages>/onnxruntime/capi/libonnxruntime_providers_migraphx.so` to `/usr/lib/libonnxruntime_providers_migraphx.so`, so the Python module can load it too (only when the build also makes `python-onnxruntime-core`). That is untested on AMD hardware as well.
 
 If an Arch ONNX Runtime variant (`onnxruntime`, `onnxruntime-cuda`, `onnxruntime-opt-cuda` and so on, and their `python-` packages) is installed, pacman reports the conflict and offers to remove it; programs built against it keep working, because `onnxruntime-core` provides `onnxruntime` and `libonnxruntime.so`, and `python-onnxruntime-core` provides `python-onnxruntime`, at the same version.
 
@@ -106,6 +109,7 @@ Every package's `depends` cover what its libraries need. `package()` reads the `
 | `onnxruntime-provider-cuda<M>-<sfx>` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `cuda`, `cudnn`, `nvidia-utils` |
 | `onnxruntime-provider-tensorrt-cuda<M>` | the same, plus `onnxruntime-provider-cuda<M>=<pkgver>` and `tensorrt` (bounded as below) |
 | `onnxruntime-provider-openvino` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `openvino` |
+| `onnxruntime-provider-migraphx` (only with `migraphx` in `ORTF_EPS`; untested on AMD hardware) | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `migraphx`, `hip-runtime-amd` (bounded as below; never `rocm-hip-sdk`) |
 | `python-onnxruntime-core` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `python`, `python-numpy`, `python-flatbuffers`, `python-packaging`, `python-protobuf` |
 
 The vendor runtimes and Python carry version bounds where the ABI demands a rebuild after an upgrade:
@@ -117,6 +121,7 @@ The vendor runtimes and Python carry version bounds where the ABI demands a rebu
 | `tensorrt` | major.minor (the ABI is sensitive to the minor version) | `include/NvInferVersion.h` of the TensorRT the build used, not an installed package: no TensorRT package is needed to build, and `prepare()` warns when none provides `tensorrt` |
 | `openvino` | year.minor | the version installed when `prepare()` ran |
 | `python` | minor version | the version of the python that built the module |
+| `migraphx`, `hip-runtime-amd` | major version of the package (`migraphx` 7.2.3 gives `>=7` and `<8`) | the versions installed when `prepare()` ran, not the sonames: ROCm 7.2 and 10.1 keep `libmigraphx_c.so.3` and `libamdhip64.so.7`, so a soname bound would admit a ROCm the provider was never built against. The sonames are checked against the ones the build linked. Upgrading ROCm across a major needs a rebuild, and pacman refuses the upgrade until then |
 
 `prepare()` records those versions in `src/ortf.conf`. The bounds mean that pacman refuses a system update that would move one of these packages past what the provider was built for, instead of leaving a provider that fails to load. When Arch moves one of them past its bound, rebuild the packages (a `pkgrel` bump) against the new version. `onnxruntime-core` has no vendor bound and keeps working CPU-only whatever the vendor packages do.
 
@@ -125,7 +130,7 @@ The packages depend on each other only by names that a prebuilt package would pr
 #### Checking built packages: `scripts/check-deps.sh`
 
 ```bash
-scripts/check-deps.sh onnxruntime-split/*-1.29.0-3-x86_64.pkg.tar.zst
+scripts/check-deps.sh onnxruntime-split/*-1.29.0-4-x86_64.pkg.tar.zst
 ```
 
 The script takes package files and is read-only: it queries `pacman` and `ldconfig` and writes only under a temporary directory. For each package it unpacks, and for each ELF shared library in it, it prints every needed soname with the path it resolves to (the library's RUNPATH, a library of the package files given, then `ldconfig`'s cache), the package that owns that path with its version, and whether a dependency of the package covers that owner. It then prints every dependency of the package, the installed package (or package file given) that meets it, that package's version, and whether the version is inside the dependency's bounds (compared as `vercmp` does). The rows carry a status; these flag a problem:
@@ -134,7 +139,7 @@ The script takes package files and is read-only: it queries `pacman` and `ldconf
 |---|---|
 | `GAP` | a needed library whose owner no dependency covers, or that no package owns |
 | `UNRESOLVED` | a needed soname that resolves to no file on this system |
-| `BOUND` | an installed version outside a dependency's bounds: the vendor package (`cuda`, `cudnn`, TensorRT, `openvino`, `python`) was upgraded past what the package was built for, and a rebuild is due |
+| `BOUND` | an installed version outside a dependency's bounds: the vendor package (`cuda`, `cudnn`, TensorRT, `openvino`, `python`, `migraphx`, `hip-runtime-amd`) was upgraded past what the package was built for, and a rebuild is due |
 | `MISSING` | a dependency that no installed package and no package file given meets |
 
 The exit status is 0 when nothing is flagged, 1 when anything is (the last line then counts each flag), and 2 on a usage error or an unreadable package file. Run it on freshly built package files before installing them, to see every library and its owner, and again after an Arch update, on the package files you installed from, to see whether a rebuild is due: a `BOUND` row names the dependency that moved. `scripts/check-deps.sh --help` prints the header. It needs `bsdtar`, `readelf`, `pacman` and `vercmp`.
@@ -179,4 +184,4 @@ A TensorRT `ok` does not show that TensorRT's built-in plugins load; see [engine
 sudo pacman -R python-onnxruntime-core onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-sm120 onnxruntime-provider-openvino onnxruntime-core
 ```
 
-Name the packages you installed: the provider packages depend on `onnxruntime-core`, so it cannot be removed while one remains. `pacman -Qq | grep onnxruntime` lists them.
+Add `onnxruntime-provider-migraphx` if you built it. Name the packages you installed: the provider packages depend on `onnxruntime-core`, so it cannot be removed while one remains. `pacman -Qq | grep onnxruntime` lists them.

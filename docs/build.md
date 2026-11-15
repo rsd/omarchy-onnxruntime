@@ -4,11 +4,11 @@ The recipe is `onnxruntime-split/PKGBUILD`; its header comment is the reference 
 
 ## Build inputs
 
-Build inputs are environment variables. `prepare()` resolves and checks them, prints each value with where it came from, and records them for `build()` and `package()`, together with the TensorRT version in its headers and the installed versions of OpenVINO and Python, from which the packages' dependency bounds are taken ([install.md](install.md#dependencies-and-version-bounds)). Of the package metadata only the package names depend on them (see [Package names](#package-names)); every other field of `makepkg --printsrcinfo` is the same for any inputs. After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
+Build inputs are environment variables. `prepare()` resolves and checks them, prints each value with where it came from, and records them for `build()` and `package()`, together with the TensorRT version in its headers and the installed versions of OpenVINO, Python and (for MIGraphX) `migraphx` and `hip-runtime-amd`, from which the packages' dependency bounds are taken ([install.md](install.md#dependencies-and-version-bounds)). Of the package metadata only the package names depend on them (see [Package names](#package-names)), and `makedepends`, which gains `migraphx` and `hip-runtime-amd` when `migraphx` is selected; every other field of `makepkg --printsrcinfo` is the same for any inputs. After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ORTF_EPS` | `cuda tensorrt openvino` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`; or `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. The CPU provider is always built |
+| `ORTF_EPS` | `cuda tensorrt openvino` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`, `migraphx`; or `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. `migraphx` (AMD GPUs, **untested on AMD hardware**) is not in the default; it stands alone or joins the others (untested together). The CPU provider is always built |
 | `ORTF_CUDA_ARCHS` | `120` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
 | `ORTF_NVCC_THREADS` | `1` | `nvcc --threads` per CUDA compile job |
 | `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so`. Its `include/NvInferVersion.h` gives the major.minor that the TensorRT provider's `tensorrt` dependency is bounded to |
@@ -25,8 +25,17 @@ ORTF_CUDA_ARCHS=rtx MAKEFLAGS=-j8 makepkg -f              # RTX 20 to 50 series:
 ORTF_CUDA_ARCHS=all MAKEFLAGS=-j8 makepkg -f              # every x86 GPU CUDA 13 supports: -cuda13-all
 ORTF_EPS="cuda tensorrt" ORTF_CUDA_ARCHS="89 120" MAKEFLAGS=-j8 makepkg -f
 ORTF_EPS=openvino MAKEFLAGS=-j8 makepkg -f                # OpenVINO only
+ORTF_EPS=migraphx MAKEFLAGS=-j8 makepkg -d -f             # AMD GPUs only (untested): see below
+ORTF_EPS='cuda tensorrt openvino migraphx' MAKEFLAGS=-j8 makepkg -s -f   # every provider (untested together)
 ORTF_TENSORRT_HOME=/usr MAKEFLAGS=-j8 makepkg -f          # the AUR's tensorrt
 ```
+
+### MIGraphX (AMD GPUs)
+
+`migraphx` in `ORTF_EPS` builds the MIGraphX provider, with `-Donnxruntime_USE_MIGRAPHX=ON -Donnxruntime_MIGRAPHX_HOME=/opt/rocm` and no other ROCm flags. **It is untested on AMD hardware**, and this recipe has not been built with it yet. No GPU architecture is chosen at build time: MIGraphX compiles each model for the GPU it finds at run time ([engines.md](engines.md#amd-gpus-migraphx-packaged-untested)).
+
+- **Prerequisites.** Install `migraphx` and `hip-runtime-amd` from Arch's `extra` before building. They are added to `makedepends` only when `migraphx` is selected, because their install runs to GiB. `prepare()` checks the ROCm install under `/opt/rocm` and records both packages' versions. Further configure-time dependencies (`rocm-llvm`, `rocm-device-libs`, `rocm-cmake`) are **unverified** until a trial build.
+- **`-d` for AMD only.** `cuda`, `cudnn` and `openvino` are unconditional `makedepends`, so `makepkg -s` would install them too; with `migraphx` alone use `-d`, as in the CPU-only check [below](#checking-the-recipe-without-the-vendor-runtimes). With every provider selected, `-s` is right.
 
 ### CUDA architectures
 
@@ -54,12 +63,14 @@ makepkg must know every package name before `prepare()` runs, so the names are r
 | CUDA | `ORTF_EPS` has `cuda` | `onnxruntime-provider-cuda<M>-<sfx>` |
 | TensorRT | `ORTF_EPS` has `tensorrt` | `onnxruntime-provider-tensorrt-cuda<M>` |
 | OpenVINO | `ORTF_EPS` has `openvino` | `onnxruntime-provider-openvino` |
+| MIGraphX | `ORTF_EPS` has `migraphx` | `onnxruntime-provider-migraphx` |
 | Python | `ORTF_PYTHON` is not `0` | `python-onnxruntime-core` |
 
 - **`<M>`** is the major version of the CUDA toolkit: `CUDA_VERSION` in `/opt/cuda/include/cuda.h` (Arch's `cuda`), which `prepare()` checks against `nvcc`. It is never written into the PKGBUILD. CUDA 13.x gives `-cuda13`. A CUDA 12 toolkit would give `-cuda12-` names (and TensorRT 11 needs CUDA 13, so such a build would have no `tensorrt` in `ORTF_EPS`, or use TensorRT 10), but a CUDA 12 variant is on the backlog and is not provided at present.
 - **`<sfx>`** is the preset's name (`rtx`, `all`), or, for a list, the real architectures as `smN` in ascending order without repeats, joined by `-`, then the `-virtual` one as `computeN`: `120` gives `sm120`, `"89 120"` gives `sm89-sm120`, `"89 120 120-virtual"` gives `sm89-sm120-compute120`.
 - **The TensorRT package has no architecture suffix**: its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime, and on `tensorrt`, bounded to the major.minor of the headers the build used ([install.md](install.md#2-tensorrt)). It provides and conflicts with `onnxruntime-provider-tensorrt`.
 - **CUDA packages of different builds conflict**: each provides and conflicts with `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>`, because all install the same `/usr/lib/libonnxruntime_providers_cuda.so`. One is installed at a time.
+- **The MIGraphX package has no architecture suffix and no ROCm version**: its library holds no GPU code, and ROCm 7.2 and 10.1 keep the sonames it links (`libmigraphx_c.so.3`, `libamdhip64.so.7`), so one name serves both. It depends on `migraphx` and `hip-runtime-amd`, bounded to the major version of the installed packages ([install.md](install.md#dependencies-and-version-bounds)). A ROCm major upgrade therefore needs a rebuild.
 - **`ORTF_EPS=cpu`** gives `onnxruntime-core` (and the Python package) only.
 - **Dependencies.** The providers and the Python package depend on `onnxruntime-core=<pkgver>-<pkgrel>`, and every package on the packages of the libraries it links, with version bounds for the vendor runtimes: [install.md](install.md#dependencies-and-version-bounds).
 
@@ -125,6 +136,6 @@ cd onnxruntime-split
 ORTF_EPS=cpu makepkg -d -f
 ```
 
-`-d` skips the dependency check, which would demand `cuda`, `cudnn` and `openvino`. The build writes `onnxruntime-core` and `python-onnxruntime-core` only. With `ORTF_EPS=cpu` the build needs only the tools: `cmake` and `ninja` can come from a Python virtual environment on `PATH` instead of from pacman. The `python` first on `PATH` then must agree with `/usr/bin/python` on the site-packages directory, because the Python split package installs into the system's; `prepare()` checks this and stops with a message naming both directories. The result is a recipe check, not a package for general use: install the packages only on a machine meant to run them.
+`-d` skips the dependency check, which would demand `cuda`, `cudnn` and `openvino` (the same holds for `ORTF_EPS=migraphx`, which needs `migraphx` and `hip-runtime-amd` installed instead). The build writes `onnxruntime-core` and `python-onnxruntime-core` only. With `ORTF_EPS=cpu` the build needs only the tools: `cmake` and `ninja` can come from a Python virtual environment on `PATH` instead of from pacman. The `python` first on `PATH` then must agree with `/usr/bin/python` on the site-packages directory, because the Python split package installs into the system's; `prepare()` checks this and stops with a message naming both directories. The result is a recipe check, not a package for general use: install the packages only on a machine meant to run them.
 
 `scripts/test.sh` does not build; it checks the PKGBUILD's syntax, metadata and build-input handling ([README](../README.md#testing)).
