@@ -45,6 +45,8 @@ What is released: the five packages of the `rtx` build (the recipe as committed:
    git clone ssh://aur@aur.archlinux.org/onnxruntime-split-bin.git aur/onnxruntime-split-bin
    ```
 
+   Each AUR repository also carries a `LICENSE` file, the 0BSD licence of the packaging files (the commit "Add a 0BSD licence for the packaging files"). The commands below add only `PKGBUILD` and `.SRCINFO`, so it stays as it is; a new pkgbase needs it copied in before its first push ([section 6](#6-the-cuda-12-legacy-line)).
+
 4. `extra-x86_64-build` creates `/var/lib/archbuild/extra-x86_64` on first use (needs `sudo`; several GiB, since the chroot installs `cuda`, `cudnn` and `openvino`).
 
 ## 1. Build the rtx packages
@@ -131,8 +133,10 @@ flowchart LR
     A[gen-cuda12.sh, srcinfo.sh --recipe] --> B[build gcc14, cuda-12.9, cudnn9.10-cuda12.9]
     B --> C[chroot build with -I]
     C --> D[check-deps.sh, check-cuda-archs.sh]
-    D --> E[gen-bin.sh, gh release create]
-    E --> F[AUR: onnxruntime-split-cuda12, then -bin]
+    D --> E[clone the AUR repos, add LICENSE]
+    E --> F[gen-bin.sh, gh release create]
+    F --> G[makepkg --verifysource, both]
+    G --> H[AUR: onnxruntime-split-cuda12, then -bin]
 ```
 
 1. **Regenerate** after any change to `onnxruntime-split/PKGBUILD` (the generated recipe differs from it only in a few input lines, a header comment and the `pkgrel`), and after a rebuild of this line alone, which is a new `cuda12_pkgrel` in `scripts/gen-cuda12.sh`:
@@ -146,7 +150,7 @@ flowchart LR
 
 2. **Build the CUDA 12 userland and `gcc14`** from the AUR with `makepkg`, outside the chroot. The recipe's build uses GCC 14 end to end, because the `cuda-12.9` package sets nvcc's host compiler to `g++-14` and the recipe compiles its C++ with that compiler; Arch's `gcc` stays as it is. The three packages are `gcc14`, `cuda-12.9` and `cudnn9.10-cuda12.9`. `gcc14` is a long build. They are third-party AUR packages: read their PKGBUILDs. `cuda-12.9` conflicts with `cuda` and depends on `gcc14`, so build `gcc14` first, and keep the three package files: the chroot installs them from those files.
 
-3. **Build in a clean chroot**, passing the three with `-I`, as the TensorRT package is passed in [1](#1-build-the-rtx-packages). A chroot cannot fetch AUR packages, and the recipe's `cuda` and `cudnn` makedepends are met by the provides of `cuda-12.9` and `cudnn9.10-cuda12.9`:
+3. **Build in a clean chroot**, passing the three with `-I`, as the TensorRT package is passed in [1](#1-build-the-rtx-packages). A chroot cannot fetch AUR packages, and the recipe's `makedepends` name these three explicitly (`gcc14`, `cuda-12.9` and `cudnn9.10-cuda12.9`, not a bare `cuda` and `cudnn`, which an AUR helper would resolve to Arch's CUDA 13 and cuDNN 9.11 or later), so the `-I` files meet them:
 
    ```bash
    cd onnxruntime-split-cuda12
@@ -173,28 +177,36 @@ flowchart LR
 
    `prepare()` of this line refuses a cuDNN other than 9.10 ("the CUDA 12 legacy line needs cuDNN 9.10 (found 9.11)"), because cuDNN 9.11 dropped Pascal and Volta; the main line is not bound by it.
 
-5. **Generate the `-bin` recipe and publish.** The `cuda12-` tag selects the CUDA 12 line: every asset must come from pkgbase `onnxruntime-split-cuda12`, a set that mixes it with the main line's is refused, and the pin `onnxruntime-core=<pkgver>` is accepted, because the main line's core meets it.
+5. **Clone the two AUR repositories and add the licence**, before `gen-bin.sh` writes into `aur/onnxruntime-split-cuda12-bin` (a clone into a directory that is not empty fails). The two pkgbases are new, so the clones are empty repositories, as in [One-time setup](#one-time-setup). Each AUR repository carries a 0BSD `LICENSE` for the packaging files, as the main line's two do; copy it in from there, to be committed with the first push:
+
+   ```bash
+   git clone ssh://aur@aur.archlinux.org/onnxruntime-split-cuda12.git aur/onnxruntime-split-cuda12
+   git clone ssh://aur@aur.archlinux.org/onnxruntime-split-cuda12-bin.git aur/onnxruntime-split-cuda12-bin
+   cp aur/onnxruntime-split/LICENSE aur/onnxruntime-split-cuda12/
+   cp aur/onnxruntime-split/LICENSE aur/onnxruntime-split-cuda12-bin/
+   ```
+
+6. **Generate the `-bin` recipe and publish.** The `cuda12-` tag selects the CUDA 12 line: every asset must come from pkgbase `onnxruntime-split-cuda12`, a set that mixes it with the main line's is refused, and the pin `onnxruntime-core=<pkgver>` is accepted, because the main line's core meets it.
 
    ```bash
    mkdir ~/release-cuda12 && cp onnxruntime-split-cuda12/onnxruntime-provider-cuda12-legacy-1.29.0-1-x86_64.pkg.tar.zst ~/release-cuda12/
    scripts/gen-bin.sh ~/release-cuda12 cuda12-v1.29.0-1
    gh release create cuda12-v1.29.0-1 ~/release-cuda12/*.pkg.tar.zst ~/release-cuda12/SHA256SUMS \
      --repo rsd/omarchy-onnxruntime --title '...' --notes '...'
-   (cd aur/onnxruntime-split-cuda12-bin && makepkg --verifysource)
    ```
 
    `gen-bin.sh` writes `~/release-cuda12/SHA256SUMS` and `aur/onnxruntime-split-cuda12-bin/{PKGBUILD,.SRCINFO}`. The tag scheme is `cuda12-v<pkgver>-<pkgrel>`, apart from the main line's `v<pkgver>-<pkgrel>`.
 
-6. **Push to the AUR**, the source package first, as in [5](#5-push-to-the-aur). The two pkgbases are new, so clone them first (an empty repository, as in [One-time setup](#one-time-setup)):
+7. **Verify the sources and push to the AUR**, the source package first, as in [5](#5-push-to-the-aur). `makepkg --verifysource` checks each recipe's sources against the sums it holds. The `-bin` one downloads the release's asset. The source recipe's sources include the 1.6+ GiB ONNX Runtime clone. The one-time setup assumes `SRCDEST` in `~/.config/pacman/makepkg.conf`, which makes `makepkg` reuse the clone of your builds; without it, `makepkg --verifysource` in `aur/onnxruntime-split-cuda12` clones the whole tree again. If `makepkg.conf` does not set it, point `SRCDEST` at the directory that holds the existing clone and zips, here the recipe directory `onnxruntime-split-cuda12` (an absolute path):
 
    ```bash
-   git clone ssh://aur@aur.archlinux.org/onnxruntime-split-cuda12.git aur/onnxruntime-split-cuda12
-   git clone ssh://aur@aur.archlinux.org/onnxruntime-split-cuda12-bin.git aur/onnxruntime-split-cuda12-bin
+   (cd aur/onnxruntime-split-cuda12-bin && makepkg --verifysource)
 
    scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --aur aur/onnxruntime-split-cuda12
-   (cd aur/onnxruntime-split-cuda12 && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-1' && git push)
+   (cd aur/onnxruntime-split-cuda12 && SRCDEST="$PWD/../../onnxruntime-split-cuda12" makepkg --verifysource)   # drop SRCDEST=... when makepkg.conf sets it
+   (cd aur/onnxruntime-split-cuda12 && git add LICENSE PKGBUILD .SRCINFO && git commit -m '1.29.0-1' && git push)
 
-   (cd aur/onnxruntime-split-cuda12-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-1' && git push)
+   (cd aur/onnxruntime-split-cuda12-bin && git add LICENSE PKGBUILD .SRCINFO && git commit -m '1.29.0-1' && git push)
    ```
 
 **The core pin.** The provider depends on `onnxruntime-core=<pkgver>`, any pkgrel, and not on the core of its own build, because the core links no CUDA library and the provider has no version handshake with it: what the two share is ONNX Runtime's version and the layout-relevant build defines (`DISABLE_*`, `ENABLE_*`, the C++ standard, `_GLIBCXX_USE_CXX11_ABI`). A core that changes one of those would break the provider without any dependency noticing. The rule is therefore:

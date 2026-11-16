@@ -1,5 +1,5 @@
 pkgbase = onnxruntime-split-cuda12
-	pkgdesc = The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)
+	pkgdesc = The CUDA execution provider of ONNX Runtime, CUDA 12 build for Pascal, Volta and newer NVIDIA GPUs, for onnxruntime-core
 	pkgver = 1.29.0
 	pkgrel = 1
 	url = https://github.com/microsoft/onnxruntime
@@ -10,8 +10,9 @@ pkgbase = onnxruntime-split-cuda12
 	makedepends = ninja
 	makedepends = patchelf
 	makedepends = python
-	makedepends = cuda
-	makedepends = cudnn
+	makedepends = cuda-12.9
+	makedepends = cudnn9.10-cuda12.9
+	makedepends = gcc14
 	noextract = ortf-dep-abseil_cpp.zip
 	noextract = ortf-dep-re2.zip
 	noextract = ortf-dep-protobuf.zip
@@ -66,14 +67,16 @@ pkgbase = onnxruntime-split-cuda12
 	b2sums = 3c12cf8c6de687744a13e889bcdd569cff2f390df4725885af255059f012de9f5a1e7c89541a26b70daffce546cad403f7907b003152918aca337b1d0dceffc2
 
 pkgname = onnxruntime-provider-cuda12-legacy
-	pkgdesc = The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)
+	pkgdesc = The CUDA execution provider of ONNX Runtime, CUDA 12 build for Pascal, Volta and newer NVIDIA GPUs, for onnxruntime-core
 	depends = onnxruntime-core=1.29.0
 	depends = glibc
 	depends = libgcc
 	depends = libstdc++
-	depends = cuda
-	depends = cudnn
 	depends = nvidia-utils
+	depends = cuda>=12
+	depends = cuda<13
+	depends = cudnn>=9.10
+	depends = cudnn<9.11
 	provides = onnxruntime-provider-cuda=1.29.0
 	provides = onnxruntime-provider-cuda12=1.29.0
 	conflicts = onnxruntime-provider-cuda

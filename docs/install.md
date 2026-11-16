@@ -130,13 +130,13 @@ Every package's `depends` cover what its libraries need. `package()` reads the `
 |---|---|
 | `onnxruntime-core` | `glibc`, `libgcc`, `libstdc++` |
 | `onnxruntime-provider-cuda<M>-<sfx>` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `cuda`, `cudnn`, `nvidia-utils` |
-| `onnxruntime-provider-cuda12-legacy` (the CUDA 12 line, [below](#older-nvidia-gpus-pascal-and-volta-cuda-12)) | `onnxruntime-core=<pkgver>` (any pkgrel), `glibc`, `libgcc`, `libstdc++`, `cuda`, `cudnn`, `nvidia-utils` (`cuda` and `cudnn` bounded as below) |
+| `onnxruntime-provider-cuda12-legacy` (the CUDA 12 line, [below](#older-nvidia-gpus-pascal-and-volta-cuda-12)) | `onnxruntime-core=<pkgver>` (any pkgrel), `glibc`, `libgcc`, `libstdc++`, `nvidia-utils`, `cuda>=12`, `cuda<13`, `cudnn>=9.10`, `cudnn<9.11` (no bare `cuda` or `cudnn`) |
 | `onnxruntime-provider-tensorrt-cuda<M>` | the same, plus `onnxruntime-provider-cuda<M>=<pkgver>` and `tensorrt` (bounded as below) |
 | `onnxruntime-provider-openvino` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `openvino` |
 | `onnxruntime-provider-migraphx` (only with `migraphx` in `ORTF_EPS`; untested on AMD hardware) | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `migraphx`, `hip-runtime-amd` (bounded as below; never `rocm-hip-sdk`) |
 | `python-onnxruntime-core` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `python`, `python-numpy`, `python-flatbuffers`, `python-packaging`, `python-protobuf` |
 
-The vendor runtimes and Python carry version bounds where the ABI demands a rebuild after an upgrade. A built package lists such a dependency by its bounds alone (`cuda>=13` and `cuda<14`, not also a bare `cuda`); the bare name is in `.SRCINFO`, where the bounds are not known yet:
+The vendor runtimes and Python carry version bounds where the ABI demands a rebuild after an upgrade. A built package lists such a dependency by its bounds alone (`cuda>=13` and `cuda<14`, not also a bare `cuda`); the bare name is in `.SRCINFO`, where the bounds are not known yet (the CUDA 12 recipe's `.SRCINFO` carries the bounds too, since its CUDA and cuDNN versions are fixed):
 
 | Dependency | Bound | Taken from |
 |---|---|---|
@@ -208,7 +208,7 @@ CUDA 13, cuDNN 9.11 and the 590 driver series dropped Pascal and Volta, so the p
 
 It replaces the CUDA 13 setup on that machine. The AUR's `cuda-12.9` conflicts with `cuda`, and `cudnn9.10-cuda12.9` conflicts with `cudnn`, so the two sets cannot be installed together, and the provider conflicts with every `-cuda13-*` package. The packages named below that are not in Arch's repositories (`nvidia-580xx-dkms`, `cuda-12.9`, `cudnn9.10-cuda12.9`, `gcc14`) are third-party AUR packages, not part of this repository: read their PKGBUILDs.
 
-Two things to know first. `cuda-12.9` and the provider depend on `nvidia-utils`, which the AUR's `nvidia-580xx-utils` provides, so that driver userspace meets the dependency; no 580xx package name appears in any dependency of this repository's packages. Second, `cuda-12.9` depends on the AUR's `gcc14`, a long source build; the helper builds it on the way. `gcc14` installs beside Arch's `gcc`.
+Three things to know first. The order: install the driver, `cuda-12.9` and `cudnn9.10-cuda12.9` before the provider, never the provider first. The provider depends on `cuda>=12`, `cuda<13`, `cudnn>=9.10` and `cudnn<9.11`, and only these two AUR packages provide versions inside those bounds (`cuda=12.9` and `cudnn=9.10`). Arch's `cuda` is CUDA 13 and its `cudnn` is 9.11 or later, which dropped these GPUs, and the 590 and later drivers dropped them too. With the CUDA 12 userland and the 580xx driver already installed, pacman or the AUR helper finds the bounds met and never reaches for Arch's CUDA 13. Next, `cuda-12.9` and the provider depend on `nvidia-utils`, which the AUR's `nvidia-580xx-utils` provides, so that driver userspace meets the dependency; no 580xx package name appears in any dependency of this repository's packages. Last, `cuda-12.9` depends on the AUR's `gcc14`, a long source build; the helper builds it on the way. `gcc14` installs beside Arch's `gcc`.
 
 1. Remove the CUDA 13 side. Name what you have installed (`pacman -Qq | grep -E '^(nvidia|cuda|cudnn|onnxruntime-provider)'` lists it): the CUDA 13 provider packages first, since they depend on `cuda` and `cudnn`, then those, then the current driver. pacman names anything else that needs `cuda` or `cudnn`; remove that too, or the transaction is refused.
 
@@ -218,13 +218,14 @@ Two things to know first. `cuda-12.9` and the provider depend on `nvidia-utils`,
    sudo pacman -R nvidia-open-dkms        # whichever nvidia-open* packages you have
    ```
 
-2. Install the 580xx driver (a DKMS package: it needs the headers of your kernel), the CUDA 12 userland and the provider. The core of the main line must be installed already (any pkgrel of 1.29.0; `onnxruntime-core` or `onnxruntime-core-bin`):
+2. Install the 580xx driver (a DKMS package: it needs the headers of your kernel) and the CUDA 12 userland first, then the provider, in a second command. `gcc14` comes with `cuda-12.9` and is a long build. The core of the main line must be installed already (any pkgrel of 1.29.0; `onnxruntime-core` or `onnxruntime-core-bin`):
 
    ```bash
-   yay -S nvidia-580xx-dkms cuda-12.9 cudnn9.10-cuda12.9 onnxruntime-provider-cuda12-legacy-bin
+   yay -S nvidia-580xx-dkms cuda-12.9 cudnn9.10-cuda12.9
+   yay -S onnxruntime-provider-cuda12-legacy-bin
    ```
 
-   Reboot to load the new driver. Without a helper, build and install the AUR packages with `makepkg -si` in their clones, and install the provider from the release (tag `cuda12-v<pkgver>-<pkgrel>`, a separate release from the main line's `v<pkgver>-<pkgrel>`): download the `.pkg.tar.zst` and `SHA256SUMS`, check them with `sha256sum -c --ignore-missing SHA256SUMS`, and `sudo pacman -U onnxruntime-provider-cuda12-legacy-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst`. To build the provider from source instead, see [build.md](build.md#the-cuda-12-legacy-line); the package is then `onnxruntime-provider-cuda12-legacy`, without `-bin`.
+   Reboot to load the new driver. Without a helper, build and install the AUR packages with `makepkg -si` in their clones (`gcc14` first, then `cuda-12.9` and `cudnn9.10-cuda12.9`, all before the provider), and install the provider from the release (tag `cuda12-v1.29.0-1`; the scheme is `cuda12-v<pkgver>-<pkgrel>`, a separate release from the main line's `v<pkgver>-<pkgrel>`): download the `.pkg.tar.zst` and `SHA256SUMS`, check them with `sha256sum -c --ignore-missing SHA256SUMS`, and `sudo pacman -U onnxruntime-provider-cuda12-legacy-1.29.0-1-x86_64.pkg.tar.zst`. To build the provider from source instead, see [build.md](build.md#the-cuda-12-legacy-line); the package is then `onnxruntime-provider-cuda12-legacy`, without `-bin`.
 
 3. Check it, as in [Verify](#4-verify) with the targets you have:
 

@@ -1482,11 +1482,61 @@ on12 expect_package_fail "cuda12 line: an ortf.conf without the cuDNN minor fail
     "${conf12/$'\n'ORTF_CUDNN_MINOR=10/}" "libonnxruntime_providers_cuda.so=$needed_cuda12" "${run12[@]}"
 on12 expect_package_fail "cuda12 line: an empty recorded cuDNN minor fails" "$cu12" "ORTF_CUDNN_MINOR is '', not a minor version" \
     "${conf12/ORTF_CUDNN_MINOR=10/ORTF_CUDNN_MINOR=}" "libonnxruntime_providers_cuda.so=$needed_cuda12" "${run12[@]}"
-on12 package_run "${conf12/ORTF_CUDNN_MINOR=10/ORTF_CUDNN_MINOR=0}" "libonnxruntime_providers_cuda.so=$needed_cuda12" "${run12[@]}"
-if ((status == 0)) && grep -qF "$cu12 depends: " <<<"$out" && grep -qF 'cudnn>=9.0 cudnn<9.1' <<<"$out"; then
-    ok "cuda12 line: a cuDNN minor 0 gives cudnn>=9.0 cudnn<9.1"
+# The package function lists its cuda and cudnn bounds itself (.SRCINFO):
+# a recorded cuDNN or a linked CUDA that gives other bounds fails, rather
+# than adding them beside the listed ones.
+for minor in 0 11; do
+    on12 expect_package_fail "cuda12 line: a recorded cuDNN 9.$minor fails, its bounds not the listed ones" "$cu12" \
+        "$cu12: cudnn>=9.$minor is not in its depends (onnxruntime-core=1.29.0 glibc libgcc libstdc++ nvidia-utils cuda>=12 cuda<13 cudnn>=9.10 cudnn<9.11)" \
+        "${conf12/ORTF_CUDNN_MINOR=10/ORTF_CUDNN_MINOR=$minor}" "libonnxruntime_providers_cuda.so=$needed_cuda12" "${run12[@]}"
+done
+# _ortf_check_libs itself, sourced from the cuda12 recipe, on a package
+# without libraries: a bounded cudnn in depends (no bare one) still has the
+# recorded cuDNN read, and its bounds, already listed, are not added again;
+# another recorded minor fails, naming the bound; the main line adds them.
+# shellcheck disable=SC2016 # the script expands its own arguments
+check_libs12() { # check_libs12 <PKGBUILD> <ORTF_CUDNN_MINOR> <depends...>
+    local dir
+    dir=$(mktemp -d "$tmp/checklibs.XXXXXX")
+    mkdir -p "$dir/src" "$dir/pkg"
+    printf 'ORTF_CUDA_MAJOR=12\nORTF_CUDNN_MAJOR=9\nORTF_CUDNN_MINOR=%s\n' "$2" >"$dir/src/ortf.conf"
+    out=$(env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON FX_CUDA_HOME="$fx/empty" bash -c '
+        set -euo pipefail
+        # shellcheck disable=SC1090
+        . "$1"
+        srcdir=$2/src pkgdir=$2/pkg
+        pkgname=(onnxruntime-provider-cuda12-legacy)
+        shift 2
+        depends=("$@")
+        status=0
+        _ortf_check_libs || status=$?
+        echo "status $status: ${depends[*]}"
+    ' _ "$1" "$dir" "${@:3}" 2>&1) || out="FAILED: $out"
+}
+check_libs12 "$pkgbuild12" 10 onnxruntime-core=1.29.0 nvidia-utils 'cuda>=12' 'cuda<13' 'cudnn>=9.10' 'cudnn<9.11'
+if [[ $out == 'status 0: onnxruntime-core=1.29.0 nvidia-utils cuda>=12 cuda<13 cudnn>=9.10 cudnn<9.11' ]]; then
+    ok "_ortf_check_libs (cuda12): a bounded cudnn is recognised, its listed bounds kept once"
 else
-    fail "cuda12 line with cuDNN 9.0 (exit $status): $out"
+    fail "_ortf_check_libs (cuda12, cuDNN 9.10): $out"
+fi
+check_libs12 "$pkgbuild12" 11 onnxruntime-core=1.29.0 nvidia-utils 'cuda>=12' 'cuda<13' 'cudnn>=9.10' 'cudnn<9.11'
+if [[ $out == *'cudnn>=9.11 is not in its depends'* && $out == *'cudnn<9.12 is not in its depends'* &&
+    $out == *'status 1: onnxruntime-core=1.29.0 nvidia-utils cuda>=12 cuda<13 cudnn>=9.10 cudnn<9.11' ]]; then
+    ok "_ortf_check_libs (cuda12): a recorded cuDNN 9.11 fails, nothing added"
+else
+    fail "_ortf_check_libs (cuda12, cuDNN 9.11): $out"
+fi
+check_libs12 "$pkgbuild12" 10 onnxruntime-core=1.29.0 nvidia-utils 'cuda>=12' 'cuda<13'
+if [[ $out == *'cudnn'* ]]; then
+    fail "_ortf_check_libs (cuda12) without cudnn in depends read the cuDNN: $out"
+else
+    ok "_ortf_check_libs (cuda12): no cudnn in depends, no cuDNN bound"
+fi
+check_libs12 "$pkgbuild" 10 onnxruntime-core=1.29.0-6 nvidia-utils cuda cudnn
+if [[ $out == 'status 0: onnxruntime-core=1.29.0-6 nvidia-utils cuda cudnn cudnn>=9 cudnn<10' ]]; then
+    ok "_ortf_check_libs (main line): the bare cudnn gets the recorded major's bounds added"
+else
+    fail "_ortf_check_libs (main line): $out"
 fi
 # The main line ignores the minor: its CUDA package keeps the major's bound,
 # and a CUDA 13 library there is the CUDA major check's (by the names).
@@ -1870,16 +1920,27 @@ if command -v makepkg >/dev/null 2>&1; then
     if [[ $k != *FAILED* && $(sed -n 's/^pkgname = //p' <<<"$k") == onnxruntime-provider-cuda12-legacy &&
         $k == 'pkgbase = onnxruntime-split-cuda12'$'\n'* && $k == *$'\tpkgrel = 1\n'* &&
         $k_block == *$'\tdepends = onnxruntime-core=1.29.0\n'* &&
+        $(sed -n 's/^\tdepends = //p' <<<"$k_block" | tr '\n' ' ') == \
+        'onnxruntime-core=1.29.0 glibc libgcc libstdc++ nvidia-utils cuda>=12 cuda<13 cudnn>=9.10 cudnn<9.11 ' &&
         $k_block == *$'\tprovides = onnxruntime-provider-cuda=1.29.0\n\tprovides = onnxruntime-provider-cuda12=1.29.0\n'* &&
         $k_block$'\n' == *$'\tconflicts = onnxruntime-provider-cuda\n\tconflicts = onnxruntime-provider-cuda12\n'* ]]; then
         ok "cuda12 line: pkgbase onnxruntime-split-cuda12, onnxruntime-provider-cuda12-legacy alone, onnxruntime-core=1.29.0"
     else
         fail "cuda12 line .SRCINFO: $k"
     fi
-    if [[ $(sed -n 's/^\tmakedepends = //p' <<<"$k" | tr '\n' ' ') == 'git cmake ninja patchelf python cuda cudnn ' ]]; then
-        ok "cuda12 line: no tensorrt, openvino or Python-module makedepends"
+    if [[ $(sed -n 's/^\tmakedepends = //p' <<<"$k" | tr '\n' ' ') == 'git cmake ninja patchelf python cuda-12.9 cudnn9.10-cuda12.9 gcc14 ' ]]; then
+        ok "cuda12 line: the AUR's CUDA 12.9, cuDNN 9.10 and gcc14; no tensorrt, openvino or Python-module makedepends"
     else
         fail "cuda12 line makedepends: $(grep makedepends <<<"$k")"
+    fi
+    # No bare cuda or cudnn, which an AUR helper would resolve to Arch's
+    # CUDA 13 and cuDNN 9.11 or later; the main line keeps its bare ones.
+    if ! grep -qxE $'\t(make)?depends = (cuda|cudnn)' <<<"$k" &&
+        grep -qxF $'\tmakedepends = cuda' <<<"$a" && grep -qxF $'\tmakedepends = cudnn' <<<"$a" &&
+        grep -qxF $'\tdepends = cuda' <<<"$a" && grep -qxF $'\tdepends = cudnn' <<<"$a"; then
+        ok "cuda12 line: no bare cuda or cudnn in (make)depends; the main line has them"
+    else
+        fail "cuda12 line bare cuda/cudnn: $(grep -E 'depends = (cuda|cudnn)' <<<"$k")"
     fi
     # The same on a host with CUDA 12, and whatever ORTF_* the caller has
     # (the names never depend on them in this line).
@@ -1887,10 +1948,13 @@ if command -v makepkg >/dev/null 2>&1; then
     if [[ $l == "$k" ]]; then ok "cuda12 line: the same .SRCINFO with CUDA 12 and other ORTF_* values"; else
         fail "cuda12 line with CUDA 12: $(diff <(echo "$k") <(echo "$l") | head -8)"; fi
     # The pkgbase's pkgdesc is the CUDA provider's, its one package's, not
-    # onnxruntime-core's.
-    if [[ $(sed -n '/^pkgbase = /,/^$/s/^\tpkgdesc = //p' <<<"$k") == \
+    # onnxruntime-core's; the main line's CUDA provider keeps its own.
+    desc12='The CUDA execution provider of ONNX Runtime, CUDA 12 build for Pascal, Volta and newer NVIDIA GPUs, for onnxruntime-core'
+    if [[ $(sed -n '/^pkgbase = /,/^$/s/^\tpkgdesc = //p' <<<"$k") == "$desc12" &&
+        $(sed -n '/^pkgname = /,/^$/s/^\tpkgdesc = //p' <<<"$k_block") == "$desc12" &&
+        $(sed -n '/^pkgname = onnxruntime-provider-cuda13-rtx$/,/^$/s/^\tpkgdesc = //p' <<<"$a") == \
         'The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)' ]]; then
-        ok "cuda12 line: the pkgbase's pkgdesc is the CUDA provider's"
+        ok "cuda12 line: the pkgbase's pkgdesc is the CUDA provider's, the CUDA 12 one"
     else
         fail "cuda12 line pkgbase pkgdesc: $(sed -n '/^pkgbase = /,/^$/p' <<<"$k" | grep pkgdesc)"
     fi

@@ -283,10 +283,11 @@ fi
 # The CUDA 12 legacy line: a second pkgbase, onnxruntime-split-cuda12, whose
 # PKGBUILD is generated from onnxruntime-split's. Its recipe and .SRCINFO are
 # checked for being up to date, and its COMMITTED .SRCINFO is read for the
-# names, the pkgdesc and the bare dependencies (the cuda and cudnn version
-# bounds are added at package time, from the DT_NEEDED entries and the
-# recorded cuDNN version, as in the main line; pkgbuild-settings-test.sh
-# checks them).
+# names, the pkgdesc and the dependencies: the cuda and cudnn bounds, which
+# its package function lists itself (package time checks them against the
+# DT_NEEDED entries and the recorded cuDNN version; pkgbuild-settings-test.sh
+# checks that), never the bare names, and the AUR's CUDA 12.9 and cuDNN
+# 9.10 as makedepends.
 run "gen-cuda12.sh --check" scripts/gen-cuda12.sh --check
 run "srcinfo.sh --recipe onnxruntime-split-cuda12 --check" scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --check
 si12=onnxruntime-split-cuda12/.SRCINFO
@@ -297,19 +298,21 @@ if [[ -r $si12 ]]; then
         got=$(sed -n 's/^pkgname = //p' "$si12" | tr '\n' ' ')
         [[ $got == 'onnxruntime-provider-cuda12-legacy ' ]] || { echo "pkgnames: $got"; return 1; }
         srcinfo_has "$si12" 'pkgbase = onnxruntime-split-cuda12' \
-            "${T}pkgdesc = The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)" \
+            "${T}pkgdesc = The CUDA execution provider of ONNX Runtime, CUDA 12 build for Pascal, Volta and newer NVIDIA GPUs, for onnxruntime-core" \
             'pkgname = onnxruntime-provider-cuda12-legacy' \
-            "${T}depends = onnxruntime-core=1.29.0" "${T}depends = cuda" "${T}depends = cudnn" \
-            "${T}depends = nvidia-utils" \
+            "${T}depends = onnxruntime-core=1.29.0" "${T}depends = cuda>=12" "${T}depends = cuda<13" \
+            "${T}depends = cudnn>=9.10" "${T}depends = cudnn<9.11" "${T}depends = nvidia-utils" \
+            "${T}makedepends = cuda-12.9" "${T}makedepends = cudnn9.10-cuda12.9" "${T}makedepends = gcc14" \
             "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \
             "${T}provides = onnxruntime-provider-cuda=1.29.0" "${T}provides = onnxruntime-provider-cuda12=1.29.0" \
             "${T}conflicts = onnxruntime-provider-cuda" "${T}conflicts = onnxruntime-provider-cuda12" || return 1
-        # No installed-version bounds (package time adds them), and no CUDA
-        # 13 anywhere (a .so.13 soname, a cuda>=13 bound, a -cuda13 name).
-        srcinfo_lacks "$si12" "^${T}depends = (cuda|cudnn)[<>=]" || return 1
+        # No bare cuda or cudnn (an AUR helper would resolve them to Arch's
+        # CUDA 13 and cuDNN 9.11 or later), and no CUDA 13 anywhere (a .so.13
+        # soname, a cuda>=13 bound, a -cuda13 name).
+        srcinfo_lacks "$si12" "^${T}(make)?depends = (cuda|cudnn)\$" || return 1
         srcinfo_lacks "$si12" '\.so\.13|cuda>=13|cuda<14|cuda13'
     }
-    run "$si12: names, pkgdesc, bare depends, provides, conflicts, no CUDA 13" srcinfo12_names
+    run "$si12: names, pkgdesc, bounded depends, AUR makedepends, provides, conflicts, no CUDA 13" srcinfo12_names
 else
     echo "== $si12: not found"
     failed+=("$si12: not found")

@@ -37,7 +37,8 @@
 # For every asset <name>, package <name>-bin installs the asset's usr/
 # unchanged (its licence directory renamed to usr/share/licenses/<name>-bin)
 # with the asset's pkgdesc (" (prebuilt)" appended), depends, optdepends and replaces as they are
-# (bounds included), provides <name>=<pkgver>-<pkgrel> plus the asset's
+# (bounds included; for a cuda12- tag, the pkgdesc is cuda12_pkgdesc
+# below instead, also the pkgbase's), provides <name>=<pkgver>-<pkgrel> plus the asset's
 # provides, and conflicts with <name> plus the asset's conflicts: the -bin
 # convention of onnxruntime-split/PKGBUILD. Every depend on an
 # onnxruntime-* or python-onnxruntime* name must be met by what the -bin
@@ -92,6 +93,11 @@ fi
 # The tag scheme names the line, and with it the source pkgbase.
 srcbase=onnxruntime-split
 [[ -z ${BASH_REMATCH[1]} ]] || srcbase=onnxruntime-split-cuda12
+# The CUDA 12 line's pkgdesc, onnxruntime-split-cuda12's (its .SRCINFO;
+# scripts/tests/gen-bin-test.sh checks they agree). Its released 1.29.0-1
+# asset carries an older text, which cannot change: its -bin package, and
+# the -bin pkgbase (namcap wants a pkgdesc there), take this one instead.
+cuda12_pkgdesc='The CUDA execution provider of ONNX Runtime, CUDA 12 build for Pascal, Volta and newer NVIDIA GPUs, for onnxruntime-core'
 pkgver=${BASH_REMATCH[2]} pkgrel=${BASH_REMATCH[3]}
 version=$pkgver-$pkgrel
 if ((rel_given)); then
@@ -154,7 +160,11 @@ for path in "$pkgdir_in"/*.pkg.tar.zst; do
         esac
     done < <(sed 's|^\./||; s|/.*||' "$tmp/list" | sort -u)
     files+=("$file") names+=("$name")
-    descs+=("$(field "$info" pkgdesc | head -n 1) (prebuilt)")
+    if [[ $srcbase == onnxruntime-split-cuda12 ]]; then
+        descs+=("$cuda12_pkgdesc (prebuilt)")
+    else
+        descs+=("$(field "$info" pkgdesc | head -n 1) (prebuilt)")
+    fi
     licenses+=("$(field "$info" license)")
     deps+=("$(field "$info" depend)")
     optdeps+=("$(field "$info" optdepend)")
@@ -245,6 +255,7 @@ pkgbuild=$tmp/PKGBUILD
     echo "# asset <name> (built by $srcbase) as they are."
     echo
     echo "pkgbase=$srcbase-bin"
+    [[ $srcbase != onnxruntime-split-cuda12 ]] || echo "pkgdesc=$(q "$cuda12_pkgdesc (prebuilt)")"
     array '' pkgname "$(printf '%s-bin\n' "${names[@]}")"
     echo "pkgver=$(q "$pkgver")"
     echo "pkgrel=$(q "$bin_rel")"

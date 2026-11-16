@@ -105,9 +105,22 @@ for line in 'pkgbase = onnxruntime-split-cuda12' "${T}pkgrel = 1" "${T}pkgver = 
     'pkgname = onnxruntime-provider-cuda12-legacy' "${T}depends = onnxruntime-core=1.29.0" \
     "${T}provides = onnxruntime-provider-cuda=1.29.0" "${T}provides = onnxruntime-provider-cuda12=1.29.0" \
     "${T}conflicts = onnxruntime-provider-cuda" "${T}conflicts = onnxruntime-provider-cuda12" \
-    "${T}depends = nvidia-utils" "${T}makedepends = cuda" "${T}makedepends = cudnn" "${T}makedepends = python"; do
+    "${T}depends = nvidia-utils" "${T}depends = cuda>=12" "${T}depends = cuda<13" \
+    "${T}depends = cudnn>=9.10" "${T}depends = cudnn<9.11" "${T}makedepends = cuda-12.9" \
+    "${T}makedepends = cudnn9.10-cuda12.9" "${T}makedepends = gcc14" "${T}makedepends = python"; do
     if grep -qxF -- "$line" "$srcinfo12_file"; then ok "cuda12: has [$line]"; else fail "cuda12: lacks [$line]"; fi
 done
+# No bare cuda or cudnn (an AUR helper would take Arch's CUDA 13 and cuDNN
+# 9.11 or later); the main line's .SRCINFO keeps its bare ones.
+if ! grep -nxE "${T}(make)?depends = (cuda|cudnn)" "$srcinfo12_file" &&
+    grep -qxF "${T}depends = cuda" "$top/onnxruntime-split/.SRCINFO" &&
+    grep -qxF "${T}depends = cudnn" "$top/onnxruntime-split/.SRCINFO" &&
+    grep -qxF "${T}makedepends = cuda" "$top/onnxruntime-split/.SRCINFO" &&
+    grep -qxF "${T}makedepends = cudnn" "$top/onnxruntime-split/.SRCINFO"; then
+    ok "cuda12: no bare cuda or cudnn in (make)depends; the main line has them"
+else
+    fail "cuda12: a bare cuda or cudnn (above), or the main line lacks its own"
+fi
 if (($(grep -c '^pkgname = ' "$srcinfo12_file") == 1)) &&
     ! grep -nE 'makedepends = (tensorrt|openvino|python-.*|migraphx|hip-runtime-amd)$|cuda13|onnxruntime-core=1\.29\.0-' "$srcinfo12_file"; then
     ok "cuda12: one package; no TensorRT, OpenVINO, Python-module or ROCm build input; no CUDA 13 name; no pkgrel pin"

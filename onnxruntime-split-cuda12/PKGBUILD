@@ -65,9 +65,13 @@
 # (cuda>=12, cuda<13) and a cuDNN of the build's major.minor (cudnn>=9.10,
 # cudnn<9.11: cuDNN 9.11 dropped these GPUs), which the AUR's cuda-12.9
 # and cudnn9.10-cuda12.9 provide; they replace Arch's cuda and cudnn on
-# that machine. As every CUDA package, it provides and conflicts with
-# onnxruntime-provider-cuda and onnxruntime-provider-cuda12, so it is
-# never installed beside a -cuda13 one. The main line's
+# that machine. Its package function lists those bounds itself, never the
+# bare cuda and cudnn, and its makedepends name the AUR packages
+# (cuda-12.9, cudnn9.10-cuda12.9 and gcc14, CUDA 12.9's host compiler), so
+# an AUR helper reading its .SRCINFO never resolves them to Arch's CUDA 13
+# and cuDNN 9.11 or later. As every CUDA package, it provides and
+# conflicts with onnxruntime-provider-cuda and onnxruntime-provider-cuda12,
+# so it is never installed beside a -cuda13 one. The main line's
 # python-onnxruntime-core serves it too (its module links no CUDA
 # library). Its architectures run untested on Pascal and Volta hardware.
 # Its prebuilt counterpart is the AUR pkgbase onnxruntime-split-cuda12-bin,
@@ -554,9 +558,10 @@ pkgver=1.29.0
 pkgrel=1
 # Each package sets its own; this one is the pkgbase's (and onnxruntime-core's).
 pkgdesc='Cross-platform inference engine for ONNX models: the C and C++ library with the CPU execution provider'
-# The cuda12 line's pkgbase is its one package, the CUDA provider's.
-[[ $_ortf_line != cuda12 ]] ||
-  pkgdesc='The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)'
+# The cuda12 line's pkgbase is its one package, the CUDA provider's
+# (_ortf_cuda12_pkgdesc, its package function's too).
+_ortf_cuda12_pkgdesc='The CUDA execution provider of ONNX Runtime, CUDA 12 build for Pascal, Volta and newer NVIDIA GPUs, for onnxruntime-core'
+[[ $_ortf_line != cuda12 ]] || pkgdesc=$_ortf_cuda12_pkgdesc
 arch=('x86_64')
 url='https://github.com/microsoft/onnxruntime'
 # ONNX Runtime (MIT) and the bundled dependencies compiled into its
@@ -585,7 +590,15 @@ makedepends=(
 # OpenVINO (its .SRCINFO, which the AUR shows, lists neither).
 [[ $_ortf_line == cuda12 ]] ||
   makedepends+=('python-build' 'python-installer' 'python-wheel' 'python-setuptools' 'python-numpy')
-makedepends+=('cuda' 'cudnn')
+# The cuda12 line's CUDA 12.9 and cuDNN 9.10 by the AUR packages that
+# install them, and gcc14, the host compiler CUDA 12.9 accepts: the bare
+# cuda and cudnn would be Arch's CUDA 13 and cuDNN 9.11 or later, which
+# prepare() refuses in this line.
+if [[ $_ortf_line == cuda12 ]]; then
+  makedepends+=('cuda-12.9' 'cudnn9.10-cuda12.9' 'gcc14')
+else
+  makedepends+=('cuda' 'cudnn')
+fi
 [[ $_ortf_line == cuda12 ]] || makedepends+=('openvino')
 # ROCm only when ORTF_EPS (from the environment, as for pkgname: the names
 # it gave above) selects migraphx: its install runs to GiB, and no other
@@ -1739,9 +1752,10 @@ _ortf_dep_license() {
 # entry without a version (cuda) that a bounded entry of the same name
 # (cuda>=13, cuda<14) also lists: pacman needs the bounds alone, and the
 # package's .PKGINFO then lists each such dependency once, by its bounds.
-# Run last, after _ortf_check_libs and the recorded bounds, which find the
-# vendor packages by their bare names. The bare names stay in the package
-# functions' bodies, so .SRCINFO (whose depends carry no bounds) has them.
+# Run last, after _ortf_check_libs and the recorded bounds. The bare names
+# stay in the package functions' bodies, so .SRCINFO (whose depends carry
+# no bounds then) has them; the cuda12 line's CUDA package lists its cuda
+# and cudnn bounds in the body instead, and has none here to drop.
 _ortf_drop_bare_depends() {
   local d e keep
   local -a kept=()
@@ -1795,12 +1809,16 @@ _ortf_cuda12_needed() {
 # libmigraphx_c and libamdhip64 sonames checked against the majors
 # prepare() found (ORTF_MIGRAPHX_SONAME_MAJOR, ORTF_HIP_SONAME_MAJOR).
 # In the cuda12 line the cudnn bounds are on the recorded major.minor
-# (ORTF_CUDNN_MINOR), and each library's NEEDED entries also pass
-# _ortf_cuda12_needed.
+# (ORTF_CUDNN_MINOR), each library's NEEDED entries also pass
+# _ortf_cuda12_needed, and a cuda or cudnn bound not already in depends
+# fails: that package function lists its bounds itself (in .SRCINFO), so
+# a build of another CUDA or cuDNN would not match them.
 _ortf_check_libs() {
-  local trt=${1:-} cuda_major cudnn_major='' cudnn_minor='' trt_version='' lib needed bounds b bad=0
+  local trt=${1:-} cuda_major cudnn_major='' cudnn_minor='' trt_version='' lib needed bounds b d bad=0
   local mgx_soname='' hip_soname='' key
-  local -a libs found=()
+  local -a libs found=() names=()
+  # The names in depends, without their bounds (cudnn for cudnn>=9.10).
+  for d in "${depends[@]}"; do names+=("${d%%[<>=]*}"); done
   # The CUDA major the names carry, and the TensorRT version prepare()
   # recorded: the libcudart and libnvinfer linked must be of these.
   cuda_major=$(_ortf_get ORTF_CUDA_MAJOR) || return 1
@@ -1809,7 +1827,7 @@ _ortf_check_libs() {
   # cudnn (the CUDA provider dlopen()s cuDNN: no NEEDED entry gives its
   # bound). A libcudnn in the NEEDED entries (the TensorRT provider's) must
   # be of it, and gives the same bounds, added once.
-  if [[ " ${depends[*]} " == *" cudnn "* ]]; then
+  if [[ " ${names[*]} " == *" cudnn "* ]]; then
     cudnn_major=$(_ortf_get ORTF_CUDNN_MAJOR) || return 1
     if [[ ! $cudnn_major =~ ^[1-9][0-9]*$ ]]; then
       echo "ortf.conf: ORTF_CUDNN_MAJOR is '$cudnn_major', not a major version (run makepkg without -e, so that prepare() runs)" >&2
@@ -1855,8 +1873,15 @@ _ortf_check_libs() {
     found+=("cudnn>=$cudnn_major" "cudnn<$((cudnn_major + 1))")
   fi
   for b in "${found[@]}"; do
-    [[ " ${depends[*]} " == *" $b "* ]] || depends+=("$b")
+    [[ " ${depends[*]} " != *" $b "* ]] || continue
+    if [[ $_ortf_line == cuda12 && ( ${b%%[<>=]*} == cuda || ${b%%[<>=]*} == cudnn ) ]]; then
+      echo "${pkgname[0]}: $b is not in its depends (${depends[*]}): the cuda12 line's package function lists its cuda and cudnn bounds, and the build does not match them" >&2
+      bad=1
+      continue
+    fi
+    depends+=("$b")
   done
+  ((bad == 0))
 }
 
 # _ortf_recorded_bounds <ortf.conf key> <package> [major]: prints the
@@ -2064,16 +2089,27 @@ _ortf_package_provider() {
 # pkgver, any pkgrel: onnxruntime-core links no CUDA library, and the
 # provider bridge between the two depends on the ONNX Runtime version and
 # build defines only, not on the CUDA of either side.
+# The cuda12 line's vendor depends are its bounds, written out in the
+# order package() gives them (the released package's .PKGINFO), so that
+# .SRCINFO, the built package and its -bin list the same: CUDA 12 and
+# cuDNN 9.10, the only ones prepare() accepts there, and the guard in
+# _ortf_check_libs fails a build whose bounds differ. The main line's are
+# the bare names, the bounds added at package time (_ortf_check_libs,
+# _ortf_drop_bare_depends).
 # Single-quoted: $pkgver and $pkgrel expand in the function's body.
 # shellcheck disable=SC2016
 if [[ $_ortf_line == cuda12 ]]; then
   _ortf_cuda_core_dep='onnxruntime-core=$pkgver'
+  _ortf_cuda_vendor_deps="'nvidia-utils' 'cuda>=12' 'cuda<13' 'cudnn>=9.10' 'cudnn<9.11'"
+  _ortf_cuda_pkgdesc=$_ortf_cuda12_pkgdesc
 else
   _ortf_cuda_core_dep='onnxruntime-core=$pkgver-$pkgrel'
+  _ortf_cuda_vendor_deps="'cuda' 'cudnn' 'nvidia-utils'"
+  _ortf_cuda_pkgdesc='The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)'
 fi
 eval "package_onnxruntime-provider-cuda$_ortf_cuda_major-$_ortf_sfx() {
-  pkgdesc='The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)'
-  depends=(\"$_ortf_cuda_core_dep\" 'glibc' 'libgcc' 'libstdc++' 'cuda' 'cudnn' 'nvidia-utils')
+  pkgdesc='$_ortf_cuda_pkgdesc'
+  depends=(\"$_ortf_cuda_core_dep\" 'glibc' 'libgcc' 'libstdc++' $_ortf_cuda_vendor_deps)
   provides=(\"onnxruntime-provider-cuda=\$pkgver\" \"onnxruntime-provider-cuda$_ortf_cuda_major=\$pkgver\")
   conflicts=('onnxruntime-provider-cuda' 'onnxruntime-provider-cuda$_ortf_cuda_major')
   _ortf_package_provider cuda

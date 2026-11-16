@@ -378,7 +378,7 @@ cuda12() { # cuda12 <dir> <core pin>: the legacy provider
     local saved=$srcbase
     srcbase=onnxruntime-split-cuda12
     pack "$1" onnxruntime-provider-cuda12-legacy 1.29.0-1 <<EOF
-pkgdesc = The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA Pascal and Volta GPUs, CUDA 12)
+pkgdesc = The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)
 conflict = onnxruntime-provider-cuda
 conflict = onnxruntime-provider-cuda12
 provides = onnxruntime-provider-cuda=1.29.0
@@ -418,6 +418,18 @@ check "cuda12 .SRCINFO: provides, conflicts, the core pin carried through" "$tmp
     "${T}conflicts = onnxruntime-provider-cuda" "${T}conflicts = onnxruntime-provider-cuda12" \
     "${T}depends = onnxruntime-core=1.29.0" "${T}depends = cuda>=12" "${T}depends = cuda<13" \
     "${T}depends = cudnn>=9.10" "${T}depends = cudnn<9.11" "${T}depends = nvidia-utils"
+# The asset's own pkgdesc (the released 1.29.0-1's older text) gives way to
+# the line's, onnxruntime-split-cuda12's .SRCINFO's, in the package and in
+# the pkgbase (namcap's "Missing description in PKGBUILD").
+desc12=$(sed -n '/^pkgbase = /,/^$/s/^\tpkgdesc = //p' "$here/../../onnxruntime-split-cuda12/.SRCINFO")
+if [[ -n $desc12 && $(grep -c "^${T}pkgdesc = " "$srcinfo") == 2 ]] &&
+    [[ $(sed -n '/^pkgbase = /,/^$/s/^\tpkgdesc = //p' "$srcinfo") == "$desc12 (prebuilt)" &&
+    $(sed -n 's/^\tpkgdesc = //p' "$tmp/onnxruntime-provider-cuda12-legacy-bin") == "$desc12 (prebuilt)" ]] &&
+    ! grep -qF 'for onnxruntime-core (NVIDIA GPUs)' "$aur12/PKGBUILD"; then
+    ok "cuda12: the pkgbase and the package have onnxruntime-split-cuda12's pkgdesc (prebuilt), not the asset's"
+else
+    fail "cuda12 pkgdesc (want '$desc12 (prebuilt)'): $(grep -F pkgdesc "$srcinfo")"
+fi
 if [[ $(sed -n 's/^pkgname = //p' "$srcinfo") == onnxruntime-provider-cuda12-legacy-bin ]] &&
     grep -q 'built by onnxruntime-split-cuda12)' "$aur12/PKGBUILD" &&
     grep -q 'release cuda12-v1.29.0-1' "$aur12/PKGBUILD"; then
