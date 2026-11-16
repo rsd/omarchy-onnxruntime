@@ -1,17 +1,17 @@
 # Measured results
 
-What the recipe's checks reported for one full build, and the conditions they were run under. The figures are ONNX Runtime figures for the raw model only, without any pre- or post-processing, and are indicative: the desktop was in use during the runs.
+What the recipe's checks reported for one full build, and the conditions they were run under. The figures are ONNX Runtime figures for the raw model only, without any pre- or post-processing, and are indicative: the desktop was in use during the runs. The tools that produced them are the [smoke test](../tools/ort-smoke/README.md) and the [model check](../tools/ort-model-check/README.md); terms such as TF32 and fp16 are in the [glossary](glossary.md).
 
 ## Conditions
 
 | | |
 |---|---|
-| ONNX Runtime | 1.29.0, built by this recipe with `ORTF_EPS` at its default and `ORTF_CUDA_ARCHS=120` ([build.md](build.md#parallelism-memory-and-disk) has the build and the vendor runtime versions). It is the build of the single `onnxruntime-full` 1.29.0-1; 1.29.0-2 splits the same libraries into `onnxruntime-core` and one package per engine ([build.md](build.md#package-names)) and was not measured separately |
+| ONNX Runtime | 1.29.0, built by this recipe with `ORTF_EPS` at its default and `ORTF_CUDA_ARCHS=120` ([build.md](build.md#parallelism-memory-and-disk) has the build and the vendor runtime versions). It is the build of the single package `onnxruntime-full` 1.29.0-1; since 1.29.0-2 the same libraries are split into `onnxruntime-core` and one package per engine ([build.md](build.md#package-names)), and the split packages were not measured separately |
 | NVIDIA GPU | GeForce RTX 5080 Laptop GPU |
 | CPU | Intel Core Ultra 9 275HX, 24 threads, 30 GiB of RAM |
 | Intel GPU and NPU | the integrated graphics and the NPU of that CPU |
 | Runtimes | CUDA 13.4.3, cuDNN 9.27.0.42, TensorRT 11.4.0.106, OpenVINO 2026.4.1 (intel-npu-driver 1.38.0) |
-| Where it ran | the build tree, before installing ([install.md](install.md#before-installing-the-build-tree)) |
+| Where it ran | the build tree, before installing ([build-from-source.md](build-from-source.md#before-installing-the-build-tree)) |
 | Model check | `tools/ort-model-check`: 1 first run, 3 warm-up runs and 50 timed runs per target, CPU EP fallback disabled, uniform-random input in [0, 1), `--precision default` unless stated; the [README](../tools/ort-model-check/README.md) explains the columns and the error bounds |
 | TensorRT | engine cache off, fp16 off |
 
@@ -90,7 +90,7 @@ MODNet with `--precision fp32`, which asks each provider for fp32 arithmetic whe
 
 ## CUDA 12 legacy provider
 
-The CUDA 12 legacy provider, `onnxruntime-provider-cuda12-legacy` 1.29.0-1 ([engines.md](engines.md#nvidia-pascal-and-volta-cuda-12-legacy-packaged-untested)), built in a clean chroot. It was run on a Blackwell GPU, not on the Pascal or Volta cards it is for, so the figures show that the library loads and computes with the CUDA 12 runtimes, not that its `sm_60`, `sm_61` and `sm_70` code runs.
+The CUDA 12 legacy provider, `onnxruntime-provider-cuda12-legacy` 1.29.0-1 ([cuda12-legacy.md](cuda12-legacy.md)), built in a clean chroot. It was run on a Blackwell GPU, not on the Pascal or Volta cards it is for, so the figures show that the library loads and computes with the CUDA 12 runtimes, not that its `sm_60`, `sm_61` and `sm_70` code runs.
 
 | | |
 |---|---|
