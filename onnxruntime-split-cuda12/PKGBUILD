@@ -245,9 +245,10 @@
 # system's Python version). It is installed into /usr/bin/python's
 # site-packages whichever python builds it.
 #
-# The build is long and large: hours with CUDA, and it needs tens of GiB of
-# disk under the build directory (BUILDDIR=/path/with/space makepkg ... moves
-# it; SRCDEST=... moves the 1.6 GiB git clone). CUDA kernels (CUTLASS, flash
+# The build is long and large: about 2 hours with CUDA for the default four
+# architectures (27 minutes with one, ORTF_CUDA_ARCHS=120), and it needs tens
+# of GiB of disk under the build directory (BUILDDIR=/path/with/space
+# makepkg ... moves it; SRCDEST=... moves the 1.6 GiB git clone). CUDA kernels (CUTLASS, flash
 # attention) take several GiB of RAM per compile job, so the job count, not
 # the thread count, decides whether the build fits in memory. For 24
 # threads and 30 GiB of RAM:

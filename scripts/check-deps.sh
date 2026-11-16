@@ -24,7 +24,8 @@
 #               package owns
 #   UNRESOLVED  a needed soname that resolves to no file on this system
 #   BOUND       an installed version outside a depend's bounds: the vendor
-#               package (cuda, cudnn, TensorRT, openvino, python) was
+#               package (cuda, cudnn, TensorRT, openvino, migraphx,
+#               hip-runtime-amd, python) was
 #               upgraded past what the package was built for, and a
 #               rebuild is due
 #   MISSING     a depend no installed package and no package file given

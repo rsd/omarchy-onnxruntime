@@ -137,7 +137,7 @@ not release its environment.
 Whether TensorRT's default plugin library loaded is not observable through the C
 API, so the report cannot show it. With TensorRT installed under
 `/opt/nvidia/tensorrt`, ORT loads `libnvinfer_plugin.so.11` with `dlopen` from
-inside `libonnxruntime.so`, which has no RUNPATH, so the built-in TensorRT
+inside `libonnxruntime.so`, whose RUNPATH is only `$ORIGIN` (`/usr/lib`), so the built-in TensorRT
 plugins are found only if the TensorRT environment file
 `/usr/share/nvidia-tensorrt/nvidia-tensorrt.env` (from the `nvidia-tensorrt`
 package) is sourced or `LD_LIBRARY_PATH` includes the TensorRT `lib` directory.
