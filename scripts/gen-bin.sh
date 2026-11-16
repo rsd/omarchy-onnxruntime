@@ -1,24 +1,32 @@
 #!/usr/bin/env bash
 # Generates the PKGBUILD and .SRCINFO of onnxruntime-split-bin, the prebuilt
-# counterpart of onnxruntime-split, from the packages of a release.
+# counterpart of onnxruntime-split, from the packages of a release; or, for
+# a cuda12- tag, of onnxruntime-split-cuda12-bin, the counterpart of
+# onnxruntime-split-cuda12 (the CUDA 12 legacy provider).
 #
 #   scripts/gen-bin.sh [--base-url URL] [--out DIR] [--pkgrel N] <package dir> <tag>
 #   e.g. scripts/gen-bin.sh ~/release v1.29.0-6
+#        scripts/gen-bin.sh ~/release-cuda12 cuda12-v1.29.0-1
 #
 # <package dir> holds the release assets: every *.pkg.tar.zst in it (the
 # packages of the rtx build plus the CUDA package of the `all` build, all
 # from pkgbase onnxruntime-split; *-debug-* packages are skipped). <tag> is
-# the release tag, v<pkgver>-<pkgrel>. --base-url is where the assets are
+# the release tag, v<pkgver>-<pkgrel>, or cuda12-v<pkgver>-<pkgrel> for the
+# CUDA 12 line (its own tag scheme; its assets are all from pkgbase
+# onnxruntime-split-cuda12, and a set mixing the two pkgbases is refused).
+# One -bin pkgbase per source pkgbase. --base-url is where the assets are
 # downloaded from (default
 # https://github.com/rsd/omarchy-onnxruntime/releases/download/<tag>);
 # --out is the directory written (default aur/onnxruntime-split-bin at the
-# top of this repository, the AUR git clone). --pkgrel N (a positive
+# top of this repository, the AUR git clone; aur/onnxruntime-split-cuda12-bin
+# for a cuda12- tag). --pkgrel N (a positive
 # integer; default the tag's pkgrel) sets only the generated PKGBUILD's
 # pkgrel, to bump a fix to that file alone without a new release: the
 # assets' version (the tag's pkgver-pkgrel) still drives the version check,
 # the <name>=<pkgver>-<pkgrel> provides and the dependency check.
 #
-# Each asset's .PKGINFO (bsdtar) must name pkgbase onnxruntime-split, the
+# Each asset's .PKGINFO (bsdtar) must name pkgbase onnxruntime-split (or
+# onnxruntime-split-cuda12 for a cuda12- tag; no other), the
 # tag's pkgver-pkgrel, arch x86_64 and a pkgname no other asset has, and
 # the file name must be <pkgname>-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst. An
 # asset holding anything but .PKGINFO, .BUILDINFO, .MTREE and usr/ (an
@@ -34,7 +42,9 @@
 # convention of onnxruntime-split/PKGBUILD. Every depend on an
 # onnxruntime-* or python-onnxruntime* name must be met by what the -bin
 # packages provide (as pacman compares versions); the generator fails
-# naming the one that is not. The licence is the assets' (per package when
+# naming the one that is not, except, for a cuda12- tag, the pin
+# onnxruntime-core=<pkgver> (pkgver only), which the main line's core meets.
+# The licence is the assets' (per package when
 # they differ). noextract lists every asset: extracted, they would all land
 # in the same $srcdir and their usr/ trees would merge.
 #
@@ -76,10 +86,13 @@ fi
 pkgdir_in=$1 tag=$2
 [[ -d $pkgdir_in ]] || die 2 "$pkgdir_in: not a directory"
 pkgdir_in=$(cd "$pkgdir_in" && pwd)
-if [[ ! $tag =~ ^v([^-]+)-([0-9]+(\.[0-9]+)?)$ ]]; then
-    die 2 "$tag: not a tag v<pkgver>-<pkgrel> (e.g. v1.29.0-6)"
+if [[ ! $tag =~ ^(cuda12-)?v([^-]+)-([0-9]+(\.[0-9]+)?)$ ]]; then
+    die 2 "$tag: not a tag v<pkgver>-<pkgrel> or cuda12-v<pkgver>-<pkgrel> (e.g. v1.29.0-6)"
 fi
-pkgver=${BASH_REMATCH[1]} pkgrel=${BASH_REMATCH[2]}
+# The tag scheme names the line, and with it the source pkgbase.
+srcbase=onnxruntime-split
+[[ -z ${BASH_REMATCH[1]} ]] || srcbase=onnxruntime-split-cuda12
+pkgver=${BASH_REMATCH[2]} pkgrel=${BASH_REMATCH[3]}
 version=$pkgver-$pkgrel
 if ((rel_given)); then
     [[ $bin_rel =~ ^[1-9][0-9]*$ ]] || die 2 "--pkgrel $bin_rel: not a positive integer"
@@ -88,7 +101,7 @@ else
 fi
 base_url=${base_url:-https://github.com/rsd/omarchy-onnxruntime/releases/download/$tag}
 base_url=${base_url%/}
-out=${out:-$top/aur/onnxruntime-split-bin}
+out=${out:-$top/aur/$srcbase-bin}
 
 for tool in bsdtar sha256sum makepkg vercmp; do
     command -v "$tool" >/dev/null 2>&1 || die 2 "$tool not found"
@@ -117,7 +130,7 @@ for path in "$pkgdir_in"/*.pkg.tar.zst; do
     name=$(field "$info" pkgname | head -n 1)
     [[ -n $name ]] || die 1 "$file: no pkgname in its .PKGINFO"
     base=$(field "$info" pkgbase | head -n 1)
-    [[ $base == onnxruntime-split ]] || die 1 "$file: pkgbase is '$base', not onnxruntime-split"
+    [[ $base == "$srcbase" ]] || die 1 "$file: pkgbase is '$base', not $srcbase (the tag $tag takes only $srcbase packages)"
     if [[ $name == onnxruntime-provider-migraphx* ]]; then
         die 1 "$file: $name is not shipped as -bin (the MIGraphX provider never ran on AMD hardware); remove it from $pkgdir_in"
     fi
@@ -184,6 +197,9 @@ for ((i = 0; i < n; i++)); do
     mapfile -t list < <(grep . <<<"${deps[i]}" || true)
     for d in "${list[@]}"; do
         [[ $d == onnxruntime-* || $d == python-onnxruntime* ]] || continue
+        # The CUDA 12 line has no core of its own: its pkgver-only pin is met by
+        # the main line's onnxruntime-core or onnxruntime-core-bin.
+        [[ $srcbase == onnxruntime-split-cuda12 && $d == "onnxruntime-core=$pkgver" ]] && continue
         met=0
         for p in "${offered[@]}"; do
             if satisfies "$d" "$p"; then
@@ -226,9 +242,9 @@ pkgbuild=$tmp/PKGBUILD
     echo "# Generated by scripts/gen-bin.sh of https://github.com/rsd/omarchy-onnxruntime"
     echo "# from the packages of its release $tag: do not edit it by hand, run the"
     echo '# generator again. Each <name>-bin package installs the files of the release'
-    echo '# asset <name> (built by onnxruntime-split) as they are.'
+    echo "# asset <name> (built by $srcbase) as they are."
     echo
-    echo 'pkgbase=onnxruntime-split-bin'
+    echo "pkgbase=$srcbase-bin"
     array '' pkgname "$(printf '%s-bin\n' "${names[@]}")"
     echo "pkgver=$(q "$pkgver")"
     echo "pkgrel=$(q "$bin_rel")"

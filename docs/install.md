@@ -32,7 +32,7 @@ sudo pacman -U onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst \
   python-onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst
 ```
 
-The release's files are named without `-bin`, and they carry the same dependencies, so they work with each other; they do not satisfy a `-bin` package's name, so do not mix `pacman -U` of a release file with the AUR's `-bin` of the same package. The MIGraphX provider is not prebuilt: build it from the recipe. The prebuilt packages have the same dependency bounds as a source build ([below](#dependencies-and-version-bounds)): pacman refuses a vendor upgrade that goes past one, and a rebuilt release follows. Then continue at [step 4](#4-verify).
+The release's files are named without `-bin`, and they carry the same dependencies, so they work with each other; they do not satisfy a `-bin` package's name, so do not mix `pacman -U` of a release file with the AUR's `-bin` of the same package. The MIGraphX provider is not prebuilt: build it from the recipe. The CUDA 12 legacy provider for Pascal and Volta cards is a separate AUR package base, `onnxruntime-split-cuda12-bin`, and needs a different CUDA on the machine: see [Older NVIDIA GPUs](#older-nvidia-gpus-pascal-and-volta-cuda-12). The prebuilt packages have the same dependency bounds as a source build ([below](#dependencies-and-version-bounds)): pacman refuses a vendor upgrade that goes past one, and a rebuilt release follows. Then continue at [step 4](#4-verify).
 
 ## 1. Prerequisites
 
@@ -130,6 +130,7 @@ Every package's `depends` cover what its libraries need. `package()` reads the `
 |---|---|
 | `onnxruntime-core` | `glibc`, `libgcc`, `libstdc++` |
 | `onnxruntime-provider-cuda<M>-<sfx>` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `cuda`, `cudnn`, `nvidia-utils` |
+| `onnxruntime-provider-cuda12-legacy` (the CUDA 12 line, [below](#older-nvidia-gpus-pascal-and-volta-cuda-12)) | `onnxruntime-core=<pkgver>` (any pkgrel), `glibc`, `libgcc`, `libstdc++`, `cuda`, `cudnn`, `nvidia-utils` (`cuda` and `cudnn` bounded as below) |
 | `onnxruntime-provider-tensorrt-cuda<M>` | the same, plus `onnxruntime-provider-cuda<M>=<pkgver>` and `tensorrt` (bounded as below) |
 | `onnxruntime-provider-openvino` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `openvino` |
 | `onnxruntime-provider-migraphx` (only with `migraphx` in `ORTF_EPS`; untested on AMD hardware) | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `migraphx`, `hip-runtime-amd` (bounded as below; never `rocm-hip-sdk`) |
@@ -140,7 +141,7 @@ The vendor runtimes and Python carry version bounds where the ABI demands a rebu
 | Dependency | Bound | Taken from |
 |---|---|---|
 | `cuda` | major version | the sonames the libraries link (`libcudart.so.13` gives `cuda>=13` and `cuda<14`) |
-| `cudnn` | major version | `CUDNN_MAJOR` of the cuDNN installed when `prepare()` ran: the CUDA provider `dlopen()`s cuDNN, so no soname gives it (`scripts/check-deps.sh` sees only `DT_NEEDED` entries, so this and the other `dlopen()`ed libraries are covered by the recorded bounds) |
+| `cudnn` | major version (major.minor in the CUDA 12 legacy package: `cudnn>=9.10` and `cudnn<9.11`, because cuDNN 9.11 dropped Pascal and Volta) | `CUDNN_MAJOR` (and `CUDNN_MINOR`) of the cuDNN installed when `prepare()` ran: the CUDA provider `dlopen()`s cuDNN, so no soname gives it (`scripts/check-deps.sh` sees only `DT_NEEDED` entries, so this and the other `dlopen()`ed libraries are covered by the recorded bounds) |
 | `tensorrt` | major.minor (the ABI is sensitive to the minor version) | `include/NvInferVersion.h` of the TensorRT the build used, not an installed package: no TensorRT package is needed to build, and `prepare()` warns when none provides `tensorrt` |
 | `openvino` | year.minor | the version installed when `prepare()` ran |
 | `python` | minor version | the version of the python that built the module |
@@ -201,10 +202,49 @@ The model check also runs against the installed package, without `PYTHONPATH`.
 
 A TensorRT `ok` does not show that TensorRT's built-in plugins load; see [engines.md](engines.md#tensorrt).
 
+## Older NVIDIA GPUs (Pascal and Volta): CUDA 12
+
+CUDA 13, cuDNN 9.11 and the 590 driver series dropped Pascal and Volta, so the packages above cannot use those cards. `onnxruntime-provider-cuda12-legacy` is the CUDA provider built with CUDA 12.9 for them ([engines.md](engines.md#nvidia-pascal-and-volta-cuda-12-legacy-packaged-untested)). It is **untested on Pascal and Volta hardware**, and CUDA 12.9 with cuDNN 9.10 on the 580xx driver is untested too. Maxwell is not supported: ONNX Runtime 1.29's fp16 kernels need `sm_53` or later, and a WebGPU provider is planned for those cards.
+
+It replaces the CUDA 13 setup on that machine. The AUR's `cuda-12.9` conflicts with `cuda`, and `cudnn9.10-cuda12.9` conflicts with `cudnn`, so the two sets cannot be installed together, and the provider conflicts with every `-cuda13-*` package. The packages named below that are not in Arch's repositories (`nvidia-580xx-dkms`, `cuda-12.9`, `cudnn9.10-cuda12.9`, `gcc14`) are third-party AUR packages, not part of this repository: read their PKGBUILDs.
+
+Two things to know first. `cuda-12.9` and the provider depend on `nvidia-utils`, which the AUR's `nvidia-580xx-utils` provides, so that driver userspace meets the dependency; no 580xx package name appears in any dependency of this repository's packages. Second, `cuda-12.9` depends on the AUR's `gcc14`, a long source build; the helper builds it on the way. `gcc14` installs beside Arch's `gcc`.
+
+1. Remove the CUDA 13 side. Name what you have installed (`pacman -Qq | grep -E '^(nvidia|cuda|cudnn|onnxruntime-provider)'` lists it): the CUDA 13 provider packages first, since they depend on `cuda` and `cudnn`, then those, then the current driver. pacman names anything else that needs `cuda` or `cudnn`; remove that too, or the transaction is refused.
+
+   ```bash
+   sudo pacman -R onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-rtx
+   sudo pacman -R cudnn cuda
+   sudo pacman -R nvidia-open-dkms        # whichever nvidia-open* packages you have
+   ```
+
+2. Install the 580xx driver (a DKMS package: it needs the headers of your kernel), the CUDA 12 userland and the provider. The core of the main line must be installed already (any pkgrel of 1.29.0; `onnxruntime-core` or `onnxruntime-core-bin`):
+
+   ```bash
+   yay -S nvidia-580xx-dkms cuda-12.9 cudnn9.10-cuda12.9 onnxruntime-provider-cuda12-legacy-bin
+   ```
+
+   Reboot to load the new driver. Without a helper, build and install the AUR packages with `makepkg -si` in their clones, and install the provider from the release (tag `cuda12-v<pkgver>-<pkgrel>`, a separate release from the main line's `v<pkgver>-<pkgrel>`): download the `.pkg.tar.zst` and `SHA256SUMS`, check them with `sha256sum -c --ignore-missing SHA256SUMS`, and `sudo pacman -U onnxruntime-provider-cuda12-legacy-<pkgver>-<pkgrel>-x86_64.pkg.tar.zst`. To build the provider from source instead, see [build.md](build.md#the-cuda-12-legacy-line); the package is then `onnxruntime-provider-cuda12-legacy`, without `-bin`.
+
+3. Check it, as in [Verify](#4-verify) with the targets you have:
+
+   ```bash
+   scripts/smoke-test.sh --require cpu,cuda
+   ```
+
+To go back to CUDA 13 (possible only where a card supports it: a machine with only Pascal or Volta cards has no CUDA 13 setup to go back to), remove the CUDA 12 side, which is the same order reversed, and install what step 1 removed:
+
+```bash
+sudo pacman -R onnxruntime-provider-cuda12-legacy-bin cudnn9.10-cuda12.9 cuda-12.9 nvidia-580xx-dkms   # drop -bin if you built the provider from source; add the other 580xx packages you have
+sudo pacman -S nvidia-open-dkms cuda cudnn onnxruntime-provider-cuda13-rtx-bin   # your driver, and the CUDA 13 packages you removed
+```
+
+`pacman -Qdtq` then lists `gcc14` and other packages the CUDA 12 userland brought in, if nothing else needs them.
+
 ## Uninstalling
 
 ```bash
 sudo pacman -R python-onnxruntime-core onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-rtx onnxruntime-provider-openvino onnxruntime-core
 ```
 
-Add `onnxruntime-provider-migraphx` if you built it. For the prebuilt packages, name the `-bin` packages instead, and the `all` CUDA package (`onnxruntime-provider-cuda13-all`) if that is the one you installed. Name the packages you installed: the provider packages depend on `onnxruntime-core`, so it cannot be removed while one remains. `pacman -Qq | grep onnxruntime` lists them.
+Add `onnxruntime-provider-migraphx` if you built it. The CUDA 12 legacy package, if installed, replaces the CUDA 13 one in that list (`onnxruntime-provider-cuda12-legacy`), and has no TensorRT package. For the prebuilt packages, name the `-bin` packages instead, and the `all` CUDA package (`onnxruntime-provider-cuda13-all`) if that is the one you installed. Name the packages you installed: the provider packages depend on `onnxruntime-core`, so it cannot be removed while one remains. `pacman -Qq | grep onnxruntime` lists them.

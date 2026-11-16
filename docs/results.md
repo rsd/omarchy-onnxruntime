@@ -87,3 +87,48 @@ MODNet with `--precision fp32`, which asks each provider for fp32 arithmetic whe
 - **`first ms`** includes lazy initialisation: CUDA's first run takes hundreds of milliseconds for that reason.
 - **Small models** run in about a millisecond or less on the accelerators, so their medians are close to the cost of dispatching the work, and the p95 is sensitive to what else the machine was doing.
 - **The selfie segmentation and PP-HumanSeg v2 models give outputs that depend little on the input noise** ([model-check README](../tools/ort-model-check/README.md#running-it)), so for them agreement shows that the engine runs the graph, not that it is sensitive to the input.
+
+## CUDA 12 legacy provider
+
+The CUDA 12 legacy provider, `onnxruntime-provider-cuda12-legacy` 1.29.0-1 ([engines.md](engines.md#nvidia-pascal-and-volta-cuda-12-legacy-packaged-untested)), built in a clean chroot. It was run on a Blackwell GPU, not on the Pascal or Volta cards it is for, so the figures show that the library loads and computes with the CUDA 12 runtimes, not that its `sm_60`, `sm_61` and `sm_70` code runs.
+
+| | |
+|---|---|
+| Package | `onnxruntime-provider-cuda12-legacy` 1.29.0-1: download 172.6 MiB (180943965 B), installed 557.5 MiB (584557139 B). Extracted, not installed |
+| Core | the installed `onnxruntime-core` 1.29.0-6 (its `libonnxruntime.so.1.29.0`, copied next to the provider) and `python-onnxruntime-core` 1.29.0-6 |
+| Runtimes | the libraries of `cuda-12.9` 12.9.2-1 (`libcudart.so.12.9.79`, `libcublas.so.12.9.2.10`, `libcublasLt.so.12.9.2.10`) and `cudnn9.10-cuda12.9` 9.10.2.21-1, extracted from the packages, not installed, on `LD_LIBRARY_PATH`; the host's CUDA 13.4.3 was untouched. `LD_DEBUG` showed the provider and every CUDA and cuDNN library loading from the CUDA 12 copies, and no `.so.13` |
+| Host | GeForce RTX 5080 Laptop GPU (compute capability 12.0), driver 615.78.08, Intel Core Ultra 9 275HX |
+| Model check | as above: `tools/ort-model-check --targets cpu,cuda`, `--precision default` (TF32) unless stated |
+
+The provider's `DT_NEEDED` entries are `libcublasLt.so.12`, `libcublas.so.12`, `libcudart.so.12` and the system libraries (`libstdc++.so.6`, `libm.so.6`, `libgcc_s.so.1`, `libc.so.6`, `ld-linux-x86-64.so.2`): no `.so.13`. Its only undefined symbol beyond the system's is `Provider_GetHost`. `cuobjdump` (of `cuda-12.9`) lists machine code for `sm_60`, `sm_61` and `sm_70` (181 kernels each), `sm_75` (222), `sm_80`, `sm_86` and `sm_89` (270 each), `sm_90a` (18), `sm_120a` (271), and the PTX of `compute_60` only. The 18 `sm_90a` kernels are compiled by ONNX Runtime whatever the architecture list is; the CUDA 13 `rtx` package has the same 18. `scripts/check-deps.sh` on the package found no gap and nothing missing; its three unresolved libraries (`libcudart`, `libcublas`, `libcublasLt` `.so.12`) and two bound mismatches (`cuda<13`, `cudnn<9.11`) are what a CUDA 13 host shows.
+
+### Smoke test
+
+`scripts/smoke-test.sh --only cpu,cuda --require cuda` (CPU EP fallback disabled): 2 ok, 0 failed. The `cpu` target reported max error 0; `cuda` reported `ok` with max error 0 (create 557.4 ms, first run 3647.18 ms, warm run 0.03 ms).
+
+### Model check
+
+All four models ran `ok` on `cuda` in the default precision. Columns as above; the CPU median is for comparison.
+
+| Model | create ms | first ms | median ms | p95 ms | max err | mean err | cpu median ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| selfie_segmentation_landscape, 1x144x256x3 | 394.2 | 2605.16 | 0.48 | 0.54 | 5.96e-8 | 9.70e-12 | 1.85 |
+| pp_humansegv2_mobile_192x192 | 298.5 | 1611.07 | 1.19 | 1.33 | 1.84e-5 | 1.70e-6 | 2.87 |
+| pp_humansegv2_lite_192x192 | 289.0 | 638.80 | 0.70 | 0.73 | 3.88e-4 | 2.72e-5 | 3.61 |
+| modnet_photographic, `--size 512x512` | 389.7 | 2319.69 | 4.77 | 4.84 | 1.29e-1 | 1.80e-3 | 47.00 |
+
+With `--precision fp32`:
+
+| Model | max err | mean err |
+|---|---:|---:|
+| selfie_segmentation_landscape | 5.96e-8 | not recorded |
+| pp_humansegv2_mobile_192x192 | 1.19e-7 | not recorded |
+| pp_humansegv2_lite_192x192 | 5.96e-7 | not recorded |
+| modnet_photographic | 1.23e-3 | 3.73e-6 |
+
+In fp32 mode MODNet's CUDA maximum error is 1.23e-3, above the 1e-3 bound of the model check, although its mean error is 3.7e-6; it reproduced three times. The CUDA 13 provider gives 2.78e-4 on the same model and run (the table above). The default (TF32) mode passes on all four models.
+
+### Not tested
+
+- The legacy architectures on real Pascal or Volta hardware, and the `sm_75` to `sm_89` machine code on real cards of those generations.
+- CUDA 12.9 with cuDNN 9.10 on the 580xx driver series. This run used driver 615.78.08 on a Blackwell GPU.

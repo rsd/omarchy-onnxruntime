@@ -1,6 +1,6 @@
 # Releasing
 
-The maintainer's procedure for a release: build the packages in a clean chroot, publish them as GitHub release assets, and update the two AUR packages, `onnxruntime-split` (the recipe) and `onnxruntime-split-bin` (the prebuilt packages, which download those assets). Users of the packages need none of this: see [install.md](install.md#prebuilt-packages). The commands below are for the release of version `1.29.0-6`; replace the version for another.
+The maintainer's procedure for a release: build the packages in a clean chroot, publish them as GitHub release assets, and update the two AUR packages, `onnxruntime-split` (the recipe) and `onnxruntime-split-bin` (the prebuilt packages, which download those assets). The CUDA 12 legacy line is released separately, with two AUR packages of its own: [section 6](#6-the-cuda-12-legacy-line). Users of the packages need none of this: see [install.md](install.md#prebuilt-packages). The commands below are for the release of version `1.29.0-6`; replace the version for another.
 
 ```mermaid
 flowchart LR
@@ -122,6 +122,88 @@ scripts/srcinfo.sh --aur aur/onnxruntime-split          # checks .SRCINFO is cur
 
 `scripts/srcinfo.sh --aur` commits nothing and fails when the committed `onnxruntime-split/.SRCINFO` is stale: regenerate it with `scripts/srcinfo.sh --write` after a PKGBUILD change.
 
+## 6. The CUDA 12 legacy line
+
+The package `onnxruntime-provider-cuda12-legacy` (the CUDA provider built with CUDA 12.9 for Pascal and Volta; [engines.md](engines.md#nvidia-pascal-and-volta-cuda-12-legacy-packaged-untested)) has its own pkgbase, `onnxruntime-split-cuda12`, its own prebuilt pkgbase, `onnxruntime-split-cuda12-bin`, its own `pkgrel` and its own GitHub release. Its PKGBUILD is generated from `onnxruntime-split/PKGBUILD`; never edit it by hand. It is released with the same `pkgver` as the main line, and the commands below are for `cuda12-v1.29.0-1`.
+
+```mermaid
+flowchart LR
+    A[gen-cuda12.sh, srcinfo.sh --recipe] --> B[build gcc14, cuda-12.9, cudnn9.10-cuda12.9]
+    B --> C[chroot build with -I]
+    C --> D[check-deps.sh, check-cuda-archs.sh]
+    D --> E[gen-bin.sh, gh release create]
+    E --> F[AUR: onnxruntime-split-cuda12, then -bin]
+```
+
+1. **Regenerate** after any change to `onnxruntime-split/PKGBUILD` (the generated recipe differs from it only in a few input lines, a header comment and the `pkgrel`), and after a rebuild of this line alone, which is a new `cuda12_pkgrel` in `scripts/gen-cuda12.sh`:
+
+   ```bash
+   scripts/gen-cuda12.sh                                          # writes onnxruntime-split-cuda12/PKGBUILD
+   scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --write   # its .SRCINFO
+   ```
+
+   `scripts/gen-cuda12.sh --check` and `scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --check` fail when either is stale; `scripts/test.sh` runs both.
+
+2. **Build the CUDA 12 userland and `gcc14`** from the AUR with `makepkg`, outside the chroot. The recipe's build uses GCC 14 end to end, because the `cuda-12.9` package sets nvcc's host compiler to `g++-14` and the recipe compiles its C++ with that compiler; Arch's `gcc` stays as it is. The three packages are `gcc14`, `cuda-12.9` and `cudnn9.10-cuda12.9`. `gcc14` is a long build. They are third-party AUR packages: read their PKGBUILDs. `cuda-12.9` conflicts with `cuda` and depends on `gcc14`, so build `gcc14` first, and keep the three package files: the chroot installs them from those files.
+
+3. **Build in a clean chroot**, passing the three with `-I`, as the TensorRT package is passed in [1](#1-build-the-rtx-packages). A chroot cannot fetch AUR packages, and the recipe's `cuda` and `cudnn` makedepends are met by the provides of `cuda-12.9` and `cudnn9.10-cuda12.9`:
+
+   ```bash
+   cd onnxruntime-split-cuda12
+   extra-x86_64-build -- -I /path/to/gcc14-<ver>-x86_64.pkg.tar.zst \
+     -I /path/to/cuda-12.9-<ver>-x86_64.pkg.tar.zst \
+     -I /path/to/cudnn9.10-cuda12.9-<ver>-x86_64.pkg.tar.zst
+   ```
+
+   The recipe builds the CUDA provider alone (no TensorRT, OpenVINO or Python package). `prepare()` refuses a toolkit that is not CUDA 12, and `package()` fails the build on a CUDA library with a `.so.13` soname or a CUDA provider that does not link `libcudart.so.12`, `libcublas.so.12` and `libcublasLt.so.12`.
+
+4. **Check** the package file:
+
+   ```bash
+   scripts/check-deps.sh onnxruntime-split-cuda12/onnxruntime-provider-cuda12-legacy-1.29.0-1-x86_64.pkg.tar.zst \
+     /path/to/cuda-12.9-<ver>-x86_64.pkg.tar.zst /path/to/cudnn9.10-cuda12.9-<ver>-x86_64.pkg.tar.zst
+   scripts/check-cuda-archs.sh [--cuobjdump /path/to/cuda-12.9/bin/cuobjdump] \
+     onnxruntime-split-cuda12/onnxruntime-provider-cuda12-legacy-1.29.0-1-x86_64.pkg.tar.zst \
+     60 61 70 75 80 86 89 90 120 60-virtual
+   ```
+
+   The list has `90` because ONNX Runtime compiles 18 kernels for `sm_90a` whatever `ORTF_CUDA_ARCHS` says (the CUDA 13 packages have them too).
+
+   `check-deps.sh` compares the package with what is installed. On a machine whose `cuda` and `cudnn` are CUDA 13, nothing installed meets `cuda>=12`, `cuda<13` or `cudnn<9.11`; the two package files given after the provider count as meeting them by their provides. The library rows resolve through the host's `ldconfig` cache, so a host without the CUDA 12 userland installed can show the CUDA 12 libraries as `UNRESOLVED` or `GAP`; read the flags with that in mind, or run it on a machine that has `cuda-12.9` and `cudnn9.10-cuda12.9` installed. `check-cuda-archs.sh` fails unless the library holds exactly the SASS of those architectures and one PTX (`compute_60`, the oldest architecture built: a preset's PTX is always that of its oldest); `--cuobjdump` points it at the `cuobjdump` of a CUDA 12.9 toolkit, where the host's is another version. The package conflicts with every CUDA 13 package, so run the smoke test on a machine set up as in [install.md](install.md#older-nvidia-gpus-pascal-and-volta-cuda-12).
+
+   `prepare()` of this line refuses a cuDNN other than 9.10 ("the CUDA 12 legacy line needs cuDNN 9.10 (found 9.11)"), because cuDNN 9.11 dropped Pascal and Volta; the main line is not bound by it.
+
+5. **Generate the `-bin` recipe and publish.** The `cuda12-` tag selects the CUDA 12 line: every asset must come from pkgbase `onnxruntime-split-cuda12`, a set that mixes it with the main line's is refused, and the pin `onnxruntime-core=<pkgver>` is accepted, because the main line's core meets it.
+
+   ```bash
+   mkdir ~/release-cuda12 && cp onnxruntime-split-cuda12/onnxruntime-provider-cuda12-legacy-1.29.0-1-x86_64.pkg.tar.zst ~/release-cuda12/
+   scripts/gen-bin.sh ~/release-cuda12 cuda12-v1.29.0-1
+   gh release create cuda12-v1.29.0-1 ~/release-cuda12/*.pkg.tar.zst ~/release-cuda12/SHA256SUMS \
+     --repo rsd/omarchy-onnxruntime --title '...' --notes '...'
+   (cd aur/onnxruntime-split-cuda12-bin && makepkg --verifysource)
+   ```
+
+   `gen-bin.sh` writes `~/release-cuda12/SHA256SUMS` and `aur/onnxruntime-split-cuda12-bin/{PKGBUILD,.SRCINFO}`. The tag scheme is `cuda12-v<pkgver>-<pkgrel>`, apart from the main line's `v<pkgver>-<pkgrel>`.
+
+6. **Push to the AUR**, the source package first, as in [5](#5-push-to-the-aur). The two pkgbases are new, so clone them first (an empty repository, as in [One-time setup](#one-time-setup)):
+
+   ```bash
+   git clone ssh://aur@aur.archlinux.org/onnxruntime-split-cuda12.git aur/onnxruntime-split-cuda12
+   git clone ssh://aur@aur.archlinux.org/onnxruntime-split-cuda12-bin.git aur/onnxruntime-split-cuda12-bin
+
+   scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --aur aur/onnxruntime-split-cuda12
+   (cd aur/onnxruntime-split-cuda12 && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-1' && git push)
+
+   (cd aur/onnxruntime-split-cuda12-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-1' && git push)
+   ```
+
+**The core pin.** The provider depends on `onnxruntime-core=<pkgver>`, any pkgrel, and not on the core of its own build, because the core links no CUDA library and the provider has no version handshake with it: what the two share is ONNX Runtime's version and the layout-relevant build defines (`DISABLE_*`, `ENABLE_*`, the C++ standard, `_GLIBCXX_USE_CXX11_ABI`). A core that changes one of those would break the provider without any dependency noticing. The rule is therefore:
+
+- **A main-line release that changes `cmake` flags or patches** also rebuilds and re-tests the CUDA 12 line, as a new `cuda12_pkgrel` released under a new tag.
+- **A main-line release that only changes packaging** (dependencies, descriptions, licence files, a vendor bound) does not.
+
+**When ONNX Runtime drops CUDA 12.** Upstream has deprecated CUDA 12 since 1.27. When the main line's ONNX Runtime moves past the last version that builds with it, this line stays at that version and is not rebuilt, because a provider built for one ONNX Runtime version cannot follow a newer core. Continuing it past that point would need its own versioned core, which is a different design from this one, and the decision belongs before the main line leaves that version.
+
 ## Later releases
 
 - **A fix to the `-bin` PKGBUILD alone** (a dependency, a description): bump only its `pkgrel`, with the assets and the release as they are:
@@ -131,5 +213,5 @@ scripts/srcinfo.sh --aur aur/onnxruntime-split          # checks .SRCINFO is cur
   ```
 
   The assets' version still drives the version check and the `<name>=<pkgver>-<pkgrel>` provides. Verify and push as in [4](#4-collect-generate-publish) and [5](#5-push-to-the-aur), without a new release.
-- **A change to the packages** needs a rebuild, a new `pkgrel` in `onnxruntime-split/PKGBUILD`, a new `.SRCINFO` and a new release (a new tag).
+- **A change to the packages** needs a rebuild, a new `pkgrel` in `onnxruntime-split/PKGBUILD`, a new `.SRCINFO` and a new release (a new tag). Whether the CUDA 12 line is rebuilt with it depends on the change: [the core pin](#6-the-cuda-12-legacy-line).
 - **A vendor bump past a dependency bound** (OpenVINO 2026.5, Python 3.15, a new TensorRT minor, and so on; [the bounds](install.md#dependencies-and-version-bounds)) makes pacman refuse the vendor upgrade until the packages are rebuilt: rebuild against the new version, bump `pkgrel`, and release again. `scripts/check-deps.sh` on the released files shows when one is due.

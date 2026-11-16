@@ -3,7 +3,9 @@
 # vendor install: shellcheck over every shell script (the hooks, scripts/,
 # scripts/tests/, tools/) and the PKGBUILD, the PKGBUILD's syntax and
 # metadata (`makepkg --printsrcinfo` and the names, provides and conflicts
-# consumers rely on), namcap when it is installed, every
+# consumers rely on), the CUDA 12 legacy pkgbase onnxruntime-split-cuda12
+# (its generated PKGBUILD and .SRCINFO up to date, and the names in its
+# committed .SRCINFO), namcap when it is installed, every
 # scripts/tests/*-test.sh, the byte-compile and --help of
 # tools/ort-model-check/model-check.py, and the licence guard over the whole
 # tree.
@@ -276,6 +278,41 @@ if command -v namcap >/dev/null 2>&1; then
     run "namcap ($recipe/PKGBUILD)" namcap_pkgbuild
 else
     echo "== namcap: skipped (not installed; pacman -S namcap)"
+fi
+
+# The CUDA 12 legacy line: a second pkgbase, onnxruntime-split-cuda12, whose
+# PKGBUILD is generated from onnxruntime-split's. Its recipe and .SRCINFO are
+# checked for being up to date, and its COMMITTED .SRCINFO is read for the
+# names, the pkgdesc and the bare dependencies (the cuda and cudnn version
+# bounds are added at package time, from the DT_NEEDED entries and the
+# recorded cuDNN version, as in the main line; pkgbuild-settings-test.sh
+# checks them).
+run "gen-cuda12.sh --check" scripts/gen-cuda12.sh --check
+run "srcinfo.sh --recipe onnxruntime-split-cuda12 --check" scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --check
+si12=onnxruntime-split-cuda12/.SRCINFO
+if [[ -r $si12 ]]; then
+    T=$'\t'
+    srcinfo12_names() {
+        local got
+        got=$(sed -n 's/^pkgname = //p' "$si12" | tr '\n' ' ')
+        [[ $got == 'onnxruntime-provider-cuda12-legacy ' ]] || { echo "pkgnames: $got"; return 1; }
+        srcinfo_has "$si12" 'pkgbase = onnxruntime-split-cuda12' \
+            "${T}pkgdesc = The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA GPUs)" \
+            'pkgname = onnxruntime-provider-cuda12-legacy' \
+            "${T}depends = onnxruntime-core=1.29.0" "${T}depends = cuda" "${T}depends = cudnn" \
+            "${T}depends = nvidia-utils" \
+            "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \
+            "${T}provides = onnxruntime-provider-cuda=1.29.0" "${T}provides = onnxruntime-provider-cuda12=1.29.0" \
+            "${T}conflicts = onnxruntime-provider-cuda" "${T}conflicts = onnxruntime-provider-cuda12" || return 1
+        # No installed-version bounds (package time adds them), and no CUDA
+        # 13 anywhere (a .so.13 soname, a cuda>=13 bound, a -cuda13 name).
+        srcinfo_lacks "$si12" "^${T}depends = (cuda|cudnn)[<>=]" || return 1
+        srcinfo_lacks "$si12" '\.so\.13|cuda>=13|cuda<14|cuda13'
+    }
+    run "$si12: names, pkgdesc, bare depends, provides, conflicts, no CUDA 13" srcinfo12_names
+else
+    echo "== $si12: not found"
+    failed+=("$si12: not found")
 fi
 
 for t in scripts/tests/*-test.sh; do

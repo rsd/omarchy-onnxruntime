@@ -15,7 +15,13 @@
 # conflicts. Refused: a version other than the tag's, a duplicate pkgname,
 # the MIGraphX provider, an unmet onnxruntime-core=1.29.0-4 depend, an
 # asset with an .INSTALL script; --pkgrel (bumps only the PKGBUILD's pkgrel, a
-# non-integer is exit 2).
+# non-integer is exit 2). The CUDA 12 line: a cuda12-v tag and a package of
+# pkgbase onnxruntime-split-cuda12 (the legacy provider, with its pkgver-only
+# core pin, met by the main line's core) give pkgbase
+# onnxruntime-split-cuda12-bin, the cuda12-v tag in the source URLs and the
+# provides and conflicts of the -bin convention; refused: a core pin with a
+# pkgrel, a set mixing the two pkgbases, either pkgbase under the other
+# line's tag, and an unknown pkgbase.
 # Needs bsdtar, makepkg (with fakeroot), vercmp and sha256sum; without them
 # it says so and skips. makepkg refuses to run as root: then it fails.
 # Usage: scripts/tests/gen-bin-test.sh. Exits non-zero on any failure.
@@ -49,6 +55,7 @@ fails=0 count=0
 ok() { count=$((count + 1)); echo "ok   $1"; }
 fail() { count=$((count + 1)); echo "FAIL $1"; fails=$((fails + 1)); }
 
+srcbase=onnxruntime-split # the pkgbase pack() writes into .PKGINFO
 lic='MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MPL-2.0'
 # pack <dir> <name> <version> [<extra top-level file>]: builds
 # <dir>/<name>-<version>-x86_64.pkg.tar.zst from a staging root holding the
@@ -58,7 +65,7 @@ pack() {
     local dir=$1 name=$2 version=$3 extra=${4:-} root
     root=$(mktemp -d "$tmp/root.XXXXXX")
     {
-        printf 'pkgname = %s\npkgbase = onnxruntime-split\nxdata = pkgtype=split\n' "$name"
+        printf 'pkgname = %s\npkgbase = %s\nxdata = pkgtype=split\n' "$name" "$srcbase"
         printf 'pkgver = %s\narch = x86_64\nlicense = %s\n' "$version" "$lic"
         cat
     } >"$root/.PKGINFO"
@@ -366,6 +373,101 @@ for bad_rel in x 0 1.5 -1 ''; do
     gen --pkgrel "$bad_rel" --out "$tmp/aur-rel" "$good" v1.29.0-5
     if ((status == 2)) && has 'not a positive integer'; then ok "--pkgrel '$bad_rel': usage error, exit 2"; else fail "--pkgrel '$bad_rel' (exit $status): $out"; fi
 done
+# The CUDA 12 line: pkgbase onnxruntime-split-cuda12, tag cuda12-v<pkgver>-<pkgrel>.
+cuda12() { # cuda12 <dir> <core pin>: the legacy provider
+    local saved=$srcbase
+    srcbase=onnxruntime-split-cuda12
+    pack "$1" onnxruntime-provider-cuda12-legacy 1.29.0-1 <<EOF
+pkgdesc = The CUDA execution provider of ONNX Runtime, for onnxruntime-core (NVIDIA Pascal and Volta GPUs, CUDA 12)
+conflict = onnxruntime-provider-cuda
+conflict = onnxruntime-provider-cuda12
+provides = onnxruntime-provider-cuda=1.29.0
+provides = onnxruntime-provider-cuda12=1.29.0
+depend = onnxruntime-core=$2
+depend = cuda>=12
+depend = cuda<13
+depend = cudnn>=9.10
+depend = cudnn<9.11
+depend = nvidia-utils
+depend = glibc
+depend = libgcc
+depend = libstdc++
+EOF
+    srcbase=$saved
+}
+c12=$tmp/cuda12
+cuda12 "$c12" 1.29.0
+aur12=$tmp/aur12
+gen --base-url "file://$c12/" --out "$aur12" "$c12" cuda12-v1.29.0-1
+if ((status == 0)) && [[ -s $aur12/PKGBUILD && -s $aur12/.SRCINFO ]]; then
+    ok "cuda12: a good release, exit 0"
+else
+    fail "cuda12 release (exit $status): $out"
+fi
+file12=onnxruntime-provider-cuda12-legacy-1.29.0-1-x86_64.pkg.tar.zst
+srcinfo=$aur12/.SRCINFO
+section onnxruntime-provider-cuda12-legacy-bin
+check "cuda12 .SRCINFO: pkgbase, version" "$srcinfo" \
+    'pkgbase = onnxruntime-split-cuda12-bin' "${T}pkgver = 1.29.0" "${T}pkgrel = 1"
+check "cuda12 .SRCINFO: the source is under the base URL given, the file named as the asset" "$srcinfo" \
+    "${T}source = $file12::file://$c12/$file12" "${T}noextract = $file12"
+check "cuda12 .SRCINFO: provides, conflicts, the core pin carried through" "$tmp/onnxruntime-provider-cuda12-legacy-bin" \
+    "${T}provides = onnxruntime-provider-cuda12-legacy=1.29.0-1" \
+    "${T}provides = onnxruntime-provider-cuda=1.29.0" "${T}provides = onnxruntime-provider-cuda12=1.29.0" \
+    "${T}conflicts = onnxruntime-provider-cuda12-legacy" \
+    "${T}conflicts = onnxruntime-provider-cuda" "${T}conflicts = onnxruntime-provider-cuda12" \
+    "${T}depends = onnxruntime-core=1.29.0" "${T}depends = cuda>=12" "${T}depends = cuda<13" \
+    "${T}depends = cudnn>=9.10" "${T}depends = cudnn<9.11" "${T}depends = nvidia-utils"
+if [[ $(sed -n 's/^pkgname = //p' "$srcinfo") == onnxruntime-provider-cuda12-legacy-bin ]] &&
+    grep -q 'built by onnxruntime-split-cuda12)' "$aur12/PKGBUILD" &&
+    grep -q 'release cuda12-v1.29.0-1' "$aur12/PKGBUILD"; then
+    ok "cuda12 PKGBUILD: the one -bin package, header names pkgbase and tag"
+else
+    fail "cuda12 PKGBUILD: $(head -n 8 "$aur12/PKGBUILD")"
+fi
+if has "^  gh release create cuda12-v1\.29\.0-1 .*$c12/$file12 "; then
+    ok "cuda12: gh release create with the cuda12-v tag"
+else
+    fail "cuda12 gh command: $out"
+fi
+# Without --base-url the assets come from the cuda12-v tag, and without --out
+# the pkgbase's own aur/ directory is written (not run here: it is the AUR
+# clone), so read both from the generated PKGBUILD / the script.
+gen --out "$tmp/aur12-url" "$c12" cuda12-v1.29.0-1
+if grep -qF "::https://github.com/rsd/omarchy-onnxruntime/releases/download/cuda12-v1.29.0-1/$file12" "$tmp/aur12-url/PKGBUILD"; then
+    ok "cuda12: the default source URL is under the cuda12-v1.29.0-1 tag"
+else
+    fail "cuda12 default URL: $(grep -F source "$tmp/aur12-url/.SRCINFO")"
+fi
+# shellcheck disable=SC2016 # the script's own text, not an expansion
+if grep -qF 'out=${out:-$top/aur/$srcbase-bin}' "$tool"; then
+    ok "cuda12: the default out directory is aur/<pkgbase>-bin (onnxruntime-split-cuda12-bin)"
+else
+    fail "the default out directory is not derived from the pkgbase"
+fi
+refused_tag() { # refused_tag <description> <regex> <package dir> <tag>
+    local dest
+    dest=$(mktemp -d "$tmp/aur-bad.XXXXXX")
+    gen --out "$dest" "$3" "$4"
+    if ((status == 1)) && has "$2" && [[ ! -e $dest/PKGBUILD ]]; then
+        ok "$1: exit 1"
+    else
+        fail "$1 (exit $status): $out"
+    fi
+}
+bad=$tmp/c12-pin
+cuda12 "$bad" 1.29.0-1
+refused_tag "cuda12: a core pin with a pkgrel" 'depend onnxruntime-core=1\.29\.0-1 is met by no -bin package' "$bad" cuda12-v1.29.0-1
+bad=$tmp/c12-mixed
+cuda12 "$bad" 1.29.0
+core "$bad" 1.29.0-1
+refused_tag "a set mixing the two pkgbases" "pkgbase is 'onnxruntime-split', not onnxruntime-split-cuda12" "$bad" cuda12-v1.29.0-1
+refused_tag "the cuda12 package under a v tag" "pkgbase is 'onnxruntime-split-cuda12', not onnxruntime-split" "$c12" v1.29.0-1
+bad=$tmp/c12-unknown
+srcbase=onnxruntime-other
+pack "$bad" onnxruntime-provider-cuda12-legacy 1.29.0-1 <<<'depend = onnxruntime-core=1.29.0'
+srcbase=onnxruntime-split
+refused_tag "an unknown pkgbase" "pkgbase is 'onnxruntime-other', not onnxruntime-split-cuda12" "$bad" cuda12-v1.29.0-1
 gen "$good" 1.29.0-5
 if ((status == 2)) && has 'not a tag'; then ok "a tag without v: exit 2"; else fail "bad tag (exit $status): $out"; fi
 

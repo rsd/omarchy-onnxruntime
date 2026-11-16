@@ -1,6 +1,6 @@
 # Building
 
-The recipe is `onnxruntime-split/PKGBUILD`; its header comment is the reference for the build inputs and this page explains them. Build from the `onnxruntime-split/` directory with `makepkg`. The recipe is one build, pkgbase `onnxruntime-split`, that writes one package per engine.
+The recipe is `onnxruntime-split/PKGBUILD`; its header comment is the reference for the build inputs and this page explains them. Build from the `onnxruntime-split/` directory with `makepkg`. The recipe is one build, pkgbase `onnxruntime-split`, that writes one package per engine. A second recipe, `onnxruntime-split-cuda12/PKGBUILD`, builds the CUDA 12 legacy provider for older NVIDIA GPUs; it is generated from this one ([below](#the-cuda-12-legacy-line)).
 
 ## Build inputs
 
@@ -9,7 +9,7 @@ Build inputs are environment variables. `prepare()` resolves and checks them, pr
 | Variable | Default | Meaning |
 |---|---|---|
 | `ORTF_EPS` | `cuda tensorrt openvino` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`, `migraphx`; or `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. `migraphx` (AMD GPUs, **untested on AMD hardware**) is not in the default; it stands alone or joins the others (untested together). The CPU provider is always built |
-| `ORTF_CUDA_ARCHS` | `rtx` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
+| `ORTF_CUDA_ARCHS` | `rtx` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`, and `legacy` for CUDA 12) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
 | `ORTF_NVCC_THREADS` | `1` | `nvcc --threads` per CUDA compile job |
 | `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so`. Its `include/NvInferVersion.h` gives the major.minor that the TensorRT provider's `tensorrt` dependency is bounded to |
 | `ORTF_PYTHON` | `1` | `1` also builds the Python module and `python-onnxruntime-core`; `0` skips both |
@@ -47,12 +47,15 @@ ORTF_TENSORRT_HOME=/usr MAKEFLAGS=-j8 makepkg -f          # the AUR's tensorrt
 |---|---|---|
 | `rtx` | `75 86 89 120`: the GeForce and RTX lines, Turing (RTX 20, GTX 16) to Blackwell (RTX 50) | `onnxruntime-provider-cuda13-rtx` |
 | `all` | `75 80 86 89 90 100 103 120`: every x86 GPU CUDA 13 supports, including A100, H100, B200 and B300 | `onnxruntime-provider-cuda13-all` |
+| `legacy` | `60 61 70 75 80 86 89 120` and the PTX of `60` (`60-virtual`): Pascal and Volta, which CUDA 13 dropped, with Turing to Blackwell beside them. Needs CUDA 12. Maxwell (`50`, `52`) is not in it: ONNX Runtime 1.29's fp16 kernels need `sm_53` or later | `onnxruntime-provider-cuda12-legacy` |
 
-`nvcc` also knows `87 88 107 110 121`, which are Jetson, Thor and DGX Spark (Arm) targets; `all` leaves them out. ONNX Runtime compiles `90`, `100`, `103` and `120` as accelerated (`a`) machine code, for exactly that GPU, and the others as plain machine code: no preset embeds PTX.
+`nvcc` also knows `87 88 107 110 121`, which are Jetson, Thor and DGX Spark (Arm) targets; `all` leaves them out. ONNX Runtime compiles `90`, `100`, `103` and `120` as accelerated (`a`) machine code, for exactly that GPU, and the others as plain machine code: `rtx` and `all` embed no PTX, and `legacy` embeds that of `60`. Whatever `ORTF_CUDA_ARCHS` says, ONNX Runtime also compiles 18 kernels for `sm_90a`, so a built provider holds that machine code as well (the CUDA 13 `rtx` package has the same 18). The rule: a preset's PTX is for the oldest architecture the build compiles, the one PTX that every newer GPU can JIT-compile.
+
+A preset is tied to the CUDA major of the toolkit that builds it, and `prepare()` refuses the other combinations: `rtx` and `all` need CUDA 13 or later, `legacy` needs CUDA 12. With a CUDA 12 toolkit the main line therefore takes an explicit list (or `legacy`), and never the default `rtx`.
 
 - **Size and time.** The CUDA provider is 55.7 MiB of host code plus about 33.7 MiB of GPU code per target, and `sm_120` alone makes 89.4 MiB. The CUDA kernels' compile time grows about linearly with the number of targets. The table with the per-preset estimates is in the [README](../README.md#cuda-architecture-presets).
 - **No `a` or `f` suffix.** `120a` and `120f` are refused. ONNX Runtime adds the `a` itself, and it turns its SM120 kernels on only for a bare `120`, so a suffix would silently drop them.
-- **PTX.** `-virtual` entries embed PTX as well, for example `120-virtual`. ONNX Runtime keeps one `-virtual` entry, so at most one is accepted. A preset cannot be combined with other words; give the list instead.
+- **PTX.** `-virtual` entries embed PTX as well, for example `60-virtual`. ONNX Runtime keeps one `-virtual` entry, so at most one is accepted. A preset cannot be combined with other words; give the list instead.
 - **More architectures** make the build longer and larger; give only the GPUs you have.
 
 ### Package names
@@ -68,7 +71,7 @@ makepkg must know every package name before `prepare()` runs, so the names are r
 | MIGraphX | `ORTF_EPS` has `migraphx` | `onnxruntime-provider-migraphx` |
 | Python | `ORTF_PYTHON` is not `0` | `python-onnxruntime-core` |
 
-- **`<M>`** is the major version of the CUDA toolkit: `CUDA_VERSION` in `/opt/cuda/include/cuda.h` (Arch's `cuda`), which `prepare()` checks against `nvcc`. It is never written into the PKGBUILD. CUDA 13.x gives `-cuda13`. Where `cuda.h` does not exist yet when makepkg reads the PKGBUILD (an AUR helper reads it before it installs the makedepends), the name uses major 13, never `-cudax-`. A CUDA 12 toolkit would give `-cuda12-` names (and TensorRT 11 needs CUDA 13, so such a build would have no `tensorrt` in `ORTF_EPS`, or use TensorRT 10), but a CUDA 12 variant is on the backlog and is not provided at present.
+- **`<M>`** is the major version of the CUDA toolkit: `CUDA_VERSION` in `/opt/cuda/include/cuda.h` (Arch's `cuda`), which `prepare()` checks against `nvcc`. It is never written into the PKGBUILD. CUDA 13.x gives `-cuda13`. Where `cuda.h` does not exist yet when makepkg reads the PKGBUILD (an AUR helper reads it before it installs the makedepends), the name uses major 13, never `-cudax-`. A CUDA 12 toolkit gives `-cuda12-` names. The main line with CUDA 12 then needs `ORTF_CUDA_ARCHS` set to an explicit list or `legacy` (the default `rtx` needs CUDA 13), and no `tensorrt` in `ORTF_EPS` (TensorRT 11 needs CUDA 13), or a TensorRT 10. The CUDA 12 package that is released, `onnxruntime-provider-cuda12-legacy`, comes from its own recipe, not from this one with other inputs: [below](#the-cuda-12-legacy-line).
 - **`<sfx>`** is the preset's name (`rtx`, `all`), or, for a list, the real architectures as `smN` in ascending order without repeats, joined by `-`, then the `-virtual` one as `computeN`: `120` gives `sm120`, `"89 120"` gives `sm89-sm120`, `"89 120 120-virtual"` gives `sm89-sm120-compute120`.
 - **The TensorRT package has no architecture suffix**: its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime, and on `tensorrt`, bounded to the major.minor of the headers the build used ([install.md](install.md#2-tensorrt)). It provides and conflicts with `onnxruntime-provider-tensorrt`.
 - **CUDA packages of different builds conflict**: each provides and conflicts with `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>`, because all install the same `/usr/lib/libonnxruntime_providers_cuda.so`. One is installed at a time.
@@ -77,6 +80,18 @@ makepkg must know every package name before `prepare()` runs, so the names are r
 - **Dependencies.** The providers and the Python package depend on `onnxruntime-core=<pkgver>-<pkgrel>`, and every package on the packages of the libraries it links, with version bounds for the vendor runtimes: [install.md](install.md#dependencies-and-version-bounds).
 
 Each package function checks that the inputs recorded by `prepare()` in `src/ortf.conf` give the same names. They would not under `makepkg -e` or `-R` run with other inputs, or after a CUDA upgrade, and the message says what to pass.
+
+### The CUDA 12 legacy line
+
+`onnxruntime-split-cuda12/PKGBUILD` builds one package, `onnxruntime-provider-cuda12-legacy`: the CUDA provider compiled with CUDA 12.9 for the preset `legacy`, to load into the main line's `onnxruntime-core` ([engines.md](engines.md#nvidia-pascal-and-volta-cuda-12-legacy-packaged-untested)). It is a pkgbase of its own, because the two toolchains both own `/opt/cuda` and cannot share a build, and because its AUR `makedepends` would be wrong for one of the two.
+
+- **Generated, never edited.** `scripts/gen-cuda12.sh` writes it from `onnxruntime-split/PKGBUILD` and changes only a few lines: `pkgbase`, the defaults `_ortf_default_eps='cuda'`, `_ortf_default_cuda_archs=legacy` and `_ortf_default_python=0`, `_ortf_line=cuda12`, `_ortf_cuda_major_default=12`, and `pkgrel`, which is the line's own (`cuda12_pkgrel` in the script, starting at 1), plus a header comment. The same `pkgver`, sources, patches and build follow. `scripts/gen-cuda12.sh --check` fails, with a diff, when the committed file is stale, and the script stops without writing when a source line it replaces is missing or repeated. Its `.SRCINFO` comes from `scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --write` (`--check` and `--aur DIR` take the same `--recipe`).
+- **What the line refuses.** `_ortf_line=cuda12` builds the CUDA provider alone: `prepare()` stops for an `ORTF_EPS` other than `cuda`, for `ORTF_PYTHON=1`, for a cuDNN other than 9.10 (cuDNN 9.11 dropped Maxwell, Pascal and Volta; the main line is not bound by this), and for a toolkit that is not CUDA 12 (the names carry `12` whatever `/opt/cuda` holds when makepkg reads the file, so the published `.SRCINFO` is the same on a CUDA 13 host). `package()` fails the build on a CUDA library with a `.so.13` soname, and on a provider that does not link `libcudart.so.12`, `libcublas.so.12` and `libcublasLt.so.12`.
+- **Dependencies.** `onnxruntime-core=<pkgver>` (the version only, any pkgrel, since this line makes no core), `cuda>=12`, `cuda<13`, `cudnn` bounded to the minor of the cuDNN installed at build time (`cudnn>=9.10`, `cudnn<9.11` with cuDNN 9.10), and `nvidia-utils`. `makedepends` are the build tools, `cuda` and `cudnn`. The bounds resolve against the provides of the AUR's `cuda-12.9` (`cuda=12.9`) and `cudnn9.10-cuda12.9` (`cudnn=9.10`).
+- **Compiler: GCC 14.** `cuda-12.9`'s `/etc/profile.d/cuda.sh` sets `NVCC_CCBIN=/usr/bin/g++-14`, and the recipe uses nvcc's host compiler for its C++ as well, so that host code compiled by nvcc and by the C++ compiler agrees. Nothing is set in the recipe for it; the build needs the AUR's `gcc14`, which installs beside Arch's `gcc` (`gcc-14` and `g++-14`), in the clean chroot only.
+- **Build.** Only in a clean chroot, with the three AUR packages passed in with `-I`: [release.md](release.md#6-the-cuda-12-legacy-line). The check of the architectures it holds is `scripts/check-cuda-archs.sh [--cuobjdump PATH] FILE ARCH...`, which takes a package file or the library and fails unless `cuobjdump` lists exactly those SASS and PTX architectures.
+
+`scripts/test.sh` runs the generator's `--check`, the `--check` of both `.SRCINFO` files, and the names, provides and conflicts of the generated one.
 
 ### Portable baseline
 
