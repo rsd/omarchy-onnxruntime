@@ -8,7 +8,9 @@
 # UNRESOLVED; a depend nothing meets is MISSING; a library of another
 # package file given, and a depend on it, are checked against that file; a
 # library covered by a depend on a name its owner provides; a depend met by a
-# virtual provision; a non-ELF *.so skipped; $ORIGIN in a RUNPATH.
+# virtual provision; a non-ELF *.so skipped; $ORIGIN in a RUNPATH; a
+# needed libdnnl is a DNNL flag whoever owns it, the package's own copy
+# included (oneDNN must be linked statically).
 # It queries the real pacman and ldconfig (read-only) and needs gcc, zlib
 # installed and pacman's vercmp; without them it says so and skips.
 # Usage: scripts/tests/check-deps-test.sh. Exits non-zero on any failure.
@@ -95,7 +97,7 @@ has() { grep -qE -- "$1" <<<"$out"; }
 covered=$(pack fx-zlib-user 1-1 libfxz.so.1 -- glibc "$zlib_owner")
 check "$covered"
 if ((status == 0)) && has "libfxz\.so\.1 +libz\.so\.1 +/usr/lib/libz\.so\.1 +$zlib_owner .*ok \($zlib_owner\)" &&
-    has 'libc\.so\.6 .* glibc .*ok \(glibc\)' && has 'no gaps, unresolved libraries or bound violations'; then
+    has 'libc\.so\.6 .* glibc .*ok \(glibc\)' && has 'no gaps, unresolved libraries, bound violations or shared libdnnl'; then
     ok "every needed library covered by a depend: exit 0"
 else
     fail "covered (exit $status): $out"
@@ -216,6 +218,27 @@ if ((status == 1)) && has '^  fx-dep>=3 +fx-dep +2-1 +BOUND'; then
 else
     fail "two packages, bound (exit $status): $out"
 fi
+
+# A shared libdnnl: a stand-in libdnnl.so.3 (oneDNN's soname) shipped in the
+# package itself, and a library that links it. Resolved and owned (this
+# package), it is still flagged: the oneDNN provider links oneDNN
+# statically, and a libdnnl.so.3 in /usr/lib would be Arch's onednn's file.
+printf 'int dnnl_version(void) { return 3; }\n' >"$tmp/src/fxdnnl.c"
+printf 'int dnnl_version(void);\nint fxp(void) { return dnnl_version(); }\n' >"$tmp/src/fxp.c"
+build "$tmp/libdnnl.so.3" libdnnl.so.3 "$tmp/src/fxdnnl.c"
+build "$tmp/libfxp.so" libfxp.so "$tmp/src/fxp.c" -L"$tmp" -l:libdnnl.so.3
+shared_dnnl=$(pack fx-provider-dnnl 1-1 libfxp.so libdnnl.so.3 -- glibc)
+check "$shared_dnnl"
+if ((status == 1)) && has 'libfxp\.so +libdnnl\.so\.3 .*DNNL \(oneDNN must be linked statically\)' &&
+    has 'flagged: 0 GAP, 0 UNRESOLVED, 0 BOUND, 0 MISSING, 1 DNNL'; then
+    ok "a needed libdnnl, even the package's own, is a DNNL flag: exit 1"
+else
+    fail "shared libdnnl (exit $status): $out"
+fi
+static_dnnl=$(pack fx-provider-static 1-1 libfxdep.so.1 -- glibc)
+check "$static_dnnl"
+if ((status == 0)) && ! has 'DNNL'; then ok "no libdnnl needed: no DNNL flag"; else
+    fail "no libdnnl (exit $status): $out"; fi
 
 check
 if ((status == 2)) && has 'scripts/check-deps.sh <package file>'; then ok "no arguments: usage, exit 2"; else

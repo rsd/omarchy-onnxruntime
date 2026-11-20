@@ -10,8 +10,10 @@
 #     machine (SMOKE_ORT_INCLUDE, or /usr/include/onnxruntime); the header is not
 #     vendored in this repository, so otherwise that check is skipped. The same
 #     header builds smoke.c with -DSMOKE_UNIT_TEST (no linking) to test how a
-#     setup error is classified: vendor runtime missing / OpenVINO device absent
-#     are "unavailable", everything else a failure.
+#     setup error is classified: vendor runtime missing / OpenVINO device absent /
+#     the oneDNN or MIGraphX provider library absent are "unavailable", the HIP
+#     no-device errors of migraphx-load (hipGetDeviceCount only) are "no device" (a pass), everything else
+#     a failure.
 # Usage: scripts/tests/smoke-test-test.sh. Exits non-zero on any failure.
 set -euo pipefail
 
@@ -82,7 +84,11 @@ done
 
 # ---- smoke-test.sh: arguments and the missing-ORT paths ---------------------
 
-contains "--help prints the usage" "Usage: scripts/smoke-test.sh" "$("$smoke" --help)"
+help=$("$smoke" --help)
+contains "--help prints the usage" "Usage: scripts/smoke-test.sh" "$help"
+contains "--help names the dnnl target" "dnnl" "$help"
+contains "--help names the migraphx-load target" "migraphx-load" "$help"
+contains "--help says migraphx-load is not in the default set" "set is every target except migraphx-load" "$help"
 expect "--help exits 0" 0 "$(status_of "$smoke" --help)"
 expect "an unknown option is a usage error" 2 "$(status_of "$smoke" --frobnicate)"
 expect "--only without a value is a usage error" 2 "$(status_of "$smoke" --only)"
@@ -151,6 +157,12 @@ contains "run: LD_LIBRARY_PATH points at the library directory" "LD=$fakeprefix/
 first=$(head -n1 "$FAKE_LOG.run")
 if [[ -f $first ]]; then fail "the temporary directory is removed after the run"; else ok "the temporary directory is removed after the run"; fi
 
+# The new targets pass through untouched: validating the names is the test
+# program's job, the wrapper only forwards them.
+CC=$fakecc "$smoke" --prefix "$fakeprefix" --only cpu,dnnl,migraphx-load --require dnnl,migraphx-load >/dev/null 2>&1
+run_args=$(cat "$FAKE_LOG.run")
+contains "run: --only forwards dnnl and migraphx-load" $'--only\ncpu,dnnl,migraphx-load' "$run_args"
+contains "run: --require forwards dnnl and migraphx-load" $'--require\ndnnl,migraphx-load' "$run_args"
 CC=$fakecc "$smoke" --prefix "$fakeprefix" >/dev/null 2>&1
 run_args=$(cat "$FAKE_LOG.run")
 if [[ $run_args == *--only* || $run_args == *--require* || $run_args == *--runs* ]]; then
@@ -242,6 +254,63 @@ if [[ -f $hdr/onnxruntime_c_api.h ]]; then
             "$("$classify" openvino:CPU "[ERROR] [OpenVINO] Invalid device_type is selected. Supported modes are AUTO/HETERO/MULTI")"
         expect "device-missing text does not apply to cuda" fail \
             "$("$classify" cuda "Device CPU is not available")"
+
+        # oneDNN: an optional package (provider library) with an optional runtime.
+        expect "dnnl: absent provider library is unavailable" \
+            "unavailable: provider library not installed: libonnxruntime_providers_dnnl.so" \
+            "$("$classify" dnnl "append provider: Failed to load library libonnxruntime_providers_dnnl.so with error: libonnxruntime_providers_dnnl.so: cannot open shared object file: No such file or directory")"
+        expect "dnnl: missing libdnnl is unavailable" \
+            "unavailable: vendor runtime not installed: libdnnl.so.3" \
+            "$("$classify" dnnl "append provider: Failed to load library libonnxruntime_providers_dnnl.so with error: libdnnl.so.3: cannot open shared object file: No such file or directory")"
+        expect "dnnl: an undefined symbol is a failure" fail \
+            "$("$classify" dnnl "append provider: Failed to load library libonnxruntime_providers_dnnl.so with error: undefined symbol: dnnl_foo")"
+        expect "dnnl: a session error is a failure, never a pass" fail \
+            "$("$classify" dnnl "CreateSession: Could not find an implementation for Conv")"
+        expect "the dnnl provider library is not special for cuda" fail \
+            "$("$classify" cuda "Failed to load library libonnxruntime_providers_dnnl.so with error: libonnxruntime_providers_dnnl.so: cannot open shared object file")"
+
+        # MIGraphX: load only.  Absent library or runtime is unavailable; only the
+        # HIP no-device signatures (hipGetDeviceCount) are the clean pass; everything else is a failure.
+        expect "migraphx-load: absent provider library is unavailable" \
+            "unavailable: provider library not installed: libonnxruntime_providers_migraphx.so" \
+            "$("$classify" migraphx-load "append provider: Failed to load library libonnxruntime_providers_migraphx.so with error: libonnxruntime_providers_migraphx.so: cannot open shared object file: No such file or directory")"
+        expect "migraphx-load: missing libmigraphx_c is unavailable" \
+            "unavailable: vendor runtime not installed: libmigraphx_c.so.3" \
+            "$("$classify" migraphx-load "CreateSession: Failed to load library libonnxruntime_providers_migraphx.so with error: libmigraphx_c.so.3: cannot open shared object file: No such file or directory")"
+        expect "migraphx-load: missing libamdhip64 is unavailable" \
+            "unavailable: vendor runtime not installed: libamdhip64.so.7" \
+            "$("$classify" migraphx-load "CreateSession: Failed to load library libonnxruntime_providers_migraphx.so with error: libamdhip64.so.7: cannot open shared object file: No such file or directory")"
+        expect "migraphx-load: missing libhsa is unavailable" \
+            "unavailable: vendor runtime not installed: libhsa-runtime64.so.1" \
+            "$("$classify" migraphx-load "append provider: Failed to load library libonnxruntime_providers_migraphx.so with error: libhsa-runtime64.so.1: cannot open shared object file: No such file or directory")"
+        expect "migraphx-load: the real HIP no-device message is a clean pass" "no device" \
+            "$("$classify" migraphx-load "append provider: HIP failure 100: no ROCm-capable device is detected; GPU=0; hostname=h; file=migraphx_execution_provider_info.cc; line=29; expr=hipGetDeviceCount(&num_devices); ")"
+        expect "migraphx-load: 'HIP failure' alone is a failure" fail \
+            "$("$classify" migraphx-load "append provider: HIP failure 35: something")"
+        expect "migraphx-load: HIP failure 35 from hipGetDeviceCount (broken driver) is a failure" fail \
+            "$("$classify" migraphx-load "append provider: HIP failure 35: hipErrorInsufficientDriver; GPU=0; hostname=h; file=migraphx_execution_provider_info.cc; line=29; expr=hipGetDeviceCount(&num_devices); ")"
+        expect "migraphx-load: a HIP failure of hipMalloc is a failure" fail \
+            "$("$classify" migraphx-load "CreateSession: HIP failure 2: out of memory; GPU=0; hostname=h; file=x.cc; line=1; expr=hipMalloc(&p, n); ")"
+        expect "migraphx-load: a HIP failure of hipSetDevice is a failure" fail \
+            "$("$classify" migraphx-load "CreateSession: HIP failure 101: invalid device ordinal; GPU=0; hostname=h; file=migraphx_execution_provider.cc; line=162; expr=hipSetDevice(info_.device_id); ")"
+        expect "migraphx-load: hipErrorNoDevice is a clean pass" "no device" \
+            "$("$classify" migraphx-load "CreateSession: hipSetDevice failed: hipErrorNoDevice")"
+        expect "migraphx-load: 'no ROCm-capable device' is a clean pass" "no device" \
+            "$("$classify" migraphx-load "no ROCm-capable device is detected")"
+        expect "migraphx-load: zero devices is a clean pass" "no device" \
+            "$("$classify" migraphx-load "append provider: Invalid device ID: 0, must be between 0 (inclusive) and 0 (exclusive).")"
+        expect "migraphx-load: a device ID error with devices present is a failure" fail \
+            "$("$classify" migraphx-load "append provider: Invalid device ID: 3, must be between 0 (inclusive) and 2 (exclusive).")"
+        expect "migraphx-load: 'not supported in this build' is a failure" fail \
+            "$("$classify" migraphx-load "append provider: MIGraphX execution provider is not supported in this build. ")"
+        expect "migraphx-load: an undefined symbol in the provider library is a failure" fail \
+            "$("$classify" migraphx-load "append provider: Failed to load library libonnxruntime_providers_migraphx.so with error: undefined symbol: migraphx_foo")"
+        expect "migraphx-load: an unknown provider name is a failure" fail \
+            "$("$classify" migraphx-load "append provider: Unknown provider name 'MIGraphX'. Currently supported values are 'DML'/'DmlExecutionProvider'.")"
+        expect "migraphx-load: any other error status is a failure" fail \
+            "$("$classify" migraphx-load "CreateSession: MIGraphX EP could not be created")"
+        expect "no device never applies to cuda" fail \
+            "$("$classify" cuda "CreateSession: hipSetDevice failed: hipErrorNoDevice")"
     else
         fail "smoke.c classifier test build does not compile against $hdr"
     fi

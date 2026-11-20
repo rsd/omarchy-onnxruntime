@@ -6,12 +6,35 @@
  *
  * MODEL.onnx is the model written by make-model.py.  LIST is a comma-separated
  * set of targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU,
- * openvino:NPU (case-insensitive; "openvino" selects all three devices).
+ * openvino:NPU, dnnl, migraphx-load (case-insensitive; "openvino" selects all
+ * three OpenVINO devices).
  *
  * A target is "unavailable" (not a failure) when its provider is not in the
  * library, when the provider's vendor runtime is not installed (CUDA, cuDNN,
- * TensorRT and OpenVINO are optional dependencies, so every provider is compiled
- * in), or when OpenVINO reports the device absent.
+ * TensorRT, OpenVINO, oneDNN and MIGraphX are optional dependencies, so every
+ * provider is compiled in), when the oneDNN or MIGraphX provider library
+ * (libonnxruntime_providers_dnnl.so / _migraphx.so, separate packages) is not
+ * installed, or when OpenVINO reports the device absent.
+ *
+ * migraphx-load is the one target nobody can be sure to run: it needs an AMD
+ * GPU.  It appends the MIGraphX provider by name and creates the session.  The
+ * main library does not list MIGraphX among its available providers (the
+ * provider is loaded on demand), so the usual "provider is listed" check does
+ * not apply: the target is "unavailable" when libonnxruntime_providers_migraphx.so
+ * is not installed next to libonnxruntime.so, or when libmigraphx_c, libamdhip64
+ * or libhsa is missing.  Without a device the provider's own option parsing
+ * fails with "HIP failure 100: ... expr=hipGetDeviceCount(...)" (hipErrorNoDevice,
+ * "no ROCm-capable device is detected"), or with "Invalid device
+ * ID: 0, must be between 0 (inclusive) and 0 (exclusive)"; only those signatures
+ * are the pass "ok (no device)" (the message follows).  A HIP failure of any
+ * other code (e.g. 35, a broken driver) or call (hipMalloc, hipSetDevice, ...) is a failure.
+ * Any other error, an old library ("Unknown provider name"), a library built
+ * without MIGraphX ("not supported in this build"), an undefined symbol in the
+ * provider library (soname or ABI drift) and the like, is a failure.  With a
+ * device the model runs and is checked like any other target ("ok").  A crash
+ * is not caught here: the wrapper reports the signal.  Because a broken HIP
+ * runtime may abort the process, migraphx-load is not in the default set of
+ * targets: it runs only when named in --only or --require.
  *
  * Exit status: 0 when every selected target that is available passed and every
  * --require'd target is ok; 1 otherwise; 2 on a usage error; 3 when the ONNX
@@ -23,17 +46,21 @@
  *
  * Build:  cc -std=c11 smoke.c -I<dir with onnxruntime_c_api.h> -lonnxruntime -lm
  */
-#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE /* dladdr, for the location of libonnxruntime.so */
 
 #include <onnxruntime_c_api.h>
 
 #include <ctype.h>
+#ifndef SMOKE_UNIT_TEST
+#include <dlfcn.h>
+#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Oldest API table we accept: SessionOptionsAppendExecutionProvider_OpenVINO_V2
  * (the newest entry point used here) appeared in ORT 1.17. */
@@ -88,13 +115,14 @@ static void build_reference(void)
 
 /* ---- targets ------------------------------------------------------------- */
 
-typedef enum { EP_CPU, EP_CUDA, EP_TENSORRT, EP_OPENVINO } EpKind;
+typedef enum { EP_CPU, EP_CUDA, EP_TENSORRT, EP_OPENVINO, EP_DNNL, EP_MIGRAPHX } EpKind;
 
 typedef struct {
     const char *id;       /* name used on the command line and in the report */
     EpKind kind;
     const char *provider; /* name reported by GetAvailableProviders */
     const char *device;   /* OpenVINO device_type, else NULL */
+    int opt_in;           /* not part of the default set: runs only when named */
     /*
      * Accepted error per element: atol + rtol * |expected|.  The reference
      * values are exact in fp16, so a correct fp16 or fp32 path reproduces them
@@ -105,17 +133,23 @@ typedef struct {
      *    (OpenVINO CPU on AMX hardware, 8-bit mantissa, ~0.4% relative); 1e-2
      *    catches any wrong result (the output spans 0.25..18) without
      *    flagging reduced precision.
+     *  - oneDNN: fp32 on the CPU by default; 1e-3 leaves room for fused
+     *    kernels' summation order, as for CUDA.
+     *  - MIGraphX: fp32 unless fp16 is requested, which it is not; 1e-2 as for
+     *    the other GPU engines (never measured: no AMD GPU was available).
      */
     double atol, rtol;
 } Target;
 
 static const Target TARGETS[] = {
-    {"cpu", EP_CPU, "CPUExecutionProvider", NULL, 1e-5, 1e-5},
-    {"cuda", EP_CUDA, "CUDAExecutionProvider", NULL, 1e-3, 1e-3},
-    {"tensorrt", EP_TENSORRT, "TensorrtExecutionProvider", NULL, 1e-2, 1e-2},
-    {"openvino:CPU", EP_OPENVINO, "OpenVINOExecutionProvider", "CPU", 1e-2, 1e-2},
-    {"openvino:GPU", EP_OPENVINO, "OpenVINOExecutionProvider", "GPU", 1e-2, 1e-2},
-    {"openvino:NPU", EP_OPENVINO, "OpenVINOExecutionProvider", "NPU", 1e-2, 1e-2},
+    {"cpu", EP_CPU, "CPUExecutionProvider", NULL, 0, 1e-5, 1e-5},
+    {"cuda", EP_CUDA, "CUDAExecutionProvider", NULL, 0, 1e-3, 1e-3},
+    {"tensorrt", EP_TENSORRT, "TensorrtExecutionProvider", NULL, 0, 1e-2, 1e-2},
+    {"openvino:CPU", EP_OPENVINO, "OpenVINOExecutionProvider", "CPU", 0, 1e-2, 1e-2},
+    {"openvino:GPU", EP_OPENVINO, "OpenVINOExecutionProvider", "GPU", 0, 1e-2, 1e-2},
+    {"openvino:NPU", EP_OPENVINO, "OpenVINOExecutionProvider", "NPU", 0, 1e-2, 1e-2},
+    {"dnnl", EP_DNNL, "DnnlExecutionProvider", NULL, 0, 1e-3, 1e-3},
+    {"migraphx-load", EP_MIGRAPHX, "MIGraphXExecutionProvider", NULL, 1, 1e-2, 1e-2},
 };
 #define NTARGETS (sizeof TARGETS / sizeof TARGETS[0])
 
@@ -162,6 +196,7 @@ typedef struct {
     Phase phase;
     double create_ms, first_ms, warm_ms, max_err;
     int have_timing;
+    int no_device; /* status is ST_OK because the provider failed cleanly (migraphx-load) */
     char msg[1024];
 } Result;
 
@@ -244,16 +279,57 @@ static int missing_vendor_library(const char *msg, char *soname, size_t n)
     /* Only a provider load error counts, not any dlopen failure. */
     return contains_ci(msg, "Failed to load library") || contains_ci(msg, "libonnxruntime_providers") ||
            strncmp(soname, "libcu", 5) == 0 || strncmp(soname, "libnv", 5) == 0 ||
-           strncmp(soname, "libopenvino", 11) == 0;
+           strncmp(soname, "libopenvino", 11) == 0 || strncmp(soname, "libdnnl", 7) == 0 ||
+           strncmp(soname, "libmigraphx", 11) == 0 || strncmp(soname, "libamdhip", 9) == 0 ||
+           strncmp(soname, "libhsa", 6) == 0;
+}
+
+/* Only the no-device answers of ORT's MIGraphX provider are a clean pass.  Both
+ * come from MIGraphXExecutionProviderInfo (migraphx_execution_provider_info.cc,
+ * v1.29.0) parsing device_id: hipGetDeviceCount failing, which HIP_CALL turns
+ * into "HIP failure <code>: <hipGetErrorString>; GPU=...; expr=hipGetDeviceCount(
+ * &num_devices); " (hipErrorNoDevice reads "no ROCm-capable device is detected"),
+ * or hipGetDeviceCount succeeding with 0 devices: "Invalid device ID: 0, must be
+ * between 0 (inclusive) and 0 (exclusive)."  A "HIP failure" counts only as code 100
+ * (hipErrorNoDevice) together with "hipGetDeviceCount": any other code (35,
+ * hipErrorInsufficientDriver, a broken driver) fails, and so does the same message shape from any other HIP call
+ * (hipMalloc out of memory, hipSetDevice, no binary for the GPU) means a device
+ * is there and something is wrong.  Nothing looser. */
+static int says_no_device(const char *msg)
+{
+    return (contains_ci(msg, "HIP failure 100:") && contains_ci(msg, "hipGetDeviceCount")) ||
+           contains_ci(msg, "hipErrorNoDevice") ||
+           contains_ci(msg, "no ROCm-capable device") ||
+           (contains_ci(msg, "Invalid device ID: 0") && contains_ci(msg, "and 0 (exclusive)"));
+}
+
+/* The provider library of the two engines that ship as separate packages
+ * (onnxruntime-provider-dnnl, onnxruntime-provider-migraphx), else NULL. */
+static const char *own_provider_library(EpKind kind)
+{
+    if (kind == EP_DNNL)
+        return "libonnxruntime_providers_dnnl.so";
+    if (kind == EP_MIGRAPHX)
+        return "libonnxruntime_providers_migraphx.so";
+    return NULL;
 }
 
 /* Decide whether a setup failure means "this engine is not usable on this
  * machine" (unavailable) rather than a bug.  On yes, writes the reason. */
 static int setup_unavailable_reason(const Target *t, const char *msg, char *reason, size_t n)
 {
-    char soname[128];
+    char soname[128], needle[160];
+    const char *own = own_provider_library(t->kind);
     if (t->kind == EP_CPU)
         return 0;
+    if (own != NULL) {
+        /* The provider library itself is absent: its package is not installed. */
+        snprintf(needle, sizeof needle, "%s: cannot open shared object file", own);
+        if (strstr(msg, needle) != NULL) {
+            snprintf(reason, n, "provider library not installed: %s", own);
+            return 1;
+        }
+    }
     if (missing_vendor_library(msg, soname, sizeof soname)) {
         snprintf(reason, n, "vendor runtime not installed: %s", soname);
         return 1;
@@ -263,6 +339,21 @@ static int setup_unavailable_reason(const Target *t, const char *msg, char *reas
         return 1;
     }
     return 0;
+}
+
+typedef enum { SETUP_FAIL, SETUP_UNAVAILABLE, SETUP_NO_DEVICE } SetupOutcome;
+
+/* What a failure while appending the provider or creating the session means.
+ * Only migraphx-load has a "no device" outcome, and only for the signatures in
+ * says_no_device; every other message, "not supported in this build" and
+ * "undefined symbol" included, is a failure. */
+static SetupOutcome classify_setup(const Target *t, const char *msg, char *reason, size_t n)
+{
+    if (setup_unavailable_reason(t, msg, reason, n))
+        return SETUP_UNAVAILABLE;
+    if (t->kind == EP_MIGRAPHX && says_no_device(msg))
+        return SETUP_NO_DEVICE;
+    return SETUP_FAIL;
 }
 
 static int provider_listed(char **providers, int n, const char *name)
@@ -311,6 +402,26 @@ static OrtStatus *append_provider(const Target *t, OrtSessionOptions *opts)
     case EP_OPENVINO: {
         const char *keys[] = {"device_type"}, *vals[] = {t->device};
         return g_api->SessionOptionsAppendExecutionProvider_OpenVINO_V2(opts, keys, vals, 1);
+    }
+    case EP_DNNL: {
+        /* Default options (arena on), through the options object so that the
+         * struct layout stays ORT's business (ORT 1.15 and later). */
+        OrtDnnlProviderOptions *o = NULL;
+        if ((st = g_api->CreateDnnlProviderOptions(&o)) != NULL)
+            return st;
+        st = g_api->SessionOptionsAppendExecutionProvider_Dnnl(opts, o);
+        g_api->ReleaseDnnlProviderOptions(o);
+        return st;
+    }
+    case EP_MIGRAPHX: {
+        /* The generic, by-name call: the legacy OrtMIGraphXProviderOptions
+         * struct changes size between versions, which a program built against
+         * one header and run on another library must not depend on.  ORT 1.29.0
+         * accepts the name when built with USE_MIGRAPHX or
+         * USE_MIGRAPHX_PROVIDER_INTERFACE (provider_registration.cc); a core
+         * without either answers "not supported in this build", a failure. */
+        const char *keys[] = {"device_id"}, *vals[] = {"0"};
+        return g_api->SessionOptionsAppendExecutionProvider(opts, "MIGraphX", keys, vals, 1);
     }
     }
     return NULL;
@@ -419,10 +530,14 @@ done:
 
     if (r->status == ST_FAIL && r->phase == PH_SETUP) {
         char reason[256], full[sizeof r->msg];
-        if (setup_unavailable_reason(t, r->msg, reason, sizeof reason)) {
+        SetupOutcome outcome = classify_setup(t, r->msg, reason, sizeof reason);
+        if (outcome == SETUP_UNAVAILABLE) {
             snprintf(full, sizeof full, "%.256s (ORT said: %.700s)", reason, r->msg);
             memcpy(r->msg, full, sizeof r->msg);
             r->status = ST_UNAVAILABLE;
+        } else if (outcome == SETUP_NO_DEVICE) {
+            r->status = ST_OK;
+            r->no_device = 1;
         }
     }
 }
@@ -433,7 +548,8 @@ done:
 /*
  * Test build (-DSMOKE_UNIT_TEST, only the ORT header needed, nothing linked):
  *   classify TARGET MESSAGE
- * prints "unavailable: REASON" or "fail" for a setup error MESSAGE on TARGET.
+ * prints "unavailable: REASON", "no device" or "fail" for a setup error MESSAGE
+ * on TARGET.
  */
 int main(int argc, char **argv)
 {
@@ -442,15 +558,39 @@ int main(int argc, char **argv)
         return 2;
     for (size_t i = 0; i < NTARGETS; i++)
         if (!strcmp(argv[1], TARGETS[i].id)) {
-            if (setup_unavailable_reason(&TARGETS[i], argv[2], reason, sizeof reason))
+            switch (classify_setup(&TARGETS[i], argv[2], reason, sizeof reason)) {
+            case SETUP_UNAVAILABLE:
                 printf("unavailable: %s\n", reason);
-            else
+                break;
+            case SETUP_NO_DEVICE:
+                puts("no device");
+                break;
+            default:
                 puts("fail");
+            }
             return 0;
         }
     return 2;
 }
 #else
+
+/* Whether the provider library of a separately packaged engine sits next to
+ * the libonnxruntime.so that is loaded, where ORT looks for it.  An unknown
+ * location counts as present: the load error then says what is missing. */
+static int provider_library_present(const char *name)
+{
+    Dl_info info;
+    char path[4096];
+    if (dladdr((void *)(size_t)&OrtGetApiBase, &info) == 0 || info.dli_fname == NULL)
+        return 1;
+    const char *slash = strrchr(info.dli_fname, '/');
+    int len = slash == NULL ? snprintf(path, sizeof path, "%s", name)
+                            : snprintf(path, sizeof path, "%.*s/%s", (int)(slash - info.dli_fname),
+                                       info.dli_fname, name);
+    if (len < 0 || (size_t)len >= sizeof path)
+        return 1;
+    return access(path, F_OK) == 0;
+}
 
 static void print_oneline(const char *s)
 {
@@ -465,8 +605,11 @@ static void print_oneline(const char *s)
 static void usage(FILE *f)
 {
     fputs("usage: smoke MODEL.onnx [--only LIST] [--require LIST] [--runs N] [--log-level N]\n"
-          "targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU, openvino:NPU\n"
-          "         (\"openvino\" selects the three OpenVINO devices)\n",
+          "targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU, openvino:NPU, dnnl,\n"
+          "         migraphx-load (\"openvino\" selects the three OpenVINO devices)\n"
+          "default set: all but migraphx-load, which runs only when named in --only or --require\n"
+          "migraphx-load: unavailable without libonnxruntime_providers_migraphx.so or its AMD\n"
+          "         libraries; \"ok (no device)\" only for a hipGetDeviceCount or no-device error, any other error fails\n",
           f);
 }
 
@@ -579,7 +722,7 @@ int main(int argc, char **argv)
 
     printf("model: %s, %d warm run(s) per target, CPU EP fallback disabled for non-CPU targets\n\n",
            model, runs);
-    printf("%-14s %-12s %10s %10s %10s %10s\n", "target", "status", "create ms", "first ms",
+    printf("%-14s %-15s %10s %10s %10s %10s\n", "target", "status", "create ms", "first ms",
            "warm ms", "max error");
 
     for (size_t i = 0; i < NTARGETS; i++)
@@ -588,23 +731,35 @@ int main(int argc, char **argv)
             rc = 1;
         }
 
-    int nok = 0, nfail = 0, nunavail = 0;
+    int nok = 0, nfail = 0, nunavail = 0, nskipped = 0;
     for (size_t i = 0; i < NTARGETS; i++) {
         const Target *t = &TARGETS[i];
-        if (have_only && !only[i])
+        /* --only picks exactly; otherwise the default set plus anything required. */
+        if (have_only ? !only[i] : (t->opt_in && !require[i])) {
+            if (!have_only)
+                nskipped++;
             continue;
+        }
 
         Result r;
-        if (!provider_listed(providers, nproviders, t->provider)) {
+        /* The main library never lists MIGraphX (its provider is loaded on
+         * demand), so for migraphx-load the provider library on disk decides. */
+        const char *own = own_provider_library(t->kind);
+        if (t->kind == EP_MIGRAPHX ? !provider_library_present(own)
+                                   : !provider_listed(providers, nproviders, t->provider)) {
             memset(&r, 0, sizeof r);
             r.status = ST_UNAVAILABLE;
-            snprintf(r.msg, sizeof r.msg, "%s is not in the available providers", t->provider);
+            if (t->kind == EP_MIGRAPHX)
+                snprintf(r.msg, sizeof r.msg, "provider library not installed: %s", own);
+            else
+                snprintf(r.msg, sizeof r.msg, "%s is not in the available providers", t->provider);
         } else {
             run_target(t, env, mem, model, runs, &r);
         }
 
-        const char *label = r.status == ST_OK ? "ok" : r.status == ST_FAIL ? "FAIL" : "unavailable";
-        printf("%-14s %-12s", t->id, label);
+        const char *label = r.status == ST_OK ? (r.no_device ? "ok (no device)" : "ok")
+                            : r.status == ST_FAIL ? "FAIL" : "unavailable";
+        printf("%-14s %-15s", t->id, label);
         if (r.have_timing)
             printf(" %10.1f %10.2f %10.2f %10.2e", r.create_ms, r.first_ms, r.warm_ms, r.max_err);
         else if (r.create_ms > 0)
@@ -612,11 +767,14 @@ int main(int argc, char **argv)
         else
             printf(" %10s %10s %10s %10s", "-", "-", "-", "-");
         putchar('\n');
-        if (r.status != ST_OK && r.msg[0]) {
-            printf("    %s: ", r.status == ST_FAIL ? "error" : "note");
+        if ((r.status != ST_OK || r.no_device) && r.msg[0]) {
+            printf("    %s: %s", r.status == ST_FAIL ? "error" : "note", r.no_device ? "no device: " : "");
             print_oneline(r.msg);
             putchar('\n');
         }
+        /* A later target may take the process down (a vendor runtime aborting):
+         * what is known by now must already be out when stdout is a pipe. */
+        fflush(stdout);
 
         if (r.status == ST_OK)
             nok++;
@@ -628,6 +786,8 @@ int main(int argc, char **argv)
             rc = 1;
     }
     printf("\n%d ok, %d failed, %d unavailable\n", nok, nfail, nunavail);
+    if (nskipped > 0)
+        printf("%d target(s) not run by default: name them in --only or --require (see --help)\n", nskipped);
 cleanup:
     if (mem != NULL)
         g_api->ReleaseMemoryInfo(mem);

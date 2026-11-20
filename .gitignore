@@ -14,6 +14,10 @@ onnxruntime-split-cuda12/src/
 onnxruntime-split-cuda12/pkg/
 onnxruntime-split-cuda12/onnxruntime/
 onnxruntime-split-cuda12/ortf-dep-*.zip
+onnxruntime-split-migraphx/src/
+onnxruntime-split-migraphx/pkg/
+onnxruntime-split-migraphx/onnxruntime/
+onnxruntime-split-migraphx/ortf-dep-*.zip
 *.pkg.tar*
 *.src.tar*
 

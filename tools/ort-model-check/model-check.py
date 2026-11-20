@@ -42,6 +42,7 @@ TARGETS = [
     ("openvino:CPU", "OpenVINOExecutionProvider", "CPU"),
     ("openvino:GPU", "OpenVINOExecutionProvider", "GPU"),
     ("openvino:NPU", "OpenVINOExecutionProvider", "NPU"),
+    ("dnnl", "DnnlExecutionProvider", None),
 ]
 TARGET_IDS = [t[0] for t in TARGETS]
 BY_ID = {t[0]: t for t in TARGETS}
@@ -80,9 +81,9 @@ FP16 = ("fp16", 1.0, 1e-2)
 # fp32 inference (an f32 hint fails to compile), so it stays at fp16.
 BOUNDS = {
     "default": {"cpu": EXACT, "cuda": TF32, "tensorrt": TF32, "openvino:CPU": FP32,
-                "openvino:GPU": FP16, "openvino:NPU": FP16},
+                "openvino:GPU": FP16, "openvino:NPU": FP16, "dnnl": FP32},
     "fp32": {"cpu": EXACT, "cuda": FP32, "tensorrt": FP32, "openvino:CPU": FP32,
-             "openvino:GPU": FP32, "openvino:NPU": FP16},
+             "openvino:GPU": FP32, "openvino:NPU": FP16, "dnnl": FP32},
 }
 TF32_OVERRIDE = "NVIDIA_TF32_OVERRIDE"
 FP32_NOTES = {
@@ -113,7 +114,7 @@ def expand_targets(text, option):
             if tid.lower() == tok.lower() or (":" in tid and tid.split(":")[0].lower() == tok.lower())
         ]
         if not hits:
-            raise ValueError("%s: unknown target '%s' (known: cpu, cuda, tensorrt, openvino, %s)" % (
+            raise ValueError("%s: unknown target '%s' (known: cpu, cuda, tensorrt, openvino, dnnl, %s)" % (
                 option, tok, ", ".join(t for t in TARGET_IDS if ":" in t)))
         chosen.update(hits)
     return [tid for tid in TARGET_IDS if tid in chosen]
@@ -131,7 +132,7 @@ def build_parser():
         prog="model-check.py",
         description="Run an ONNX model on each ONNX Runtime execution provider, "
         "compare the outputs with the CPU provider's and time the runs.",
-        epilog="targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU, openvino:NPU "
+        epilog="targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU, openvino:NPU, dnnl "
         "('openvino' selects all three devices).  Exit status: 0 ok, 1 a target "
         "failed or a required target is not ok, 2 usage error, 3 onnxruntime or "
         "numpy cannot be imported.",

@@ -22,9 +22,11 @@ sudo pacman -S --needed nvidia-utils cuda cudnn
 # OpenVINO provider: CPU, Intel GPU and Intel NPU devices
 sudo pacman -S --needed openvino openvino-intel-gpu-plugin openvino-intel-npu-plugin intel-compute-runtime level-zero-loader intel-npu-driver
 
-# MIGraphX provider (AMD GPUs; untested on AMD hardware, built only with ORTF_EPS=migraphx)
+# MIGraphX provider runtimes (AMD GPUs; untested on AMD hardware). The provider and its Python add-on are AUR source packages: amd.md#installing
 sudo pacman -S --needed migraphx hip-runtime-amd
 ```
+
+The oneDNN provider (`onnxruntime-provider-dnnl`) is optional and needs no runtime installed: oneDNN is inside the package. It is meant for Intel server CPUs (Xeon with AVX-512 or AMX) and int8 or bf16 models; on desktops and laptops use the CPU provider, or OpenVINO on Intel, and on AMD CPUs the CPU provider ([engines.md](engines.md#onednn)). `onnxruntime-core` and the CUDA package depend on `nccl`, which pacman installs from `extra` with them, and which needs no step of its own (364.18 MiB installed, on every machine, NVIDIA or not; a source build with `ORTF_NCCL=0` avoids it: [build.md](build.md#nccl-and-the-nccloff-packages)).
 
 `nvidia-utils` is the NVIDIA driver's user-space part; you need it at run time, not to build. Each provider package depends on its runtimes, so it cannot be installed without them:
 
@@ -33,7 +35,9 @@ sudo pacman -S --needed migraphx hip-runtime-amd
 | `onnxruntime-provider-cuda<M>-<sfx>` | `cuda`, `cudnn`, `nvidia-utils` |
 | `onnxruntime-provider-tensorrt-cuda<M>` | the same, plus `tensorrt` (step 2) |
 | `onnxruntime-provider-openvino` | `openvino` |
+| `onnxruntime-provider-dnnl` (optional) | nothing beyond `libgomp` (`gcc-libs`) |
 | `onnxruntime-provider-migraphx` | `migraphx`, `hip-runtime-amd` |
+| `python-onnxruntime-provider-migraphx` (the Python add-on) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python`; no vendor runtime of its own |
 
 Install the runtimes before step 3. Their dependencies carry version bounds, so pacman holds back a vendor upgrade that would break the provider until the packages are rebuilt ([dependencies.md](dependencies.md)). The OpenVINO device plugins and drivers (`openvino-intel-gpu-plugin`, `openvino-intel-npu-plugin`, `intel-compute-runtime`, `level-zero-loader`, `intel-npu-driver`) are optional dependencies of `onnxruntime-provider-openvino`, because each device needs only its own.
 
@@ -79,34 +83,38 @@ The AUR package base `onnxruntime-split-bin` provides prebuilt versions of the p
 | `onnxruntime-provider-cuda13-all-bin` | `onnxruntime-provider-cuda13-all` (`75 80 86 89 90 100 103 120`); conflicts with the `rtx` one |
 | `onnxruntime-provider-tensorrt-cuda13-bin` | `onnxruntime-provider-tensorrt-cuda13` |
 | `onnxruntime-provider-openvino-bin` | `onnxruntime-provider-openvino` |
+| `onnxruntime-provider-dnnl-bin` (optional) | `onnxruntime-provider-dnnl` |
 | `python-onnxruntime-core-bin` | `python-onnxruntime-core` |
 
 They hold only ONNX Runtime and its bundled open-source dependencies. The vendor runtimes are dependencies, installed from their own packages (steps 1 and 2): install those first, or let the AUR helper pull the ones that are in Arch's repositories. TensorRT is not: install it first (step 2), or the TensorRT provider package is refused.
 
-**With an AUR helper**, name the packages of the engines you use (the core is always needed):
+**With an AUR helper**, name the packages of the engines you use (the core is always needed; `onnxruntime-provider-dnnl-bin` is optional and can be left out):
 
 ```bash
-yay -S onnxruntime-core-bin onnxruntime-provider-cuda13-rtx-bin onnxruntime-provider-tensorrt-cuda13-bin onnxruntime-provider-openvino-bin python-onnxruntime-core-bin
+yay -S onnxruntime-core-bin onnxruntime-provider-cuda13-rtx-bin onnxruntime-provider-tensorrt-cuda13-bin onnxruntime-provider-openvino-bin onnxruntime-provider-dnnl-bin python-onnxruntime-core-bin
 ```
 
 For the `all` preset, name `onnxruntime-provider-cuda13-all-bin` instead of the `rtx` one: they conflict, and one CUDA package is installed at a time.
 
-**Without a helper**, install the release's files directly. Download the `.pkg.tar.zst` files and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases> (tag `v1.29.0-6`; the tag is `v<pkgver>-<pkgrel>`), check them, and install the ones you want in one `pacman -U`:
+**Without a helper**, install the release's files directly. Download the `.pkg.tar.zst` files and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases> (tag `v1.29.0-7`; the tag is `v<pkgver>-<pkgrel>`), check them, and install the ones you want in one `pacman -U`:
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS
-sudo pacman -U onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst \
-  onnxruntime-provider-cuda13-rtx-1.29.0-6-x86_64.pkg.tar.zst \
-  onnxruntime-provider-tensorrt-cuda13-1.29.0-6-x86_64.pkg.tar.zst \
-  onnxruntime-provider-openvino-1.29.0-6-x86_64.pkg.tar.zst \
-  python-onnxruntime-core-1.29.0-6-x86_64.pkg.tar.zst
+sudo pacman -U onnxruntime-core-1.29.0-7-x86_64.pkg.tar.zst \
+  onnxruntime-provider-cuda13-rtx-1.29.0-7-x86_64.pkg.tar.zst \
+  onnxruntime-provider-tensorrt-cuda13-1.29.0-7-x86_64.pkg.tar.zst \
+  onnxruntime-provider-openvino-1.29.0-7-x86_64.pkg.tar.zst \
+  onnxruntime-provider-dnnl-1.29.0-7-x86_64.pkg.tar.zst \
+  python-onnxruntime-core-1.29.0-7-x86_64.pkg.tar.zst
 ```
+
+The oneDNN file (`onnxruntime-provider-dnnl`) is optional: leave it out unless you run an Intel server CPU, as above.
 
 Alternatively clone the AUR package (`git clone https://aur.archlinux.org/onnxruntime-split-bin.git`) and run `makepkg` in it. That downloads the release files and writes the `-bin` packages; install the ones you want with `sudo pacman -U`. Do not use `makepkg -i`, which would try to install all of them, including both conflicting CUDA packages.
 
 The release's files are named without `-bin`, and they carry the same dependencies, so they work with each other. They do not satisfy a `-bin` package's name, so do not mix `pacman -U` of a release file with the AUR's `-bin` package of the same name. If you have source-built packages of the same names, pacman offers to replace them.
 
-A prebuilt package is not a source build with other inputs: for another CUDA architecture list, or another engine set, build from the recipe ([build-from-source.md](build-from-source.md)). The MIGraphX provider is not prebuilt, because it has never run on AMD hardware: build it from the recipe ([amd.md](amd.md)). The CUDA 12 provider for Pascal and Volta cards is a separate AUR package base, `onnxruntime-split-cuda12-bin`, and needs a different CUDA on the machine: see [Older NVIDIA GPUs](#older-nvidia-gpus-pascal-and-volta-cuda-12). The prebuilt packages have the same dependency bounds as a source build ([dependencies.md](dependencies.md)): pacman refuses a vendor upgrade that goes past one, and a rebuilt release follows. Then continue at [step 4](#4-verify).
+A prebuilt package is not a source build with other inputs: for another CUDA architecture list, or another engine set, build from the recipe ([build-from-source.md](build-from-source.md)). The MIGraphX provider and its Python add-on are not prebuilt, because the provider has never run on AMD hardware: they are source packages on the AUR ([amd.md](amd.md#installing)). For an AMD GPU, `yay -S onnxruntime-split-migraphx` builds both from that pkgbase, after the main line's core is installed. There are no prebuilt packages without NCCL (`-nccloff`). The CUDA 12 provider for Pascal and Volta cards is a separate AUR package base, `onnxruntime-split-cuda12-bin`, and needs a different CUDA on the machine: see [Older NVIDIA GPUs](#older-nvidia-gpus-pascal-and-volta-cuda-12). The prebuilt packages have the same dependency bounds as a source build ([dependencies.md](dependencies.md)): pacman refuses a vendor upgrade that goes past one, and a rebuilt release follows. Then continue at [step 4](#4-verify).
 
 ### Building from source
 
@@ -117,6 +125,10 @@ The prerequisites of this page, then [build-from-source.md](build-from-source.md
 Version 1.29.0-1 was one `onnxruntime-full` that owned every provider library, with `python-onnxruntime-full` for the Python module. `onnxruntime-core` has `replaces=(onnxruntime-full)` and `python-onnxruntime-core` has `replaces=(python-onnxruntime-full)`, and each conflicts with the name it replaces. `replaces=` acts only on a sync upgrade (`pacman -Syu` from a repository). With `pacman -U`, the conflicts make pacman offer to remove the old packages in the same transaction, and a file that moves from a package removed in that transaction to a new one is not a file conflict.
 
 Install every new file in one `pacman -U` (as in the commands of [Prebuilt packages](#prebuilt-packages) and [build-from-source.md](build-from-source.md#3-build-and-install)), not in several: pacman moves a file from one package to another only within one transaction. Answer y to its offer to remove `onnxruntime-full` and `python-onnxruntime-full`: that prompt defaults to N, so `--noconfirm` aborts the upgrade. The old `python-onnxruntime-full` depends on `onnxruntime-full=1.29.0-1`, so `python-onnxruntime-core` must be in the same transaction. With `ORTF_PYTHON=0` there is no new Python package to replace it with: remove it first with `sudo pacman -R python-onnxruntime-full`, or the transaction fails on that dependency.
+
+### Upgrading from 1.29.0-6
+
+Version 1.29.0-7 builds the core with the training operators and NCCL. That changes the interface between the core and the providers, and a provider built without them crashes in a core built with them, so install every new file of the release in one `pacman -U` (or one AUR helper call), as above. The new core also depends on `nccl`, which pacman installs from `extra`. If you use the CUDA 12 provider for Pascal and Volta, `onnxruntime-core` 1.29.0-7 conflicts with its 1.29.0-1 package: upgrade it to 1.29.0-2 or later in the same transaction ([cuda12-legacy.md](cuda12-legacy.md#upgrading)).
 
 ### Dependencies and version bounds
 
@@ -135,10 +147,10 @@ For a build from source, the build tree can be checked before `pacman -U` replac
 ### After installing
 
 ```bash
-scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
+scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU,dnnl
 ```
 
-The test lists the providers and runs a small model on every engine and device it finds, comparing the numbers with a reference. `--require` takes a comma-separated list of targets (`cpu`, `cuda`, `tensorrt`, `openvino:CPU`, `openvino:GPU`, `openvino:NPU`) and exits 1 unless each is `ok`. Without `--require`, an engine whose runtime or device is missing is reported `unavailable`, not as a failure. List only the engines your machine has, for example `--require cpu,cuda` on a machine without Intel hardware.
+The test lists the providers and runs a small model on every engine and device it finds, comparing the numbers with a reference. `--require` takes a comma-separated list of targets (`cpu`, `cuda`, `tensorrt`, `openvino:CPU`, `openvino:GPU`, `openvino:NPU`, `dnnl`) and exits 1 unless each is `ok`. The target `migraphx-load` is for the MIGraphX package and is not in the default run: `scripts/smoke-test.sh --only cpu,migraphx-load` ([amd.md](amd.md#using-it)). Without `--require`, an engine whose runtime or device is missing is reported `unavailable`, not as a failure. List only the engines your machine has, for example `--require cpu,cuda` on a machine without Intel hardware.
 
 The script is in this repository (`scripts/smoke-test.sh`); a prebuilt-only installation needs a clone to run it. The wrapper needs a C compiler and Python 3. `--only` and the other options, and how to read the output (`ok`, `FAIL`, `unavailable`), are in [tools/ort-smoke/README.md](../tools/ort-smoke/README.md).
 
@@ -148,12 +160,12 @@ A TensorRT `ok` does not show that TensorRT's built-in plugins load; see [engine
 
 ## Older NVIDIA GPUs (Pascal and Volta): CUDA 12
 
-CUDA 13, cuDNN 9.11 and the 590 driver series dropped Pascal and Volta, so the packages above cannot use those cards. The CUDA 12 provider `onnxruntime-provider-cuda12-legacy` serves them. It replaces the CUDA 13 setup on that machine and is untested on Pascal and Volta hardware. The install steps, the swap from CUDA 13 and the way back are in [cuda12-legacy.md](cuda12-legacy.md#installing).
+CUDA 13, cuDNN 9.11 and the 590 driver series dropped Pascal and Volta, so the packages above cannot use those cards. The CUDA 12 provider `onnxruntime-provider-cuda12-legacy` serves them. It replaces the CUDA 13 setup on that machine, swaps Arch's `nccl` for the AUR's `nccl-cuda12.9`, and is untested on Pascal and Volta hardware. The install steps, the swap from CUDA 13 and the way back are in [cuda12-legacy.md](cuda12-legacy.md#installing).
 
 ## Uninstalling
 
 ```bash
-sudo pacman -R python-onnxruntime-core onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-rtx onnxruntime-provider-openvino onnxruntime-core
+sudo pacman -R python-onnxruntime-core onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-rtx onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-core
 ```
 
-Add `onnxruntime-provider-migraphx` if you built it. The CUDA 12 legacy package, if installed, replaces the CUDA 13 one in that list (`onnxruntime-provider-cuda12-legacy`), and has no TensorRT package. For the prebuilt packages, name the `-bin` packages instead, and the `all` CUDA package (`onnxruntime-provider-cuda13-all`) if that is the one you installed. Name the packages you installed: the provider packages depend on `onnxruntime-core`, so it cannot be removed while one remains. `pacman -Qq | grep onnxruntime` lists them.
+Add `python-onnxruntime-provider-migraphx` and `onnxruntime-provider-migraphx` if you built them. The CUDA 12 legacy package, if installed, replaces the CUDA 13 one in that list (`onnxruntime-provider-cuda12-legacy`), and has no TensorRT package. For the prebuilt packages, name the `-bin` packages instead, and the `all` CUDA package (`onnxruntime-provider-cuda13-all`) if that is the one you installed. Name the packages you installed: the provider packages depend on `onnxruntime-core`, so it cannot be removed while one remains. `pacman -Qq | grep onnxruntime` lists them. `nccl`, which the core pulled in, stays installed until you remove it; `pacman -Qdtq` lists such leftovers.

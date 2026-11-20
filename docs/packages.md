@@ -1,6 +1,6 @@
 # Packages
 
-What the recipe builds, what each package holds and depends on, how the names are formed, and why the packages are split by engine. Terms are in the [glossary](glossary.md).
+What the recipe builds, what each package holds and depends on, how the names are formed, and why the packages are split by engine. Terms are in the [glossary](glossary.md). How this set compares with Arch's `onnxruntime-*` packages is in [choosing.md](choosing.md).
 
 ## The packages
 
@@ -8,25 +8,33 @@ The recipe `onnxruntime-split/PKGBUILD` is one build of the upstream source tag 
 
 | Package | Contents | Depends on |
 |---|---|---|
-| `onnxruntime-core` | `libonnxruntime.so` with the CPU provider, `libonnxruntime_providers_shared.so` (in a build with any other provider), the C and C++ headers (`/usr/include/onnxruntime`), `libonnxruntime.pc` and the CMake files. It works on its own, on the CPU. Provides `onnxruntime=1.29.0` and `libonnxruntime.so` | `glibc`, `libgcc`, `libstdc++` |
-| `onnxruntime-provider-cuda<M>-<sfx>` | The CUDA provider, `libonnxruntime_providers_cuda.so`. `<M>` is the major version of the CUDA toolkit the build used (`13` today); `<sfx>` names the GPU architectures it was compiled for ([CUDA architectures](build.md#cuda-architectures)). Provides `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>` | `onnxruntime-core`, `cuda`, `cudnn`, `nvidia-utils` |
+| `onnxruntime-core` | `libonnxruntime.so` with the CPU provider and the training operators, `libonnxruntime_providers_shared.so` (in a build with any other provider), the C and C++ headers (`/usr/include/onnxruntime`), `libonnxruntime.pc` and the CMake files. It works on its own, on the CPU. Provides `onnxruntime=1.29.0` and `libonnxruntime.so` | `glibc`, `libgcc`, `libstdc++`, `nccl` |
+| `onnxruntime-provider-cuda<M>-<sfx>` | The CUDA provider, `libonnxruntime_providers_cuda.so`. `<M>` is the major version of the CUDA toolkit the build used (`13` today); `<sfx>` names the GPU architectures it was compiled for ([CUDA architectures](build.md#cuda-architectures)). Provides `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>` | `onnxruntime-core`, `cuda`, `cudnn`, `nvidia-utils`, `nccl` |
 | `onnxruntime-provider-tensorrt-cuda<M>` | The TensorRT provider. It has no architecture suffix because it holds no GPU code: TensorRT builds its kernels at run time. Provides `onnxruntime-provider-tensorrt` | `onnxruntime-core`, `onnxruntime-provider-cuda<M>`, `cuda`, `cudnn`, `nvidia-utils`, `tensorrt` (bounded to the major.minor of the TensorRT headers the build used) |
 | `onnxruntime-provider-openvino` | The OpenVINO provider (Intel CPU, GPU and NPU devices) | `onnxruntime-core`, `openvino` |
-| `onnxruntime-provider-migraphx` | The MIGraphX provider (AMD GPUs), built only with `migraphx` in `ORTF_EPS`. **Untested on AMD hardware.** It holds no GPU code: MIGraphX compiles the model for the GPU it finds at run time. The name carries no ROCm version, because ROCm 7.2 and 10.1 keep the same sonames. See [amd.md](amd.md) | `onnxruntime-core`, `migraphx`, `hip-runtime-amd` (bounded to the major version of the installed packages) |
-| `python-onnxruntime-core` | The Python module. Its links to the provider libraries dangle until that provider's package is installed. Provides `python-onnxruntime` | `onnxruntime-core`, `python` and its packages |
+| `onnxruntime-provider-dnnl` | The oneDNN provider (CPU); optional, meant for Intel server CPUs, not for most desktops and laptops (use the CPU provider or OpenVINO there). oneDNN 3.11.3 is built from source and linked into the provider statically, so the package depends on no oneDNN package and installs no `libdnnl.so`. It carries oneDNN's licence and third-party notices (`onednn-LICENSE`, `onednn-THIRD-PARTY-PROGRAMS`). See [engines.md](engines.md#onednn) | `onnxruntime-core`, `libgomp` |
+| `python-onnxruntime-core` | The Python module, with `onnxruntime.training`. Its links to the provider libraries dangle until that provider's package is installed. Provides `python-onnxruntime` | `onnxruntime-core`, `nccl`, `python` and its packages, and for the training modules `python-cerberus`, `python-h5py`, `python-onnx`, `python-sympy` and `python-setuptools` |
+| `python-onnxruntime-provider-migraphx` | The Python add-on of the MIGraphX line, from its pkgbase `onnxruntime-split-migraphx` and not from this recipe: one symbolic link, `onnxruntime/capi/libonnxruntime_providers_migraphx.so` in the system Python's site-packages, to the provider's library, so that the Python module lists `MIGraphXExecutionProvider`. Source only, untested on AMD hardware ([amd.md](amd.md#the-package)) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python` (bounded to its minor) |
 
 All dependencies also include the system libraries the package links (`glibc`, `libgcc`, `libstdc++`). The providers and the Python module depend on `onnxruntime-core` at the same `pkgver-pkgrel`. The full dependency list with version bounds is in [dependencies.md](dependencies.md).
 
-The CUDA 12 line adds one more package, `onnxruntime-provider-cuda12-legacy`, from a separate recipe: [cuda12-legacy.md](cuda12-legacy.md).
+`onnxruntime-core` and `python-onnxruntime-core` list the engine packages as optional dependencies, `onnxruntime-provider-migraphx` always (it comes from another pkgbase, below). The Python package also lists `python-pytorch`, which the training modules need: even `import onnxruntime.training` imports it, while `import onnxruntime` needs none of it.
 
-`onnxruntime-core` and `python-onnxruntime-core` replace and conflict with `onnxruntime-full` and `python-onnxruntime-full`, the single packages of 1.29.0-1 ([upgrading](install.md#upgrading-from-the-single-package-1290-1)). `onnxruntime-core` also conflicts with Arch's `onnxruntime`, `onnxruntime-cpu`, `onnxruntime-cuda`, `onnxruntime-opt-cuda`, `onnxruntime-rocm`, `onnxruntime-opt-rocm` and `onnxruntime-git`, and provides `onnxruntime` and `libonnxruntime.so`, so programs built against Arch's package keep working: pacman offers to remove the conflicting package.
+Two more packages come from separate recipes, each with its own `pkgrel`:
+
+- **`onnxruntime-provider-cuda12-legacy`**, the CUDA provider built with CUDA 12.9 for Pascal and Volta (pkgbase `onnxruntime-split-cuda12`): [cuda12-legacy.md](cuda12-legacy.md).
+- **`onnxruntime-provider-migraphx`**, the MIGraphX provider for AMD GPUs (pkgbase `onnxruntime-split-migraphx`), source only, **untested on AMD hardware**, with its Python add-on `python-onnxruntime-provider-migraphx` (in the table above): [amd.md](amd.md).
+
+Both load into the core of this recipe and depend on `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`: [the joint release rule](#the-core-and-the-other-lines-providers-release-together) explains the pair. The MIGraphX add-on depends on its provider at the same version, not on the core.
+
+`onnxruntime-core` and `python-onnxruntime-core` replace and conflict with `onnxruntime-full` and `python-onnxruntime-full`, the single packages of 1.29.0-1 ([upgrading](install.md#upgrading-from-the-single-package-1290-1)). `onnxruntime-core` also conflicts with Arch's `onnxruntime`, `onnxruntime-cpu`, `onnxruntime-cuda`, `onnxruntime-opt-cuda`, `onnxruntime-rocm`, `onnxruntime-opt-rocm` and `onnxruntime-git`, and provides `onnxruntime` and `libonnxruntime.so`, so programs built against Arch's package keep working: pacman offers to remove the conflicting package ([choosing.md](choosing.md#why-one-set-per-machine)). It conflicts with `onnxruntime-provider-cuda12-legacy` and `onnxruntime-provider-cuda12-legacy-bin` below `1.29.0-2`.
 
 ## Which packages a build makes
 
-The names depend on the build inputs `ORTF_EPS`, `ORTF_PYTHON` and `ORTF_CUDA_ARCHS` and on the CUDA toolkit installed when `makepkg` reads the PKGBUILD:
+The names depend on the build inputs `ORTF_EPS`, `ORTF_PYTHON`, `ORTF_CUDA_ARCHS` and `ORTF_NCCL` and on the CUDA toolkit installed when `makepkg` reads the PKGBUILD:
 
-- **The default build with Arch's CUDA 13** makes `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino` and `python-onnxruntime-core`.
-- `ORTF_EPS=cpu` makes `onnxruntime-core` (and the Python package) only. `migraphx` in `ORTF_EPS` adds `onnxruntime-provider-migraphx`.
+- **The default build with Arch's CUDA 13** makes `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core`.
+- A build without `cuda` in `ORTF_EPS` needs `ORTF_NCCL=0` and makes `-nccloff` packages ([below](#packages-without-nccl)): `ORTF_EPS=cpu ORTF_NCCL=0` makes `onnxruntime-core-nccloff` (and the Python package) only. `dnnl` in `ORTF_EPS` adds `onnxruntime-provider-dnnl`, and `migraphx` adds `onnxruntime-provider-migraphx`, for a local build; the published MIGraphX packages are the ones from their own pkgbase.
 - The CUDA package's suffix is the preset name (`rtx`, `all`) or, for a list, the architectures (`sm120`, `sm89-sm120`).
 - Where the CUDA toolkit's `cuda.h` is not installed yet when `makepkg` reads the PKGBUILD (an AUR helper reads it before it installs the build dependencies), the names use CUDA major 13. A CUDA 12 toolkit gives `-cuda12` names. The CUDA 12 package that is released comes from its own recipe, not from this one with other inputs.
 
@@ -36,9 +44,23 @@ The rules, with the table of which input decides which name, are in [build.md](b
 
 CUDA packages of different builds provide and conflict with each other (`onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>`), because they all install the same `/usr/lib/libonnxruntime_providers_cuda.so`. One is installed at a time. The TensorRT package depends on the name `onnxruntime-provider-cuda<M>`, which every CUDA package of that major provides.
 
+## The core and the other lines' providers release together
+
+Training and NCCL change the plug between `onnxruntime-core` and a provider library: the provider interface the core exposes has members that exist only in a build with them, and nothing checks at run time that both sides agree, so a provider built without them crashes in a core built with them. Hence the rule: the main line (1.29.0-7) and the CUDA 12 line (1.29.0-2) are built and released together, and the MIGraphX line (1.29.0-1) is built against the same core. The CUDA 12 and MIGraphX providers depend on `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`: the lower bound is the first pkgrel with the new plug (the fixed "ABI pkgrel", reset to 1 with a new `pkgver`), and any later packaging-only pkgrel of 1.29.0 still satisfies the pair. `onnxruntime-core` in turn conflicts with the CUDA 12 provider below 1.29.0-2. The main line's own providers depend on the exact `pkgver-pkgrel` of their core. See [release.md](release.md#joint-release).
+
+## Packages without NCCL
+
+NCCL is on by default in every line: `onnxruntime-core` and `python-onnxruntime-core` depend on Arch's `nccl` (364.18 MiB installed), which the training operators for several GPUs need. A source build with `ORTF_NCCL=0` leaves it out and gives every package of that build the suffix `-nccloff`: `onnxruntime-core-nccloff`, `onnxruntime-provider-cuda13-rtx-nccloff`, `python-onnxruntime-core-nccloff`, and so on.
+
+- Each `-nccloff` package provides and conflicts with its base name, so it replaces the NCCL package of that name.
+- The providers and the Python package of such a build depend on `onnxruntime-core-nccloff`, which no NCCL core provides. Every NCCL provider and the NCCL Python package conflict with `onnxruntime-core-nccloff`. The two sets therefore never mix: NCCL changes the plug between the core and the providers, as training does.
+- No `-nccloff` package is prebuilt: `scripts/gen-bin.sh` refuses them. They are for local builds. The shipped CUDA 12 and MIGraphX providers are built with NCCL and so need an NCCL core.
+
+How to build them: [build.md](build.md#nccl-and-the-nccloff-packages).
+
 ## Sizes
 
-Measured on the files of the 1.29.0-6 build (download: the `.pkg.tar.zst` file; installed: the `size` field of the package's `.PKGINFO`):
+Measured on the files of the 1.29.0-6 build (download: the `.pkg.tar.zst` file; installed: the `size` field of the package's `.PKGINFO`). **The 1.29.0-7 packages, which add the training operators, NCCL and oneDNN, have not been measured yet**: the figures below are those of the build before them.
 
 | Package | Download | Installed |
 |---|---|---|
@@ -50,22 +72,8 @@ Measured on the files of the 1.29.0-6 build (download: the `.pkg.tar.zst` file; 
 | `python-onnxruntime-core` | 10.0 MiB | 43.2 MiB |
 | `onnxruntime-provider-cuda12-legacy` (1.29.0-1) | 172.6 MiB | 557.5 MiB |
 
-The CUDA provider grows with the number of GPU architectures it holds; see [build.md](build.md#cuda-architectures).
-
-## Why not Arch's onnxruntime packages
-
-Arch's `extra` repository ships ONNX Runtime 1.29.0 (`pacman -Si onnxruntime-cpu` shows the current package release) as separate builds: `onnxruntime-cpu`, `onnxruntime-cuda`, `onnxruntime-opt-cuda` (AVX2 build), `onnxruntime-rocm` and `onnxruntime-opt-rocm`, each with a `python-` counterpart. Each build provides `onnxruntime` and conflicts with it, so one is installed at a time. This recipe exists for the combination none of them offers:
-
-| | Arch `extra` builds | This recipe (`onnxruntime-core` and the provider packages) |
-|---|---|---|
-| CPU, CUDA | CUDA builds include the CPU provider | yes |
-| TensorRT, OpenVINO (CPU, Intel GPU, Intel NPU) | not enabled in the recipe | yes, in one library |
-| NVIDIA and Intel engines in one install | no: CUDA and ROCm are separate packages, and the CUDA builds add oneDNN (`dnnl`) as the other provider | yes |
-| AMD GPUs (MIGraphX) | `onnxruntime-rocm` and `onnxruntime-opt-rocm` carry the MIGraphX provider | `onnxruntime-provider-migraphx`, on request; **untested on AMD hardware** |
-| CUDA architectures | a list from `75` to `121`, including `120` (Blackwell) | the preset `rtx` (`75 86 89 120`) by default; the preset `all` or a list, set with `ORTF_CUDA_ARCHS` ([presets](build.md#cuda-architectures)) |
-
-Support for `sm_120` is therefore not the difference: the Arch CUDA builds include it. The difference is the TensorRT and OpenVINO providers, which the Arch recipe does not build, and having the NVIDIA and Intel engines in one installation. The version is the same, so programs built against Arch's package see the same API. Source: the Arch recipe at <https://gitlab.archlinux.org/archlinux/packaging/packages/onnxruntime> and `pacman -Si`.
+The packages these depend on add to this: Arch's `nccl` is 292.29 MiB to download and 364.18 MiB installed (`pacman -Si nccl`, 2.32.3-1). The CUDA provider grows with the number of GPU architectures it holds; see [build.md](build.md#cuda-architectures).
 
 ## Why one package per engine, not one per build
 
-Arch splits per build: each variant is a separate compilation of the whole library, the variants conflict, and one is installed at a time. Here the providers are separate shared objects (`libonnxruntime_providers_<provider>.so`) that one `libonnxruntime.so` loads at run time, so a single build serves every engine. The split therefore follows the engines: each package carries only its provider library, the vendor runtimes that library needs are its dependencies, and the core package runs without any of them. A machine installs the engines it has and nothing else, for example the core and the OpenVINO package on a machine without an NVIDIA GPU. How the loading works is in [engines.md](engines.md#how-the-providers-load).
+Arch splits per build: each variant is a separate compilation of the whole library, the variants conflict, and one is installed at a time ([choosing.md](choosing.md#what-arch-ships)). Here the providers are separate shared objects (`libonnxruntime_providers_<provider>.so`) that one `libonnxruntime.so` loads at run time, so a single build serves every engine. The split therefore follows the engines: each package carries only its provider library, the vendor runtimes that library needs are its dependencies, and the core package runs without any of them. A machine installs the engines it has and nothing else, for example the core and the OpenVINO package on a machine without an NVIDIA GPU. How the loading works is in [engines.md](engines.md#how-the-providers-load).

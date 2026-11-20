@@ -30,6 +30,10 @@
 #               rebuild is due
 #   MISSING     a depend no installed package and no package file given
 #               meets
+#   DNNL        a needed libdnnl (oneDNN as a shared library), whoever owns
+#               it: the oneDNN provider links oneDNN statically, and no
+#               package of this recipe may need Arch's onednn (or a
+#               libdnnl.so.3 of its own, which would be onednn's file)
 # Limit: it sees only DT_NEEDED entries. A library a package dlopen()s at run
 # time (cuDNN, which the CUDA provider opens, libcuda, libnvrtc, libcufft) is
 # invisible to it: those are covered by the recipe's recorded bounds (cudnn by
@@ -145,7 +149,7 @@ offers() {
     for p in "${words[@]}"; do printf '%s\n' "$p"; done
 }
 
-gaps=0 unresolved=0 bounds=0 missing=0
+gaps=0 unresolved=0 bounds=0 missing=0 dnnl=0
 row() { printf '  %-44s %-26s %-44s %-28s %-24s %s\n' "$@"; }
 drow() { printf '  %-44s %-34s %-28s %s\n' "$@"; }
 
@@ -175,6 +179,11 @@ for i in "${!roots[@]}"; do
         IFS=: read -ra rdirs <<<"$runpath"
         for soname in "${needed[@]}"; do
             path='' owner='' version='' in=-1
+            if [[ $soname == libdnnl.so* ]]; then
+                row "$lib" "$soname" '' '' '' 'DNNL (oneDNN must be linked statically)'
+                dnnl=$((dnnl + 1))
+                continue
+            fi
             # The library's RUNPATH, in the packages given, then here.
             for r in "${rdirs[@]}"; do
                 [[ -n $r && -z $path ]] || continue
@@ -264,9 +273,9 @@ for i in "${!roots[@]}"; do
     echo
 done
 
-flags=$((gaps + unresolved + bounds + missing))
+flags=$((gaps + unresolved + bounds + missing + dnnl))
 if ((flags > 0)); then
-    echo "flagged: $gaps GAP, $unresolved UNRESOLVED, $bounds BOUND, $missing MISSING"
+    echo "flagged: $gaps GAP, $unresolved UNRESOLVED, $bounds BOUND, $missing MISSING, $dnnl DNNL"
     exit 1
 fi
-echo "no gaps, unresolved libraries or bound violations"
+echo "no gaps, unresolved libraries, bound violations or shared libdnnl"

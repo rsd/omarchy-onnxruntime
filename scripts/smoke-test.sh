@@ -12,13 +12,32 @@
 #                   (the script looks in core/session/ below it)
 #   --libdir DIR    directory holding libonnxruntime.so, overriding --prefix
 #                   (e.g. a build tree's build/Linux/Release)
-#   --require LIST  targets that must be "ok", else exit 1 (default: none)
-#   --only LIST     test only these targets (default: all)
+#   --require LIST  targets that must be "ok" (also "ok (no device)"), else exit 1
+#                   (default: none)
+#   --only LIST     test only these targets (default: all but migraphx-load)
 #   --runs N        warm runs per target (default 5)
 #   --keep          keep the temporary build directory and print its path
 #
 # Targets (LIST is comma-separated): cpu, cuda, tensorrt, openvino:CPU,
-# openvino:GPU, openvino:NPU ("openvino" selects all three devices).
+# openvino:GPU, openvino:NPU ("openvino" selects all three devices), dnnl
+# (oneDNN, on the CPU) and migraphx-load (AMD GPU, see below).
+#
+# A target whose provider or vendor runtime is not installed is reported as
+# "unavailable", which is not a failure unless it is in --require.  The default
+# set is every target except migraphx-load, which runs only when named in --only
+# or --require: it needs an AMD GPU, and on a machine with a broken HIP runtime
+# it may abort the process.  It appends the MIGraphX provider by name and creates
+# the session.  It is "unavailable" when libonnxruntime_providers_migraphx.so is
+# not next to libonnxruntime.so (the core never lists MIGraphX among the
+# available providers, so that list is not consulted) or when libmigraphx_c,
+# libamdhip64 or libhsa is missing.  Without a device the provider fails with a
+# HIP no-device error ("HIP failure 100: ... expr=hipGetDeviceCount",
+# "no ROCm-capable device", hipErrorNoDevice, or "Invalid device ID: 0 ... and 0
+# (exclusive)"): that is the pass "ok (no device)", the message is shown.  Any
+# other error, including a HIP failure of another code (35, a broken driver) or call (hipMalloc), ("not
+# supported in this build", an undefined symbol, ...) is a FAIL.  With a device the model runs and
+# is checked ("ok").  A crash fails too, and then this script exits 1 naming the
+# signal.
 #
 # Environment: CC selects the C compiler (default cc), PYTHON the interpreter
 # that writes the model (default python3).

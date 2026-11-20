@@ -167,7 +167,7 @@ stage_case fail "OpenVINO IR weights (.bin) fail" ir/model.bin printf 'x\n'
 echo "== paths: vendor headers and trees"
 for f in NvInfer.h NvInferRuntime.h NvInferPlugin.h NvInferVersion.h NvOnnxParser.h NvOnnxConfig.h \
     cudnn.h cudnn_version.h cuda.h cuda_runtime.h cuda_runtime_api.h cublas_v2.h cufft.h curand.h \
-    nvrtc.h cupti.h; do
+    nvrtc.h cupti.h nccl.h nccl_net.h; do
     stage_case fail "the NVIDIA header $f fails" "include/$f" printf '/* fake */\n'
 done
 stage_case fail "an OpenVINO header under openvino/ fails" include/openvino/runtime/core.hpp printf '// x\n'
@@ -182,15 +182,29 @@ for f in hip/hip_runtime.h hip/hip_runtime_api.h hip/hip_version.h hip/hiprtc.h 
 done
 for f in rocblas.h rocblas/rocblas.h rocblas/internal/rocblas-types.h rocblas/rocblas-functions.h miopen/miopen.h \
     miopen/version.h miopen.h hipblas/hipblas.h hipblas.h hipblas-version.h hipblaslt/hipblaslt.h hipblaslt.h \
-    hipblaslt-version.h rocm_version.h rocm/rocm_version.h; do
+    hipblaslt-version.h rocm_version.h rocm/rocm_version.h rccl/rccl.h rccl.h rccl/rccl_bfloat16.h; do
     stage_case fail "the ROCm library header $f fails" "include/$f" printf '// x\n'
 done
 stage_case pass "docs/rocblas.md is not a ROCm header" docs/rocblas.md printf '# notes\n'
 stage_case pass "a rocblas/ directory outside headers holds no ROCm header" tools/rocblas/notes.txt printf 'plain\n'
 stage_case fail "a ROCm tree fails" opt/rocm/share/doc/notes.txt printf 'plain text\n'
 stage_case pass "docs/migraphx.md is not a MIGraphX header" docs/migraphx.md printf '# notes\n'
+stage_case pass "docs/nccl.md is not an NCCL header" docs/nccl.md printf '# notes\n'
 stage_case pass "docs/rocm-7-notes.md is not a ROCm tree" docs/rocm-7-notes.md printf '# notes\n'
 stage_case pass "a hip/ directory outside include/ holds no HIP header" tools/hip/notes.h printf '// x\n'
+# oneDNN: the oneDNN provider builds it from ortf-dep-onednn.zip, whose
+# headers and sources never enter the tree.
+for f in oneapi/dnnl/dnnl.h oneapi/dnnl/dnnl.hpp oneapi/dnnl/dnnl_types.h oneapi/dnnl/dnnl_config.h \
+    dnnl.h dnnl.hpp dnnl_version.h dnnl_graph.hpp mkldnn.h mkldnn_types.h; do
+    stage_case fail "the oneDNN header $f fails" "include/$f" printf '// x\n'
+done
+stage_case fail "a oneDNN tree under oneapi/dnnl/ fails" src/oneapi/dnnl/notes.txt printf 'plain text\n'
+stage_case fail "an unpacked oneDNN-3.11.3/ fails" oneDNN-3.11.3/README.md printf '# x\n'
+stage_case fail "a nested oneDNN source tree fails" onnxruntime-split-x/onednn-3.11.3/src/cpu/x.cpp printf '// x\n'
+stage_case fail "a oneDNN source file with Intel's copyright line fails" src/cpu/simple_sum.cpp \
+    printf '/*******\n* Copyright 2016-2026 %s\n*******/\n' "$(intel_corp)"
+stage_case pass "docs/dnnl.md is not a oneDNN header" docs/dnnl.md printf '# notes\n'
+stage_case pass "docs/onednn-notes.md is not a oneDNN tree" docs/onednn-notes.md printf '# notes\n'
 stage_case fail "an unpacked TensorRT-11.4.0.106/ fails" TensorRT-11.4.0.106/notes.txt printf 'plain text\n'
 stage_case fail "a nested TensorRT-*/ fails" onnxruntime-split/TensorRT-11.4/doc/a.txt printf 'plain text\n'
 stage_case fail "an OpenVINO toolkit tree fails" l_openvino_toolkit_ubuntu24_2026.4.0/readme.txt printf 'x\n'

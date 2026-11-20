@@ -1,8 +1,8 @@
 # Releasing
 
-The maintainer's procedure for a release: build the packages in a clean chroot, publish them as GitHub release assets, and update the two AUR packages, `onnxruntime-split` (the recipe) and `onnxruntime-split-bin` (the prebuilt packages, which download those assets). The CUDA 12 line is released separately, with two AUR packages of its own: [section 6](#6-the-cuda-12-legacy-line). Users of the packages need none of this: see [install.md](install.md#prebuilt-packages). Terms such as pkgbase, `-bin` and clean chroot are in the [glossary](glossary.md).
+The maintainer's procedure for a release: build the packages in a clean chroot, publish them as GitHub release assets, and update the two AUR packages, `onnxruntime-split` (the recipe) and `onnxruntime-split-bin` (the prebuilt packages, which download those assets). The CUDA 12 line is released separately, with two AUR packages of its own ([section 6](#6-the-cuda-12-legacy-line)), but **together with the main line** ([joint release](#joint-release)), and the MIGraphX line is an AUR source package only ([section 7](#7-the-migraphx-line)). Users of the packages need none of this: see [install.md](install.md#prebuilt-packages). Terms such as pkgbase, `-bin` and clean chroot are in the [glossary](glossary.md).
 
-The commands below are for the release of version `1.29.0-6` (`pkgver` 1.29.0, `pkgrel` 6); replace the version for another.
+The commands below are for the release of version `1.29.0-7` (`pkgver` 1.29.0, `pkgrel` 7); replace the version for another.
 
 ```mermaid
 flowchart LR
@@ -14,9 +14,20 @@ flowchart LR
     F --> G[AUR: onnxruntime-split, then -bin]
 ```
 
-What is released: the five packages of the `rtx` build (the recipe as committed: `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino` and `python-onnxruntime-core`) and the CUDA package of an `all` build (`onnxruntime-provider-cuda13-all`). Nothing else, and no MIGraphX package: it has never run on AMD hardware. No package contains a vendor library; the vendor runtimes are dependencies ([README](../README.md#licence-and-redistribution)).
+What is released: the six packages of the `rtx` build (the recipe as committed: `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core`) and the CUDA package of an `all` build (`onnxruntime-provider-cuda13-all`). Nothing else: no MIGraphX package, provider or add-on (the provider has never run on AMD hardware, and `gen-bin.sh` refuses the line) and no `-nccloff` package (a build with `ORTF_NCCL=0` is for local use). No package contains a vendor library; the vendor runtimes are dependencies ([README](../README.md#licence-and-redistribution)).
 
 Before releasing, run `scripts/test.sh` ([testing.md](testing.md)). If the PKGBUILD changed, regenerate and check the `.SRCINFO`: `scripts/srcinfo.sh --write`, then `scripts/srcinfo.sh --check`.
+
+## Joint release
+
+Training and NCCL change the interface between `onnxruntime-core` and a provider library: a provider built without them crashes in a core built with them, and nothing checks that both agree. Hence the rule for 1.29.0:
+
+- **The main line 1.29.0-7 and the CUDA 12 line 1.29.0-2 are built and released together**, so that a user who upgrades the core never meets a CUDA 12 provider of the old interface. The core 1.29.0-7 conflicts with `onnxruntime-provider-cuda12-legacy` and `onnxruntime-provider-cuda12-legacy-bin` below `1.29.0-2`, so pacman refuses that mix. Do the main line's [sections 1 to 5](#1-build-the-rtx-packages) and the CUDA 12 line's ([release-cuda12.md](release-cuda12.md)) in the same release round, and push the CUDA 12 packages after the main line's.
+- **The CUDA 12 and MIGraphX providers pin the core by a pair**, `onnxruntime-core>=<pkgver>-<N>` and `onnxruntime-core<<next patch release>` (`>=1.29.0-7`, `<1.29.1`). `N` is `_ortf_core_abi_pkgrel` in `onnxruntime-split/PKGBUILD`: the first pkgrel of the `pkgver` whose core has the plug these providers are built for. It is 7 for 1.29.0. A later packaging-only pkgrel of the main line (`1.29.0-8`) still satisfies the pair, and needs no rebuild of the other lines. `_ortf_core_abi_pkgrel` goes back to 1 with a new `pkgver`.
+- **A main-line change that alters the interface again** (a flag such as training or NCCL, or a patch to the provider bridge) raises `_ortf_core_abi_pkgrel` to that pkgrel and so needs the other lines rebuilt and released with it: see [the core pin](release-cuda12.md#the-core-pin).
+- **The main line's own providers** depend on the exact `onnxruntime-core=<pkgver>-<pkgrel>` of the build, so they need nothing extra.
+
+`scripts/gen-bin.sh` enforces the pair for the CUDA 12 line's assets, and refuses `cuda12-v1.29.0-1` and the bare pin `onnxruntime-core=1.29.0`, which fit the cores from before 1.29.0-7 ([release-cuda12.md](release-cuda12.md#6-generate-the--bin-recipe-and-publish)).
 
 ## One-time setup
 
@@ -51,11 +62,11 @@ Before releasing, run `scripts/test.sh` ([testing.md](testing.md)). If the PKGBU
 
    Each AUR repository also carries a `LICENSE` file with the 0BSD licence of the packaging files. The commands below add only `PKGBUILD` and `.SRCINFO`, so it stays as it is; a new pkgbase needs it copied in before its first push ([section 6](#6-the-cuda-12-legacy-line)).
 
-4. `extra-x86_64-build` creates `/var/lib/archbuild/extra-x86_64` on first use (needs `sudo`; several GiB, since the chroot installs `cuda`, `cudnn` and `openvino`).
+4. `extra-x86_64-build` creates `/var/lib/archbuild/extra-x86_64` on first use (needs `sudo`; several GiB, since the chroot installs `cuda`, `cudnn`, `nccl` and `openvino`).
 
 ## 1. Build the rtx packages
 
-The recipe as committed (its defaults are the engines `cuda tensorrt openvino`, the CUDA preset `rtx`, and Python):
+The recipe as committed (its defaults are the engines `cuda tensorrt openvino dnnl`, the CUDA preset `rtx`, Python and NCCL on):
 
 ```bash
 cd onnxruntime-split
@@ -74,7 +85,7 @@ w=$(mktemp -d) && cp onnxruntime-split/PKGBUILD "$w"/ \
   && (cd "$w" && extra-x86_64-build -- -I /path/to/nvidia-tensorrt-sdk-local-<ver>-x86_64.pkg.tar.zst)
 ```
 
-The packages of this build are written to `$w`. Only its CUDA package, `onnxruntime-provider-cuda13-all-1.29.0-6-x86_64.pkg.tar.zst`, is released. Its other packages are not released: the `rtx` build's own are used with it (the TensorRT package depends on `onnxruntime-provider-cuda13`, a name both CUDA packages provide).
+The packages of this build are written to `$w`. Only its CUDA package, `onnxruntime-provider-cuda13-all-1.29.0-7-x86_64.pkg.tar.zst`, is released. Its other packages are not released: the `rtx` build's own are used with it (the TensorRT package depends on `onnxruntime-provider-cuda13`, a name both CUDA packages provide).
 
 ## 3. Check
 
@@ -85,27 +96,27 @@ scripts/check-deps.sh <package files>
 Run it on the files of both builds ([what it reports](dependencies.md#checking-built-packages-scriptscheck-depssh)); nothing should be flagged. Then install the `rtx` packages and run the smoke test ([install.md, Verify](install.md#4-verify); the options are in the [smoke test README](../tools/ort-smoke/README.md)):
 
 ```bash
-scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
+scripts/smoke-test.sh --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU,dnnl
 ```
 
 ## 4. Collect, generate, publish
 
 The order matters: `SHA256SUMS` and the `-bin` PKGBUILD come from `gen-bin.sh`, which the release command needs, and the check of the `-bin` PKGBUILD needs the uploaded assets.
 
-1. Put the six packages in an otherwise empty directory (the `rtx` build's five and the `all` CUDA package), nothing else: `gen-bin.sh` refuses a package from another version or pkgbase and skips debug packages.
+1. Put the seven packages in an otherwise empty directory (the `rtx` build's six and the `all` CUDA package), nothing else: `gen-bin.sh` refuses a package from another version or pkgbase and skips debug packages.
 
 2. Generate:
 
    ```bash
-   scripts/gen-bin.sh <dir> v1.29.0-6
+   scripts/gen-bin.sh <dir> v1.29.0-7
    ```
 
-   It writes `<dir>/SHA256SUMS` and `aur/onnxruntime-split-bin/{PKGBUILD,.SRCINFO}`, and prints the `gh release create` command. It refuses, naming the cause, an asset that is not from this recipe at the tag's version, a MIGraphX package, and a dependency a `-bin` package would not meet.
+   It writes `<dir>/SHA256SUMS` and `aur/onnxruntime-split-bin/{PKGBUILD,.SRCINFO}`, and prints the `gh release create` command. It refuses, naming the cause, an asset that is not from this recipe at the tag's version, a MIGraphX package, a `-nccloff` package, and a dependency a `-bin` package would not meet. `onnxruntime-provider-dnnl` needs no special case: it gets its `-bin` package like the others.
 
 3. Create the release with that command's form, adding a title and notes. Before running it, replace each placeholder: `<dir>` with the directory from step 1, `<title>` with the release title, and `<notes.md>` with the path to a Markdown file of release notes.
 
    ```bash
-   gh release create v1.29.0-6 <dir>/*.pkg.tar.zst <dir>/SHA256SUMS \
+   gh release create v1.29.0-7 <dir>/*.pkg.tar.zst <dir>/SHA256SUMS \
      --repo rsd/omarchy-onnxruntime --title "<title>" --notes-file "<notes.md>"
    ```
 
@@ -121,26 +132,30 @@ The source package first, then the prebuilt one, which downloads assets that mus
 
 ```bash
 scripts/srcinfo.sh --aur aur/onnxruntime-split          # checks .SRCINFO is current, then copies PKGBUILD and .SRCINFO
-(cd aur/onnxruntime-split && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-6' && git push)
+(cd aur/onnxruntime-split && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-7' && git push)
 
-(cd aur/onnxruntime-split-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-6' && git push)
+(cd aur/onnxruntime-split-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-7' && git push)
 ```
 
 `scripts/srcinfo.sh --aur` commits nothing and fails when the committed `onnxruntime-split/.SRCINFO` is stale: regenerate it with `scripts/srcinfo.sh --write` after a PKGBUILD change.
 
 ## 6. The CUDA 12 legacy line
 
-The package `onnxruntime-provider-cuda12-legacy` ([cuda12-legacy.md](cuda12-legacy.md)) has its own pkgbase, its own prebuilt pkgbase, `onnxruntime-split-cuda12-bin`, its own `pkgrel` and its own GitHub release, tagged `cuda12-v<pkgver>-<pkgrel>`. Its release procedure is in [release-cuda12.md](release-cuda12.md): regenerate the recipe, build `gcc14` and the CUDA 12 userland, build in a chroot, check, publish, push. Whether a main-line release also rebuilds this line depends on what changed: [the core pin](release-cuda12.md#the-core-pin).
+The package `onnxruntime-provider-cuda12-legacy` ([cuda12-legacy.md](cuda12-legacy.md)) has its own pkgbase, its own prebuilt pkgbase, `onnxruntime-split-cuda12-bin`, its own `pkgrel` and its own GitHub release, tagged `cuda12-v<pkgver>-<pkgrel>`. Its release procedure is in [release-cuda12.md](release-cuda12.md): regenerate the recipe, build `gcc14` and the CUDA 12 userland, build in a chroot, check, publish, push. Version 1.29.0-2 of this line is released together with the main line's 1.29.0-7 ([joint release](#joint-release)); whether a later main-line release also rebuilds it depends on what changed: [the core pin](release-cuda12.md#the-core-pin).
+
+## 7. The MIGraphX line
+
+The packages `onnxruntime-provider-migraphx` and `python-onnxruntime-provider-migraphx` ([amd.md](amd.md)) are AUR source packages from their own pkgbase, `onnxruntime-split-migraphx`: no GitHub release, no `-bin`. Its procedure, including the first push of the new pkgbase, which needs the maintainer's approval, is in [release-migraphx.md](release-migraphx.md).
 
 ## Later releases
 
 - **A fix to the `-bin` PKGBUILD alone** (a dependency, a description): bump only its `pkgrel`, with the assets and the release as they are:
 
   ```bash
-  scripts/gen-bin.sh --pkgrel 7 <dir> v1.29.0-6
+  scripts/gen-bin.sh --pkgrel 8 <dir> v1.29.0-7
   ```
 
   The assets' version still drives the version check and the `<name>=<pkgver>-<pkgrel>` provides. Verify and push as in [4](#4-collect-generate-publish) and [5](#5-push-to-the-aur), without a new release.
-- **A change to the packages** needs a rebuild, a new `pkgrel` in `onnxruntime-split/PKGBUILD`, a new `.SRCINFO` and a new release (a new tag). Whether the CUDA 12 line is rebuilt with it depends on the change: [the core pin](release-cuda12.md#the-core-pin).
+- **A change to the packages** needs a rebuild, a new `pkgrel` in `onnxruntime-split/PKGBUILD`, a new `.SRCINFO` and a new release (a new tag). The CUDA 12 and MIGraphX lines are rebuilt with it only when the change alters the interface between the core and the providers, which raises `_ortf_core_abi_pkgrel`: [the core pin](release-cuda12.md#the-core-pin).
 - **A vendor bump past a dependency bound** (OpenVINO 2026.5, Python 3.15, a new TensorRT minor, and so on; [the bounds](dependencies.md#the-version-bounds)) makes pacman refuse the vendor upgrade until the packages are rebuilt: rebuild against the new version, bump `pkgrel`, and release again. `scripts/check-deps.sh` on the released files shows when one is due.
 - **A new upstream ONNX Runtime version** is not described here. `prepare()` checks the source tag against its commit (`_ortf_commit`) and each mirrored archive's URL and SHA-1 against `cmake/deps.txt` ([build.md](build.md#dependencies-are-mirrored-not-fetched)), so a bump that misses one fails at the start of the build.

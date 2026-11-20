@@ -24,10 +24,11 @@
 #     .dll), packages and archives (.pkg.tar*, .tar*, .tgz, .zip, .deb,
 #     .rpm, .whl), models and engine caches (.onnx, .engine, .trt, .plan,
 #     .trtpkg, .cubin, .fatbin, .blob, .bin, which includes OpenVINO IR
-#     weights), PDFs, logs, TensorRT, cuDNN, CUDA, OpenVINO, MIGraphX and
-#     HIP headers, a TensorRT-<version>/ or OpenVINO toolkit directory, a
-#     CUDA targets/ tree, an opt/rocm/ tree, build output or makepkg's work
-#     directories and sources;
+#     weights), PDFs, logs, TensorRT, cuDNN, CUDA, OpenVINO, MIGraphX, HIP
+#     and oneDNN headers, a TensorRT-<version>/, OpenVINO toolkit or oneDNN
+#     source directory (oneDNN-<version>/, oneapi/dnnl/), a CUDA targets/
+#     tree, an opt/rocm/ tree, build output or makepkg's work directories
+#     and sources;
 #   - it is a submodule (gitlink), or, in --all, a nested repository;
 #   - it is a symbolic link whose target is absolute or leaves the repository;
 #   - its content is larger than 1 MiB, starts with a binary or archive magic
@@ -85,11 +86,12 @@ path_reason() {
         onnxruntime/* | onnxruntime-*/onnxruntime/*) echo "ONNX Runtime source checkout"; return ;;
     esac
 
-    # Vendor header names: TensorRT, cuDNN, CUDA runtime and libraries.
+    # Vendor header names: TensorRT, cuDNN, CUDA runtime and libraries,
+    # NCCL (nccl and nccl-cuda12.9, the build's NCCL).
     case $base in
         NvInfer*.h | NvOnnxParser*.h | NvOnnxConfig.h | NvUtils.h | NvCaffeParser.h | \
             cudnn*.h | cuda.h | cuda_runtime*.h | cublas*.h | cufft*.h | curand*.h | \
-            nvrtc*.h | cupti*.h)
+            nvrtc*.h | cupti*.h | nccl.h | nccl_net.h)
             echo "NVIDIA header"; return ;;
         openvino.hpp | ie_core.hpp | inference_engine.hpp)
             echo "OpenVINO header"; return ;;
@@ -97,9 +99,14 @@ path_reason() {
             echo "MIGraphX header"; return ;;
         hip_runtime*.h | hip_version.h | hiprtc.h | amd_hip_*.h)
             echo "HIP header"; return ;;
-        # hipblas*.h covers hipblaslt*.h.
-        rocblas*.h | rocm_version.h | hipblas*.h | miopen*.h)
+        # hipblas*.h covers hipblaslt*.h; rccl.h is RCCL's (Arch's rccl,
+        # the migraphx line's NCCL).
+        rocblas*.h | rocm_version.h | hipblas*.h | miopen*.h | rccl.h)
             echo "ROCm library header"; return ;;
+        # oneDNN (Intel; the oneDNN provider builds it from its source
+        # archive, which stays out of the tree), and its old mkldnn names.
+        dnnl.h | dnnl.hpp | dnnl_*.h | dnnl_*.hpp | mkldnn*.h | mkldnn*.hpp)
+            echo "oneDNN header"; return ;;
     esac
 
     # Binary, package, model and archive extensions (case-insensitive).
@@ -123,9 +130,10 @@ path_reason() {
         */openvino/*.hpp/ | */openvino/*.h/) echo "OpenVINO header"; return ;;
         */migraphx/*.hpp/ | */migraphx/*.h/) echo "MIGraphX header"; return ;;
         */include/hip/*.h/ | */include/hip/*.hpp/) echo "HIP header"; return ;;
-        */rocblas/*.h/ | */miopen/*.h/ | */hipblas/*.h/ | */hipblaslt/*.h/ | */rocm/*.h/)
+        */rocblas/*.h/ | */miopen/*.h/ | */hipblas/*.h/ | */hipblaslt/*.h/ | */rocm/*.h/ | */rccl/*.h/)
             echo "ROCm library header"; return ;;
         */opt/rocm/*) echo "ROCm tree"; return ;;
+        */oneapi/dnnl/*) echo "oneDNN tree"; return ;;
         */targets/x86_64-linux/*) echo "CUDA toolkit tree"; return ;;
     esac
     rest=''
@@ -136,6 +144,7 @@ path_reason() {
             TensorRT-[0-9]*) echo "TensorRT tree ($component/)"; return ;;
             l_openvino_toolkit_* | openvino_toolkit_* | openvino_[0-9]*)
                 echo "OpenVINO toolkit tree ($component/)"; return ;;
+            [Oo]ne[Dd][Nn][Nn]-[0-9]* | mkl-dnn-[0-9]*) echo "oneDNN source tree ($component/)"; return ;;
             .ngc) echo "NGC configuration"; return ;;
         esac
         if [[ $rest == */* ]]; then rest=${rest#*/}; else rest=''; fi

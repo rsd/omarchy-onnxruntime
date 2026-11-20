@@ -19,6 +19,8 @@ plain C.
 | `openvino:CPU` | OpenVINO | Intel CPU plugin |
 | `openvino:GPU` | OpenVINO | Intel GPU plugin |
 | `openvino:NPU` | OpenVINO | Intel NPU plugin |
+| `dnnl` | oneDNN (default options) | host CPU |
+| `migraphx-load` | MIGraphX, device 0 (not in the default set, see below) | AMD GPU |
 
 For every target except `cpu`, the session option
 `session.disable_cpu_ep_fallback=1` is set. A provider that registers but cannot
@@ -44,6 +46,8 @@ temporary directory:
     scripts/smoke-test.sh                       # installed package, all targets
     scripts/smoke-test.sh --require cpu,cuda    # exit 1 unless these are ok
     scripts/smoke-test.sh --only openvino       # the three OpenVINO devices
+    scripts/smoke-test.sh --only cpu,dnnl       # the oneDNN provider
+    scripts/smoke-test.sh --only migraphx-load  # the MIGraphX provider loads
     scripts/smoke-test.sh --prefix /opt/ort     # a different install prefix
 
 Against a build tree instead of an installed package:
@@ -59,8 +63,8 @@ Options:
 | `--prefix DIR` | install prefix, default `/usr` (headers in `DIR/include/onnxruntime`, libraries in `DIR/lib`) |
 | `--include DIR` | directory with `onnxruntime_c_api.h`; a source tree's `include/onnxruntime` is accepted |
 | `--libdir DIR` | directory with `libonnxruntime.so` |
-| `--only LIST` | test only these targets (comma-separated) |
-| `--require LIST` | exit 1 unless these targets are `ok` |
+| `--only LIST` | test only these targets (comma-separated); default: all but `migraphx-load` |
+| `--require LIST` | exit 1 unless these targets are `ok` (`ok (no device)` counts) |
 | `--runs N` | warm runs per target, default 5 |
 | `--keep` | keep the temporary directory and print its path |
 
@@ -78,11 +82,13 @@ To build by hand:
     ONNX Runtime 1.31.1 (API 31, built against headers for API 31)
     available providers: TensorrtExecutionProvider CUDAExecutionProvider ... CPUExecutionProvider
 
-    target         status        create ms   first ms    warm ms  max error
-    cpu            ok                  4.1       0.30       0.05   0.00e+00
-    cuda           ok                180.2       2.10       0.09   0.00e+00
-    openvino:NPU   unavailable           -          -          -          -
+    target         status           create ms   first ms    warm ms  max error
+    cpu            ok                     4.1       0.30       0.05   0.00e+00
+    cuda           ok                   180.2       2.10       0.09   0.00e+00
+    openvino:NPU   unavailable              -          -          -          -
         note: ...
+    migraphx-load  ok (no device)           -          -          -          -
+        note: no device: ...
 
 - **ok** - the session was created, ran, and every output element is within
   tolerance. `create ms` includes provider initialisation and, for TensorRT,
@@ -93,7 +99,9 @@ To build by hand:
   or the numbers failed. The ORT error message follows on the next line.
 - **unavailable** - the engine cannot be used on this machine. This is not a
   failure, unless the target was named in `--require`. Three causes:
-  - the provider is not in the available-providers list;
+  - the provider is not in the available-providers list (not for `migraphx-load`:
+    the core never lists MIGraphX, so the provider library on disk decides, see
+    below);
   - the provider's library or its vendor runtime is not installed. The list is
     fixed when ONNX Runtime is built, so `available providers` lists CUDA,
     TensorRT and OpenVINO even when their provider package is not installed
@@ -107,8 +115,57 @@ To build by hand:
   - OpenVINO says `Device GPU is not available` (or `CPU`/`NPU`). The match is
     that exact message from the OpenVINO EP; any other OpenVINO error is `FAIL`.
 
+  For `dnnl` and `migraphx-load` a third form counts too: the provider library
+  itself (`libonnxruntime_providers_dnnl.so`, `libonnxruntime_providers_migraphx.so`;
+  separate packages) is absent, shown as `provider library not installed`. For
+  the other providers that is a packaging fault, a `FAIL`.
+
   A failure after the provider loaded fine (creating the session, running, or
   wrong numbers) is always `FAIL`.
+
+### The two newest targets
+
+`dnnl` runs the model on the oneDNN provider like any other engine: the provider
+is appended with default options, the CPU fallback is off, the numbers are
+checked (tolerance 1e-3). It is `unavailable` when the provider is not in the
+list, its library is not installed, or `libdnnl` is missing.
+
+`migraphx-load` exists because the MIGraphX provider needs an AMD GPU, which
+this project's machines do not have. It appends the provider by name
+(`SessionOptionsAppendExecutionProvider(..., "MIGraphX", ...)`, device 0; the
+core must be built with ORT's MIGraphX provider-interface option for the name to
+be known) and creates the session. The core does not list MIGraphX in
+`GetAvailableProviders`, so that list is not consulted for this target. Its
+results:
+
+- `ok (no device)` - the provider's device-ID check failed the way a machine
+  without an AMD GPU makes it fail; the message is printed on the next line
+  (`note: no device: ...`). That is the pass: the provider library loaded and
+  failed cleanly, with no crash and no signal. Only these signatures count (from
+  `migraphx_execution_provider_info.cc`, `hipGetDeviceCount`): `HIP failure 100:`
+  (hipErrorNoDevice) together with `hipGetDeviceCount` (the failing call named
+  in the message), `hipErrorNoDevice`,
+  `no ROCm-capable device`, and `Invalid device ID: 0, ... and 0 (exclusive)`.
+  A `HIP failure` with another code (e.g. 35, `hipErrorInsufficientDriver`, a
+  broken driver) or of another call (`hipMalloc`, `hipSetDevice`, ...) is a
+  FAIL.
+- `FAIL` - any other error, with the message shown: `not supported in this
+  build` (a core without MIGraphX), `Unknown provider name` (a library too old
+  for this call), `undefined symbol` (soname or ABI drift between the provider
+  and the core), a session error. On a machine that does have an AMD GPU, `ok
+  (no device)` means something is wrong: read the message.
+- `ok` - a device works: the model ran and the numbers are within 1e-2.
+- `unavailable` - `libonnxruntime_providers_migraphx.so` is not installed next
+  to `libonnxruntime.so`, or `libmigraphx_c`/`libamdhip64`/`libhsa` is missing.
+- a crash - the program dies from a signal, the results printed before that
+  stay visible (the output is flushed after every target), and the wrapper
+  exits 1 and names the signal.
+
+`migraphx-load` is not in the default run: a HIP runtime without a usable device
+may abort the process, and that must not turn a default run into a failure. It
+runs only when named in `--only` or `--require` (`--require migraphx-load`
+alone also runs it, together with the default set). With `--only`, the default
+set does not apply at all.
 
 Exit status of the program: `0` when no available target failed and every
 `--require`d target is `ok`; `1` otherwise; `2` for a usage error; `3` when the

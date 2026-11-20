@@ -1,12 +1,12 @@
 # Measured results
 
-What the recipe's checks reported for one full build, and the conditions they were run under. The figures are ONNX Runtime figures for the raw model only, without any pre- or post-processing, and are indicative: the desktop was in use during the runs. The tools that produced them are the [smoke test](../tools/ort-smoke/README.md) and the [model check](../tools/ort-model-check/README.md); terms such as TF32 and fp16 are in the [glossary](glossary.md).
+What the recipe's checks reported for two builds, and the conditions they were run under: first the single-package build 1.29.0-1 (and the CUDA 12 legacy provider 1.29.0-1), then the [1.29.0-7 packages](#release-1290-7), which add ONNX Runtime's training support, the oneDNN provider and the MIGraphX packages. The figures are ONNX Runtime figures for the raw model only, without any pre- or post-processing, and are indicative: the desktop was in use during the runs. The tools that produced them are the [smoke test](../tools/ort-smoke/README.md) and the [model check](../tools/ort-model-check/README.md); terms such as TF32 and fp16 are in the [glossary](glossary.md).
 
 ## Conditions
 
 | | |
 |---|---|
-| ONNX Runtime | 1.29.0, built by this recipe with `ORTF_EPS` at its default and `ORTF_CUDA_ARCHS=120` ([build.md](build.md#parallelism-memory-and-disk) has the build and the vendor runtime versions). It is the build of the single package `onnxruntime-full` 1.29.0-1; since 1.29.0-2 the same libraries are split into `onnxruntime-core` and one package per engine ([build.md](build.md#package-names)), and the split packages were not measured separately |
+| ONNX Runtime | 1.29.0, built by this recipe with `ORTF_EPS` at its default and `ORTF_CUDA_ARCHS=120` ([build.md](build.md#parallelism-memory-and-disk) has the build and the vendor runtime versions). It is the build of the single package `onnxruntime-full` 1.29.0-1; since 1.29.0-2 the same libraries are split into `onnxruntime-core` and one package per engine ([build.md](build.md#package-names)), and the split packages were not measured separately in this first run; the [1.29.0-7 packages](#release-1290-7) were |
 | NVIDIA GPU | GeForce RTX 5080 Laptop GPU |
 | CPU | Intel Core Ultra 9 275HX, 24 threads, 30 GiB of RAM |
 | Intel GPU and NPU | the integrated graphics and the NPU of that CPU |
@@ -100,7 +100,7 @@ The CUDA 12 legacy provider, `onnxruntime-provider-cuda12-legacy` 1.29.0-1 ([cud
 | Host | GeForce RTX 5080 Laptop GPU (compute capability 12.0), driver 615.78.08, Intel Core Ultra 9 275HX |
 | Model check | as above: `tools/ort-model-check --targets cpu,cuda`, `--precision default` (TF32) unless stated |
 
-The provider's `DT_NEEDED` entries are `libcublasLt.so.12`, `libcublas.so.12`, `libcudart.so.12` and the system libraries (`libstdc++.so.6`, `libm.so.6`, `libgcc_s.so.1`, `libc.so.6`, `ld-linux-x86-64.so.2`): no `.so.13`. Its only undefined symbol beyond the system's is `Provider_GetHost`. `cuobjdump` (of `cuda-12.9`) lists machine code for `sm_60`, `sm_61` and `sm_70` (181 kernels each), `sm_75` (222), `sm_80`, `sm_86` and `sm_89` (270 each), `sm_90a` (18), `sm_120a` (271), and the PTX of `compute_60` only. The 18 `sm_90a` kernels are compiled by ONNX Runtime whatever the architecture list is; the CUDA 13 `rtx` package has the same 18. `scripts/check-deps.sh` on the package found no gap and nothing missing; its three unresolved libraries (`libcudart`, `libcublas`, `libcublasLt` `.so.12`) and two bound mismatches (`cuda<13`, `cudnn<9.11`) are what a CUDA 13 host shows.
+The provider's `DT_NEEDED` entries are `libcublasLt.so.12`, `libcublas.so.12`, `libcudart.so.12` and the system libraries (`libstdc++.so.6`, `libm.so.6`, `libgcc_s.so.1`, `libc.so.6`, `ld-linux-x86-64.so.2`): no `.so.13`. This measurement is of 1.29.0-1, which did not link cuDNN. The 1.29.0-2 provider does, so its `DT_NEEDED` entries also have `libcudnn.so.9`; it was checked in the [1.29.0-7 round](#release-1290-7). Its only undefined symbol beyond the system's is `Provider_GetHost`. `cuobjdump` (of `cuda-12.9`) lists machine code for `sm_60`, `sm_61` and `sm_70` (181 kernels each), `sm_75` (222), `sm_80`, `sm_86` and `sm_89` (270 each), `sm_90a` (18), `sm_120a` (271), and the PTX of `compute_60` only. The 18 `sm_90a` kernels are compiled by ONNX Runtime whatever the architecture list is; the CUDA 13 `rtx` package has the same 18. `scripts/check-deps.sh` on the package found no gap and nothing missing; its three unresolved libraries (`libcudart`, `libcublas`, `libcublasLt` `.so.12`) and two bound mismatches (`cuda<13`, `cudnn<9.11`) are what a CUDA 13 host shows.
 
 ### Smoke test
 
@@ -128,7 +128,188 @@ With `--precision fp32`:
 
 In fp32 mode MODNet's CUDA maximum error is 1.23e-3, above the 1e-3 bound of the model check, although its mean error is 3.7e-6; it reproduced three times. The CUDA 13 provider gives 2.78e-4 on the same model and run (the table above). The default (TF32) mode passes on all four models.
 
+**This is a known difference, not a failure of the package.** The bound is kept as it is. The older cuDNN (9.10) uses a different summation order from the cuDNN 9.27 of the CUDA 13 run. The mean error is 3.7e-6, and a difference of this size is invisible in a 0 to 1 mask.
+
 ### Not tested
 
 - The legacy architectures on real Pascal or Volta hardware, and the `sm_75` to `sm_89` machine code on real cards of those generations.
 - CUDA 12.9 with cuDNN 9.10 on the 580xx driver series. This run used driver 615.78.08 on a Blackwell GPU.
+
+The 1.29.0-2 provider was run again, on the same GPU, in the [1.29.0-7 round](#release-1290-7); that round did not change either point.
+
+## Release 1.29.0-7
+
+The second set of measurements, of the packages `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core` 1.29.0-7, the preset `onnxruntime-provider-cuda13-all` 1.29.0-7, `onnxruntime-provider-cuda12-legacy` 1.29.0-2, and `onnxruntime-provider-migraphx` and `python-onnxruntime-provider-migraphx` 1.29.0-1 ([packages.md](packages.md)). These are built with ONNX Runtime's training support and NCCL, so they are larger than 1.29.0-6 (see [sizes](#package-sizes)). The first build of 1.29.0-7 had two faults that only running it showed; they are described [below](#faults-found-and-fixed) and the figures here are of the rebuilt packages.
+
+### Conditions
+
+| | |
+|---|---|
+| Machine | GeForce RTX 5080 Laptop GPU (driver 615.78.08); Intel Core Ultra 9 275HX (Arrow Lake, AVX2, no AVX-512) with its integrated GPU and NPU. The same machine as above |
+| Where it ran | The packages were extracted into a scratch directory, not installed, and the installed 1.29.0-6 packages were left alone. Each run directory held the extracted core library next to the extracted provider, which is where the core looks for providers. For Python, the extracted `python-onnxruntime-core` tree was put on `PYTHONPATH` and run with `python -s -P` (`python -I` ignores `PYTHONPATH` and would have loaded the installed package) with its `capi` links pointed at the extracted libraries. No `LD_PRELOAD` was used anywhere |
+| Vendor libraries | The host's CUDA 13, cuDNN, TensorRT and OpenVINO, versions not recorded for this run. NCCL 2.32.3 from Arch's `nccl` package, extracted and put on `LD_LIBRARY_PATH` (the main packages depend on `nccl`; it was not installed on this machine). For the CUDA 12 legacy provider, the libraries of `cuda-12.9`, `cudnn9.10-cuda12.9` (cuDNN 9.10) and `nccl-cuda12.9` (NCCL 2.30.7), extracted in the same way. For MIGraphX, Arch's ROCm libraries, extracted, where stated |
+| Tools | `scripts/smoke-test.sh --runs 50` and `tools/ort-model-check/model-check.py --runs 50`, as in the conditions above; CPU EP fallback disabled unless stated |
+
+### Results at a glance
+
+| Check | Result |
+|---|---|
+| C smoke test, main packages | pass: 7 targets `ok` with max error 0 |
+| C smoke test, `cuda` of the CUDA 12 legacy provider on the RTX 5080 with CUDA 12.9 libraries | pass: `ok`, max error 0; no `.so.13` file opened |
+| MIGraphX provider, no AMD device | with ROCm libraries: `ok (no device)`, as designed; without them: `unavailable`; both exit 0 |
+| Python `get_available_providers()` | pass; lists the oneDNN provider, and MIGraphX when the add-on is present |
+| oneDNN provider from Python | pass: no crash and no out-of-memory in 34 separate processes |
+| oneDNN provider on the four models without CPU fallback | fail: every model has nodes it cannot run (see [below](#the-onednn-provider-against-the-cpu)) |
+| MODNet fp32, CUDA 13 `cuda` and `tensorrt` | pass (2.78e-4 and 5.07e-5, bound 1e-3) |
+| MODNet fp32, CUDA 12 legacy `cuda` | known difference: 1.23e-3 against the 1e-3 bound, as in the first run (older cuDNN 9.10, different summation order; mean error 3.7e-6); default (TF32) mode passes |
+| Package checks (dependencies, search paths, vendor files, metadata) | pass |
+
+### C smoke test
+
+`scripts/smoke-test.sh --runs 50` on the main packages: 7 ok, 0 failed. `create` is the session creation, `first` the first run and `warm` a later run, in milliseconds.
+
+| Target | create ms | first ms | warm ms | max err |
+|---|---:|---:|---:|---:|
+| cpu | 3.2 | 0.08 | 0.02 | 0 |
+| cuda | 581.3 | 373.34 | 0.02 | 0 |
+| tensorrt | 3219.6 | 2.16 | 0.02 | 0 |
+| openvino:CPU | 123.8 | 4.83 | 0.02 | 0 |
+| openvino:GPU | 257.3 | 0.76 | 0.60 | 0 |
+| openvino:NPU | 24.2 | 81.92 | 0.36 | 0 |
+| dnnl | 4.8 | 5.11 | 2.36 | 0 |
+
+CUDA 12 legacy 1.29.0-2 on the RTX 5080 with the CUDA 12.9 libraries: `cuda` ok, max error 0 (create 718.7 ms, first run 476.01 ms, warm run 0.02 ms). `LD_DEBUG` showed no `.so.13` file opened; cudart, cuBLAS and cuBLASLt 12, cuDNN 9.10.2 and NCCL 2.30.7 all came from the CUDA 12 copies.
+
+MIGraphX: the machine has no AMD GPU. With Arch's ROCm libraries on the library path, the smoke test reports `ok (no device)`: the provider loads against the core and HIP reports no device (failure 100 from `hipGetDeviceCount`). Without them it reports `unavailable` (`libmigraphx_c.so.3` not found). Both exit 0. Nothing was run on an AMD GPU.
+
+### Python
+
+`get_available_providers()` from the extracted `python-onnxruntime-core`:
+
+| | Providers listed |
+|---|---|
+| Without the MIGraphX link | `Tensorrt`, `CUDA`, `OpenVINO`, `Dnnl`, `CPU` |
+| With the link that `python-onnxruntime-provider-migraphx` installs | `Tensorrt`, `CUDA`, `MIGraphX`, `OpenVINO`, `Dnnl`, `CPU` |
+
+### The oneDNN provider against the CPU
+
+Median milliseconds over 50 runs, with `--targets cpu,openvino:CPU,dnnl`. With CPU fallback disabled the oneDNN provider fails on all four models, because some nodes are assigned to the default CPU provider; `ok*` marks a result with `--allow-cpu-fallback`. The `openvino:CPU` column was measured with fallback allowed; the median of its fallback-disabled run is in brackets. The last column is the oneDNN median divided by the CPU median.
+
+| Model | cpu | openvino:CPU | dnnl (ok*) | dnnl max err | dnnl / cpu |
+|---|---:|---:|---:|---:|---:|
+| selfie_segmentation_landscape | 1.81 | 1.86 (1.17) | 18.95 | 6.06e-8 | 10.5 |
+| pp_humansegv2_mobile_192x192 | 3.14 | 3.46 (2.85) | 58.65 | 1.19e-7 | 18.7 |
+| pp_humansegv2_lite_192x192 | 4.42 | 4.12 (4.26) | 29.86 | 3.58e-7 | 6.8 |
+| modnet_photographic, `--size 512x512` | 50.05 | 45.86 (46.10) | 349.86 | 4.75e-5 | 7.0 |
+
+The oneDNN outputs are correct, but it runs these models 7 to 19 times slower than the CPU provider, and it cannot run them without the CPU provider's help. The reasons, from the profiles of the two larger models (oneDNN 3.11.3 on a CPU with AVX2):
+
+1. **The graph is split into many pieces.** `pp_humansegv2_lite` becomes 55 oneDNN subgraphs and 38 CPU nodes, MODNet 61 subgraphs and 94 CPU nodes. For MODNet the oneDNN kernels take 343 ms per run against 17 ms for the CPU nodes, and the 532 data-layout conversions at the subgraph boundaries over 5 runs add about 59 ms per run.
+2. **Two thread pools compete.** ONNX Runtime's own pool (24 threads that spin while waiting) runs next to the 24 OpenMP threads of `libgomp`. With `session.intra_op.allow_spinning=0`, `pp_humansegv2_lite` goes from 33.8 to 9.9 ms and MODNet from 362.6 to 151.1 ms (with one intra-op thread: 9.8 and 225.7 ms). `OMP_NUM_THREADS=8` did not help. Even with spinning off the provider stays slower than the CPU provider on these models.
+3. **The primitives are created for training.** The 1.29.0-7 build has training support, and oneDNN primitives are created with `forward_training`, not `forward_inference`.
+
+So on these four models the oneDNN provider is not usable without the CPU fallback, and the CPU provider or OpenVINO's `CPU` device is the better choice ([engines.md](engines.md#onednn)). The figures are for this CPU and these models only.
+
+### MODNet in fp32
+
+`--size 512x512 --precision fp32`, bound 1e-3 on the maximum error, as in the first run.
+
+| Provider | max err | mean err | median ms | Result |
+|---|---:|---:|---:|---|
+| CUDA 13, `cuda` | 2.78e-4 | 1.01e-6 | 11.18 | ok |
+| CUDA 13, `tensorrt` | 5.07e-5 | 6.48e-7 | 3.43 | ok |
+| CUDA 12 legacy, `cuda` | 1.23e-3 | 3.73e-6 | 7.83, 8.04, 7.94 | known difference: over the bound in 3 of 3 runs, see below |
+
+The CUDA 12 figure is the same as in the first run, just above the bound while the mean error is small. It is a **known difference, not a failure of the package**: the bound stays at 1e-3, and the older cuDNN (9.10) uses a different summation order. The mean error is 3.7e-6 and the difference is invisible in a 0 to 1 mask. The default (TF32) mode of the CUDA 12 provider passes: max error 1.29e-1, mean 1.80e-3, median 4.82 ms, the same errors as in the [CUDA 12 section](#model-check-1) above.
+
+### Package sizes
+
+Installed size is the `size` field of the package, in MiB; 1.29.0-6 was built without training support.
+
+| Package | 1.29.0-6 | 1.29.0-7 | Growth | Download of -7 |
+|---|---:|---:|---:|---:|
+| `onnxruntime-core` | 29.44 | 33.51 | +4.07 | 8.98 |
+| `onnxruntime-provider-cuda13-rtx` | 154.74 | 162.98 | +8.24 | 103.63 |
+| `onnxruntime-provider-cuda13-all` | 294.88 | 307.87 | +12.99 | 235.57 |
+| `python-onnxruntime-core` | 43.15 | 52.39 | +9.24 | 12.12 |
+| `onnxruntime-provider-cuda12-legacy` (1.29.0-1 to -2) | 557.48 | 587.86 | +30.39 | 186.09 |
+| `onnxruntime-provider-dnnl` | none | 64.26 | new | 10.15 |
+| `onnxruntime-provider-tensorrt-cuda13` | 1.15 | 1.15 | 0 | 0.31 |
+| `onnxruntime-provider-openvino` | 1.70 | 1.70 | 0 | 0.51 |
+| `onnxruntime-provider-migraphx` | none | 0.73 | new | 0.17 |
+| `python-onnxruntime-provider-migraphx` | none | 0 (two symbolic links) | new | 3.4 KiB |
+
+The growth is the training code. The oneDNN provider carries oneDNN statically and links only `libgomp`, `libstdc++`, `libm`, `libgcc_s` and `libc`.
+
+### Build times
+
+Clean-chroot builds on this machine, each a forced rebuild, wall-clock time:
+
+| Build | Time |
+|---|---:|
+| Main packages, `rtx` preset (`ORTF_CUDA_ARCHS=120`) | 1 h 04 min 27 s |
+| Main packages, `all` preset (all CUDA architectures) | 2 h 08 min 53 s |
+| CUDA 12 legacy line 1.29.0-2 | 1 h 28 min 56 s |
+| MIGraphX line 1.29.0-1 (ROCm chroot) | 8 min 51 s |
+| `nccl-cuda12.9` 2.30.7-2 (AUR package the CUDA 12 line depends on) | 11 min 24 s |
+
+### Package checks
+
+On the extracted packages, by hand and with the recipe's own guards:
+
+- Every CUDA provider (`rtx`, `all`, CUDA 12 legacy) lists `libcudnn.so.9` and `libnccl.so.2` as needed libraries. The core and the Python module need neither `libnccl` nor the CUDA libraries.
+- No package has a search path other than `$ORIGIN` (the TensorRT provider also has `/opt/nvidia/tensorrt/lib`, on purpose), and no file mentions the build directory except the build metadata that `makepkg` writes.
+- No package contains a vendor library (CUDA, cuDNN, NCCL, TensorRT, OpenVINO, ROCm, MIGraphX, oneDNN or `libgomp`).
+- `python-onnxruntime-provider-migraphx` contains two symbolic links and no file with content.
+- The recipe's search-path and undefined-symbol checks pass on all 11 packages; the only undefined symbols are the two the core provides, `Provider_GetHost` and `Provider_SetHost`.
+- Each package's metadata agrees with the recipe's `.SRCINFO`, apart from the version bounds that are added when the package is built.
+
+### Faults found and fixed
+
+An earlier build of 1.29.0-7 was run the same way and had two faults, which the rebuilt packages above no longer have:
+
+- **The CUDA provider could not load.** Training adds CUDA code that calls cuDNN directly, but the provider did not link cuDNN, so it failed with `undefined symbol: cudnnGetConvolutionBackwardDataWorkspaceSize`, and the TensorRT provider then reported that the CUDA provider was not available. The recipe now links cuDNN into the provider and, when packaging, checks every provider for undefined symbols.
+- **The oneDNN provider crashed from Python.** Sometimes it segfaulted, sometimes `libgomp` reported an out-of-memory error of hundreds of gigabytes. ONNX Runtime 1.29.0's Python binding gives the provider's factory a pointer to a local variable holding the thread count, and the provider reads it after the function has returned, so it passed a garbage number (in one run 1459638976) to `omp_set_num_threads`. The C API leaves the pointer null, which is why the C smoke test passed. The same code is in Arch's package, which should have the same fault; that was not run here. The recipe now patches the provider's factory to keep its own copy of the value. With the patch `omp_set_num_threads` is called once, with 24, the number of CPU threads.
+
+Two smaller faults were fixed too: the Python module carried the build directory in its search path, and the MIGraphX Python add-on carried copies of licence files, which are now a link.
+
+### Installed packages
+
+The packages were then installed with `pacman` and run from `/usr`, with no environment overrides: no `PYTHONPATH`, `LD_LIBRARY_PATH` or `LD_PRELOAD` was set. The set is `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core`, all 1.29.0-7, with `nccl` 2.32.3-1 from the repository. They were installed as an upgrade over 1.29.0-6 (`pacman -U`; the pacman log shows the five 1.29.0-6 packages upgraded and the oneDNN provider newly installed). The machine is the GeForce RTX 5080 Laptop GPU and Intel Core Ultra 9 275HX of the runs above, with CUDA 13.4.3, cuDNN 9.27.0.42, TensorRT 11.4.0.106, OpenVINO 2026.4.1 and Python 3.14.8.
+
+- **C smoke test.** `scripts/smoke-test.sh --runs 50` reported 7 of 7 targets `ok`, each with max error 0. The providers available were TensorRT, CUDA, OpenVINO, DNNL and CPU. `nccl` came from the package, so no library path was needed. `create`, `first` and `warm` are in milliseconds:
+
+| Target | create ms | first ms | warm ms | max err |
+|---|---:|---:|---:|---:|
+| cpu | 8.5 | 0.44 | 0.02 | 0 |
+| cuda | 713.5 | 361.37 | 0.02 | 0 |
+| tensorrt | 3205.8 | 2.12 | 0.02 | 0 |
+| openvino:CPU | 141.9 | 0.54 | 0.01 | 0 |
+| openvino:GPU | 251.7 | 0.78 | 0.55 | 0 |
+| openvino:NPU | 38.4 | 7.28 | 0.54 | 0 |
+| dnnl | 15.3 | 24.93 | 2.16 | 0 |
+
+  `--only cpu,migraphx-load` gives `cpu` `ok` and `migraphx-load` `unavailable`, because the MIGraphX provider library is not installed; the exit status is 0.
+
+- **Python.** `onnxruntime` 1.29.0 loads from `/usr/lib/python3.14/site-packages` and lists `TensorrtExecutionProvider`, `CUDAExecutionProvider`, `OpenVINOExecutionProvider`, `DnnlExecutionProvider` and `CPUExecutionProvider`. `get_device()` reports `GPU-DNNL-MIGRAPHX` although no MIGraphX package is installed. That is a string fixed when the library is built, so it does not show what is loaded; `get_available_providers()` does.
+- **Training import.** `import onnxruntime.training` needs PyTorch, as the [packages](packages.md) page says. `python-pytorch` is an optional dependency and was not installed, so the import stops with `ModuleNotFoundError: No module named 'torch'`, and `from onnxruntime.training import artifacts` fails the same way. The other training dependencies import: onnx 1.22.0, sympy 1.14.0, cerberus 1.3.8, h5py 3.16.0 and numpy 2.5.4.
+- **Library links.** The six entries in the Python `capi` directory (the core library and the five `providers_*` links) all point to `/usr/lib` and resolve. `onnxruntime_pybind11_state.so` has `RUNPATH` `$ORIGIN`. `pacman -Qkk` reports no altered file: 52 in `onnxruntime-core`, 11 in the CUDA 13 provider, 10 in the TensorRT provider, 10 in OpenVINO, 12 in DNNL and 1433 in `python-onnxruntime-core`.
+- **oneDNN provider from Python.** The repro ran 19 times without a crash or an out-of-memory error: 10 runs of PP-HumanSeg v2 mobile, 3 of selfie segmentation, 3 of PP-HumanSeg v2 lite and 3 of MODNet at 512x512, each with the CPU provider registered as fallback. The crash and the out-of-memory error described [above](#faults-found-and-fixed) did not recur.
+- **MODNet in fp32.** `--size 512x512 --precision fp32` on `cpu`, `cuda` and `tensorrt`, with exit 0 and every error within the 1e-3 bound. TensorRT ran with TF32 off (`NVIDIA_TF32_OVERRIDE=0`, as the tool notes).
+
+| Target | create ms | first ms | median ms | p95 ms | max err | mean err |
+|---|---:|---:|---:|---:|---:|---:|
+| cpu | 37.8 | 60.75 | 48.99 | 56.41 | 0 | 0 |
+| cuda | 361.7 | 520.27 | 10.69 | 11.38 | 2.78e-4 | 1.01e-6 |
+| tensorrt | 229.5 | 8867.10 | 3.46 | 3.90 | 5.14e-5 | 6.55e-7 |
+
+  The CUDA error matches the extracted run above (2.78e-4); the TensorRT error is 5.14e-5 here against 5.07e-5 there, under the same bound.
+- **A consumer application on the system library.** A Rust program using the `ort` crate 2.0.0-rc.15 with `load-dynamic` loads `libonnxruntime.so.1` from the system path. Its `auto` setting selects NVIDIA TensorRT and the engine loads. The test suite passes with `ORT_DYLIB_PATH` set to that library: 59 unit tests (one benchmark ignored), 1 exit test (which ran the OpenVINO CPU, GPU and NPU engines), 6 module tests and 1 runtime test. The module tests also pass with the variable unset, resolving the library from the system path. The ignored hardware and Intel GPU tests pass too; on CUDA frames `auto` (TensorRT) took 3.14 to 3.24 ms per frame, `cuda` 3.45 ms and `cpu` 3.86 ms.
+- With TensorRT 11, the provider logs that the BF16, FP16 and INT8 precision flags have been removed and that strongly-typed networks are used. An engine that asks for FP16 therefore runs the model's own types. The message is a notice, not a failure.
+
+### Not tested
+
+- The MIGraphX provider on an AMD GPU. Only loading, and the no-device result, were run.
+- The CUDA 12 legacy provider on Pascal or Volta hardware; see [above](#not-tested).
+- The installed CUDA 12 line. The `onnxruntime-provider-cuda12-legacy` package was not installed, because three of its dependencies are AUR builds.
+- Training with PyTorch. `python-pytorch` was not installed, so `onnxruntime.training` was only imported without it ([above](#installed-packages)), and training itself was not run.

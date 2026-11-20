@@ -29,6 +29,7 @@ The names are those of ort-smoke.
 | `openvino:CPU` | OpenVINO, Intel CPU plugin | fp32: max 1e-3 | fp32: max 1e-3 |
 | `openvino:GPU` | OpenVINO, Intel GPU plugin | fp16: max 1.0, mean 1e-2 | fp32 (`INFERENCE_PRECISION_HINT=f32`): max 1e-3 |
 | `openvino:NPU` | OpenVINO, Intel NPU plugin | fp16: max 1.0, mean 1e-2 | fp16 (no fp32 inference): max 1.0, mean 1e-2 |
+| `dnnl` | oneDNN, on the CPU (default options; never measured) | fp32: max 1e-3 | fp32: max 1e-3 |
 
 Each cell gives the arithmetic the target runs in and the bounds on the maximum
 and mean absolute error against the CPU outputs; a target passes when every
@@ -191,7 +192,7 @@ the first 12 hex digits of the model's SHA-256.
   built"); or OpenVINO reports `Device <name> is not available`. Any other
   error is a `FAIL`.
 
-  The script loads `capi/libonnxruntime_providers_<cuda|tensorrt|openvino>.so`
+  The script loads `capi/libonnxruntime_providers_<cuda|tensorrt|openvino|dnnl>.so`
   itself before creating the session. ONNX Runtime only logs a failure to load
   the provider and then fails the session with nodes assigned to the CPU EP,
   which hides the cause; and when session creation fails, `InferenceSession`

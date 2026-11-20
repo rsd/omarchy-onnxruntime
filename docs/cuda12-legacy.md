@@ -1,6 +1,6 @@
 # NVIDIA Pascal and Volta: the CUDA 12 line
 
-`onnxruntime-provider-cuda12-legacy` is the CUDA provider of ONNX Runtime 1.29.0 built with CUDA 12.9, for the NVIDIA GPUs that CUDA 13 dropped. It is a separate line from the packages of the main recipe, which use CUDA 13. **It is untested on Pascal and Volta hardware**, and CUDA 12.9 with cuDNN 9.10 on the 580xx driver is untested too. Terms such as compute capability, SASS and PTX are in the [glossary](glossary.md).
+`onnxruntime-provider-cuda12-legacy` is the CUDA provider of ONNX Runtime 1.29.0 built with CUDA 12.9, for the NVIDIA GPUs that CUDA 13 dropped. It is a separate line from the packages of the main recipe, which use CUDA 13. **It is untested on Pascal and Volta hardware**, and CUDA 12.9 with cuDNN 9.10 on the 580xx driver is untested too. This is version 1.29.0-2, built with the training operators and NCCL (below); it is released together with the main line's 1.29.0-7. Terms such as compute capability, SASS and PTX are in the [glossary](glossary.md).
 
 ## Who needs it
 
@@ -15,13 +15,14 @@ CUDA 13 dropped Maxwell, Pascal and Volta, cuDNN 9.11 removed them, and so did t
 ## What it is
 
 - **One package** from its own pkgbase `onnxruntime-split-cuda12`, with its own `pkgrel`. Its recipe is generated from `onnxruntime-split/PKGBUILD`; never edit it by hand ([building](#building-from-source)). It holds `libonnxruntime_providers_cuda.so`, compiled for the preset `legacy`: `60 61 70 75 80 86 89 120`, plus the PTX of `compute_60` (`60-virtual`). A preset's PTX is always that of its oldest architecture, the one every newer GPU can JIT-compile. It also holds 18 kernels for `sm_90a` that ONNX Runtime compiles whatever the architecture list says; the CUDA 13 `rtx` package has the same 18. The Turing to Blackwell targets are there so that a machine pinned to CUDA 12 with a newer card beside the old one is served too.
-- **It loads into the main line's core.** It depends on `onnxruntime-core=1.29.0` (the version only, so any pkgrel of the core satisfies it), because the core holds no CUDA code and links no CUDA library. `python-onnxruntime-core` works with it too: its module links no CUDA library either. There is no TensorRT provider and no Python package in this line.
-- **Dependencies.** `cuda>=12` and `cuda<13` (from `libcudart.so.12`), `cudnn>=9.10` and `cudnn<9.11`, `nvidia-utils`. The cuDNN bound is to the minor version, not the major as for the CUDA 13 packages, because cuDNN 9.11 dropped these GPUs: a bound on 9 alone would let pacman install a cuDNN that cannot run on them. The build refuses any cuDNN other than 9.10 for the same reason.
+- **It loads into the main line's core.** It depends on `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`, so any packaging-only pkgrel of the core from 1.29.0-7 on satisfies it, because the core holds no CUDA code and links no CUDA library. The lower bound is the first core built with the training operators and NCCL: those change the interface between the core and a provider, nothing checks that both agree, and a mismatch crashes. That is also why this line is released together with the main line, and why the core 1.29.0-7 conflicts with this package below 1.29.0-2 ([the core pin](release-cuda12.md#the-core-pin)). `python-onnxruntime-core` works with it too: its module links no CUDA library either. There is no TensorRT provider and no Python package in this line.
+- **Training and NCCL.** Like the main line, it is built with the training operators and with NCCL. Its NCCL is the AUR's `nccl-cuda12.9`, depended on by name: it provides and conflicts with `nccl` and is built for `sm_52` to `sm_72`, the GPUs this line exists for, which Arch's `nccl` (kernels for `sm_75` and newer) does not run on. A bare `nccl` dependency would let pacman pick Arch's. The main core's own dependency on `nccl` is met by `nccl-cuda12.9`'s provide.
+- **Dependencies.** `cuda>=12` and `cuda<13` (from `libcudart.so.12`), `cudnn>=9.10` and `cudnn<9.11`, `nccl-cuda12.9`, `nvidia-utils`. The cuDNN bound is to the minor version, not the major as for the CUDA 13 packages, because cuDNN 9.11 dropped these GPUs: a bound on 9 alone would let pacman install a cuDNN that cannot run on them. The build refuses any cuDNN other than 9.10 for the same reason.
 - **One CUDA provider at a time.** Like every CUDA package it provides and conflicts with `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda12`, so it cannot be installed beside any `-cuda13-*` package, the CUDA 13 TensorRT provider included (that one depends on the CUDA 13 provider).
 
 ## What the machine needs
 
-The packages below that are not in Arch's repositories (`nvidia-580xx-dkms`, `cuda-12.9`, `cudnn9.10-cuda12.9`, `gcc14`) are third-party AUR packages, not part of this repository: read their PKGBUILDs.
+The packages below that are not in Arch's repositories (`nvidia-580xx-dkms`, `cuda-12.9`, `cudnn9.10-cuda12.9`, `nccl-cuda12.9`, `gcc14`) are third-party AUR packages, not part of this repository: read their PKGBUILDs.
 
 - **The CUDA 12 userland replaces CUDA 13.** The AUR's `cuda-12.9` provides `cuda=12.9` and conflicts with `cuda`; the AUR's `cudnn9.10-cuda12.9` provides `cudnn=9.10` and conflicts with `cudnn`. So CUDA 13 and cuDNN come off that machine, and so do the packages that need them. Only these two AUR packages provide versions inside the provider's bounds. Arch's `cuda` is CUDA 13 and its `cudnn` is 9.11 or later, so with the CUDA 12 userland already installed, pacman or the AUR helper finds the bounds met and never reaches for Arch's CUDA 13.
 - **Pascal and Volta need the 580xx driver.** The 590 series dropped them, so Arch's `nvidia-open*` packages and `nvidia-utils` no longer serve them. The AUR's `nvidia-580xx-dkms` is the 580 series for them (a DKMS package: it needs the headers of your kernel). The AUR's `nvidia-580xx-utils` provides `nvidia-utils`, so it meets the `nvidia-utils` dependency of `cuda-12.9` and of this package; no 580xx package name appears in any dependency of this repository's packages.
@@ -29,7 +30,7 @@ The packages below that are not in Arch's repositories (`nvidia-580xx-dkms`, `cu
 
 ## Installing
 
-The order: install the driver, `cuda-12.9` and `cudnn9.10-cuda12.9` before the provider, never the provider first. The core of the main line must be installed already (any pkgrel of 1.29.0: `onnxruntime-core` or `onnxruntime-core-bin`).
+The order: install the driver, `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9` before the provider, never the provider first. The core of the main line must be installed already: `onnxruntime-core` or `onnxruntime-core-bin`, 1.29.0-7 or later (the provider's pin, above). The core depends on `nccl`, and `nccl-cuda12.9` provides it, so Arch's `nccl` is replaced: pacman offers to remove it, answer y.
 
 1. **Remove the CUDA 13 side.** Name what you have installed (`pacman -Qq | grep -E '^(nvidia|cuda|cudnn|onnxruntime-provider)'` lists it): the CUDA 13 provider packages first, since they depend on `cuda` and `cudnn`, then those, then the current driver. pacman names anything else that needs `cuda` or `cudnn`; remove that too, or the transaction is refused.
 
@@ -44,15 +45,15 @@ The order: install the driver, `cuda-12.9` and `cudnn9.10-cuda12.9` before the p
 2. **Install the 580xx driver and the CUDA 12 userland first, then the provider, in a second command.** `gcc14` comes with `cuda-12.9`:
 
    ```bash
-   yay -S nvidia-580xx-dkms cuda-12.9 cudnn9.10-cuda12.9
+   yay -S nvidia-580xx-dkms cuda-12.9 cudnn9.10-cuda12.9 nccl-cuda12.9
    yay -S onnxruntime-provider-cuda12-legacy-bin
    ```
 
-   Reboot to load the new driver. Without a helper, build and install the AUR packages with `makepkg -si` in their clones (`gcc14` first, then `cuda-12.9` and `cudnn9.10-cuda12.9`, all before the provider), and install the provider from its release: tag `cuda12-v1.29.0-1` (the scheme is `cuda12-v<pkgver>-<pkgrel>`, a separate release from the main line's `v<pkgver>-<pkgrel>`). Download the `.pkg.tar.zst` and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases>, check them, and install:
+   Reboot to load the new driver. Without a helper, build and install the AUR packages with `makepkg -si` in their clones (`gcc14` first, then `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9`, all before the provider), and install the provider from its release: tag `cuda12-v1.29.0-2` (the scheme is `cuda12-v<pkgver>-<pkgrel>`, a separate release from the main line's `v<pkgver>-<pkgrel>`). Download the `.pkg.tar.zst` and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases>, check them, and install:
 
    ```bash
    sha256sum -c --ignore-missing SHA256SUMS
-   sudo pacman -U onnxruntime-provider-cuda12-legacy-1.29.0-1-x86_64.pkg.tar.zst
+   sudo pacman -U onnxruntime-provider-cuda12-legacy-1.29.0-2-x86_64.pkg.tar.zst
    ```
 
    To build the provider from source instead, see [Building from source](#building-from-source); the package is then `onnxruntime-provider-cuda12-legacy`, without `-bin`.
@@ -63,13 +64,17 @@ The order: install the driver, `cuda-12.9` and `cudnn9.10-cuda12.9` before the p
    scripts/smoke-test.sh --require cpu,cuda
    ```
 
+### Upgrading
+
+From the CUDA 12 provider 1.29.0-1: version 1.29.0-2 is built with training and NCCL, and so needs the main line's core 1.29.0-7 or later, which conflicts with 1.29.0-1. Install `nccl-cuda12.9` first (answer y to replacing `nccl`), then the new core and the new provider in one `pacman -U` (or one helper call): the core's conflict with the old provider is resolved in that one transaction.
+
 ### Going back to CUDA 13
 
 This is possible only where the card supports CUDA 13: a machine with only Pascal or Volta cards has no CUDA 13 setup to go back to. Remove the CUDA 12 side, which is the same order reversed, and install what step 1 removed:
 
 ```bash
 sudo pacman -R onnxruntime-provider-cuda12-legacy-bin cudnn9.10-cuda12.9 cuda-12.9 nvidia-580xx-dkms   # drop -bin if you built the provider from source; add the other 580xx packages you have
-sudo pacman -S nvidia-open-dkms cuda cudnn onnxruntime-provider-cuda13-rtx-bin   # your driver, and the CUDA 13 packages you removed
+sudo pacman -S nvidia-open-dkms cuda cudnn nccl onnxruntime-provider-cuda13-rtx-bin   # your driver, and the CUDA 13 packages you removed; nccl replaces nccl-cuda12.9: answer y
 ```
 
 `pacman -Qdtq` then lists `gcc14` and other packages the CUDA 12 userland brought in, if nothing else needs them.
@@ -78,11 +83,11 @@ sudo pacman -S nvidia-open-dkms cuda cudnn onnxruntime-provider-cuda13-rtx-bin  
 
 `onnxruntime-split-cuda12/PKGBUILD` builds the one package `onnxruntime-provider-cuda12-legacy`. It is a pkgbase of its own, because the two toolchains both own `/opt/cuda` and cannot share a build, and because its AUR `makedepends` would be wrong for one of the two.
 
-- **Generated, never edited.** `scripts/gen-cuda12.sh` writes it from `onnxruntime-split/PKGBUILD` and changes only a few lines: `pkgbase`, the defaults `_ortf_default_eps='cuda'`, `_ortf_default_cuda_archs=legacy` and `_ortf_default_python=0`, `_ortf_line=cuda12`, `_ortf_cuda_major_default=12`, and `pkgrel`, which is the line's own (`cuda12_pkgrel` in the script, starting at 1), plus a header comment. The same `pkgver`, sources, patches and build follow. `scripts/gen-cuda12.sh --check` fails, with a diff, when the committed file is stale, and the script stops without writing when a source line it replaces is missing or repeated. Its `.SRCINFO` comes from `scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --write` (`--check` and `--aur DIR` take the same `--recipe`).
+- **Generated, never edited.** `scripts/gen-cuda12.sh` writes it from `onnxruntime-split/PKGBUILD` and changes only a few lines: `pkgbase`, the defaults `_ortf_default_eps='cuda'`, `_ortf_default_cuda_archs=legacy` and `_ortf_default_python=0`, `_ortf_line=cuda12`, `_ortf_cuda_major_default=12`, and `pkgrel`, which is the line's own (`line_pkgrel` in the script; 2 now), plus a header comment. The same `pkgver`, sources, patches and build follow. `scripts/gen-cuda12.sh --check` fails, with a diff, when the committed file is stale, and the script stops without writing when a source line it replaces is missing or repeated. Its `.SRCINFO` comes from `scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --write` (`--check` and `--aur DIR` take the same `--recipe`).
 - **What the line refuses.** `_ortf_line=cuda12` builds the CUDA provider alone. `prepare()` stops for an `ORTF_EPS` other than `cuda`, for `ORTF_PYTHON=1`, for a cuDNN other than 9.10 (cuDNN 9.11 dropped Maxwell, Pascal and Volta; the main line is not bound by this), and for a toolkit that is not CUDA 12. The names carry `12` whatever `/opt/cuda` holds when makepkg reads the file, so the published `.SRCINFO` is the same on a CUDA 13 host. `package()` fails the build on a CUDA library with a `.so.13` soname, and on a provider that does not link `libcudart.so.12`, `libcublas.so.12` and `libcublasLt.so.12`.
-- **Dependencies.** `onnxruntime-core=<pkgver>` (the version only, any pkgrel, since this line makes no core), `cuda>=12`, `cuda<13`, `cudnn` bounded to the minor of the cuDNN installed at build time (`cudnn>=9.10`, `cudnn<9.11` with cuDNN 9.10), and `nvidia-utils`. `makedepends` are the build tools and the AUR packages by name, `gcc14`, `cuda-12.9` and `cudnn9.10-cuda12.9`, never bare `cuda` and `cudnn`, which an AUR helper would resolve to Arch's CUDA 13 and cuDNN 9.11. The `.SRCINFO` lists the bounds too, not the bare names. The bounds resolve against the provides of the AUR's `cuda-12.9` (`cuda=12.9`) and `cudnn9.10-cuda12.9` (`cudnn=9.10`).
+- **Dependencies.** `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1` (this line makes no core), `nccl-cuda12.9`, `cuda>=12`, `cuda<13`, `cudnn` bounded to the minor of the cuDNN installed at build time (`cudnn>=9.10`, `cudnn<9.11` with cuDNN 9.10), and `nvidia-utils`. `makedepends` are the build tools and the AUR packages by name, `gcc14`, `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9`, never bare `cuda`, `cudnn` and `nccl`, which an AUR helper would resolve to Arch's CUDA 13, cuDNN 9.11 and NCCL. The `.SRCINFO` lists the bounds too, not the bare names. The bounds resolve against the provides of the AUR's `cuda-12.9` (`cuda=12.9`) and `cudnn9.10-cuda12.9` (`cudnn=9.10`).
 - **Compiler: GCC 14.** `cuda-12.9`'s `/etc/profile.d/cuda.sh` sets `NVCC_CCBIN=/usr/bin/g++-14`, and the recipe uses nvcc's host compiler for its C++ as well, so that host code compiled by nvcc and by the C++ compiler agrees. Nothing is set in the recipe for it; the build needs the AUR's `gcc14` (`gcc-14` and `g++-14`).
-- **Build.** Only in a clean chroot, with the three AUR packages passed in with `-I`: [release-cuda12.md](release-cuda12.md#3-build-in-a-clean-chroot).
+- **Build.** Only in a clean chroot, with the four AUR packages passed in with `-I`: [release-cuda12.md](release-cuda12.md#3-build-in-a-clean-chroot).
 - **Check the result.** `scripts/check-cuda-archs.sh [--cuobjdump PATH] FILE ARCH...` takes a package file or the library and fails unless `cuobjdump` lists exactly those SASS and PTX architectures.
 
 `scripts/test.sh` runs the generator's `--check`, the `--check` of both `.SRCINFO` files, and the names, provides and conflicts of the generated one.
@@ -92,6 +97,10 @@ Building the main recipe against a CUDA 12 toolkit is a different thing and is n
 ## Releasing
 
 The release of this line has its own tag, prebuilt pkgbase and AUR packages: [release-cuda12.md](release-cuda12.md).
+
+## Known difference: MODNet in fp32
+
+With `--precision fp32` the model check reports a maximum error of 1.23e-3 for MODNet on this provider, above its 1e-3 bound (the CUDA 13 provider gives 2.78e-4). The bound is kept, and this is recorded as a **known difference, not a failure of the package**: the older cuDNN (9.10) uses a different summation order from the cuDNN of the CUDA 13 packages. The mean error is 3.7e-6, the difference is invisible in a 0 to 1 mask, and with the default TF32 math the check passes. It reproduced in three of three runs ([results.md](results.md#modnet-in-fp32)).
 
 ## Test status
 

@@ -5,8 +5,8 @@
 # onnxruntime-split-cuda12 (the CUDA 12 legacy provider).
 #
 #   scripts/gen-bin.sh [--base-url URL] [--out DIR] [--pkgrel N] <package dir> <tag>
-#   e.g. scripts/gen-bin.sh ~/release v1.29.0-6
-#        scripts/gen-bin.sh ~/release-cuda12 cuda12-v1.29.0-1
+#   e.g. scripts/gen-bin.sh ~/release v1.29.0-7
+#        scripts/gen-bin.sh ~/release-cuda12 cuda12-v1.29.0-2
 #
 # <package dir> holds the release assets: every *.pkg.tar.zst in it (the
 # packages of the rtx build plus the CUDA package of the `all` build, all
@@ -32,7 +32,14 @@
 # asset holding anything but .PKGINFO, .BUILDINFO, .MTREE and usr/ (an
 # .INSTALL script, say), or with backup files, is refused: the -bin
 # package would silently lose it. So is onnxruntime-provider-migraphx: it
-# never ran on AMD hardware and is not shipped prebuilt.
+# never ran on AMD hardware and is not shipped prebuilt (its line,
+# onnxruntime-split-migraphx, is source-only), with its Python add-on,
+# python-onnxruntime-provider-migraphx; a migraphx- tag, that line's, is
+# refused as a usage error (exit 2); and so is every -nccloff
+# package (a build without NCCL, ORTF_NCCL=0: local builds only). Every other package of a
+# release is taken as it is, whatever its name: onnxruntime-provider-dnnl
+# (oneDNN, linked in statically) gets its onnxruntime-provider-dnnl-bin by
+# the same convention as the others.
 #
 # For every asset <name>, package <name>-bin installs the asset's usr/
 # unchanged (its licence directory renamed to usr/share/licenses/<name>-bin)
@@ -43,8 +50,23 @@
 # convention of onnxruntime-split/PKGBUILD. Every depend on an
 # onnxruntime-* or python-onnxruntime* name must be met by what the -bin
 # packages provide (as pacman compares versions); the generator fails
-# naming the one that is not, except, for a cuda12- tag, the pin
-# onnxruntime-core=<pkgver> (pkgver only), which the main line's core meets.
+# naming the one that is not, except, for a cuda12- tag, the pins on the
+# main line's core, which the main line's onnxruntime-core or
+# onnxruntime-core-bin meets (the cuda12 line has no core): the pair
+# onnxruntime-core>=<pkgver>-<N> and onnxruntime-core<<V>, V a version
+# above pkgver (since 1.29.0-2, built with the training ops for the cores
+# from 1.29.0-7), or onnxruntime-core=<pkgver>. N must be at least
+# _ortf_core_abi_pkgrel of onnxruntime-split/PKGBUILD, read from the
+# recipe, whose pkgver must be the tag's: a lower N admits cores of another
+# provider bridge (exit 1). The bare onnxruntime-core=<pkgver>, which every
+# core pkgrel of pkgver meets, is accepted only when that ABI pkgrel is 1:
+# so cuda12-v1.29.0-1 (training off, bare pin) is refused, as it does not
+# fit the cores from 1.29.0-7. The pair comes whole: a lower bound without
+# the upper one, or the reverse, is refused, as is an inclusive upper
+# bound (onnxruntime-core<=V, which pins a core to V itself) (exit 1).
+# For a cuda12- tag, a depend on the bare nccl is refused too (exit 1):
+# that line's NCCL is the AUR's nccl-cuda12.9, by name, which the -bin
+# package carries over as it is.
 # The licence is the assets' (per package when
 # they differ). noextract lists every asset: extracted, they would all land
 # in the same $srcdir and their usr/ trees would merge.
@@ -87,6 +109,11 @@ fi
 pkgdir_in=$1 tag=$2
 [[ -d $pkgdir_in ]] || die 2 "$pkgdir_in: not a directory"
 pkgdir_in=$(cd "$pkgdir_in" && pwd)
+# The MIGraphX line (pkgbase onnxruntime-split-migraphx) is source-only:
+# no tag of its own, no -bin pkgbase.
+if [[ $tag == migraphx-* ]]; then
+    die 2 "$tag: the MIGraphX line (onnxruntime-split-migraphx) is not shipped as -bin (it never ran on AMD hardware): no migraphx- tag"
+fi
 if [[ ! $tag =~ ^(cuda12-)?v([^-]+)-([0-9]+(\.[0-9]+)?)$ ]]; then
     die 2 "$tag: not a tag v<pkgver>-<pkgrel> or cuda12-v<pkgver>-<pkgrel> (e.g. v1.29.0-6)"
 fi
@@ -137,8 +164,12 @@ for path in "$pkgdir_in"/*.pkg.tar.zst; do
     [[ -n $name ]] || die 1 "$file: no pkgname in its .PKGINFO"
     base=$(field "$info" pkgbase | head -n 1)
     [[ $base == "$srcbase" ]] || die 1 "$file: pkgbase is '$base', not $srcbase (the tag $tag takes only $srcbase packages)"
-    if [[ $name == onnxruntime-provider-migraphx* ]]; then
+    if [[ $name == onnxruntime-provider-migraphx* || $name == python-onnxruntime-provider-migraphx* ]]; then
         die 1 "$file: $name is not shipped as -bin (the MIGraphX provider never ran on AMD hardware); remove it from $pkgdir_in"
+    fi
+    # A build without NCCL (ORTF_NCCL=0): a local build's, never released.
+    if [[ $name == *-nccloff ]]; then
+        die 1 "$file: $name is of a build without NCCL (ORTF_NCCL=0), which is not shipped as -bin; remove it from $pkgdir_in"
     fi
     v=$(field "$info" pkgver | head -n 1)
     [[ $v == "$version" ]] || die 1 "$file: version $v, but the tag $tag says $version"
@@ -196,6 +227,71 @@ satisfies() {
         '<') ((c < 0)) ;;
     esac
 }
+# The first pkgrel of the main line's onnxruntime-core that the other lines'
+# providers are built for: _ortf_core_abi_pkgrel of onnxruntime-split/PKGBUILD,
+# read from the recipe (not repeated here), and the recipe's pkgver it
+# belongs to.
+recipe=$top/onnxruntime-split/PKGBUILD
+abi_rel=$(sed -n 's/^_ortf_core_abi_pkgrel=\([1-9][0-9]*\)$/\1/p' "$recipe" 2>/dev/null || true)
+abi_ver=$(sed -n 's/^pkgver=\([^[:space:]]*\)$/\1/p' "$recipe" 2>/dev/null || true)
+if [[ $srcbase == onnxruntime-split-cuda12 && ( -z $abi_rel || -z $abi_ver ) ]]; then
+    die 2 "$recipe: no _ortf_core_abi_pkgrel=<N> or pkgver= line (the lowest core pkgrel a cuda12 pin may name)"
+fi
+# core_pin <dependency>: whether it is one of the cuda12 line's pins on the
+# main line's onnxruntime-core of this pkgver: onnxruntime-core>=<pkgver>-<N>
+# (N a pkgrel, at least the recipe's _ortf_core_abi_pkgrel: a lower one
+# would admit cores of another provider bridge), onnxruntime-core<<V>, V
+# above pkgver as pacman compares (1.29.1 for 1.29.0), or the bare
+# onnxruntime-core=<pkgver>, which every pkgrel of pkgver meets: only when
+# the ABI pkgrel is 1, so that all of them share one provider bridge (not
+# for 1.29.0, whose cores from 7 have the training ops: the training-off
+# cuda12-v1.29.0-1 is refused). Both rules need the pkgver to be the
+# recipe's, whose ABI pkgrel is the only one known.
+core_pin() {
+    local n
+    case $1 in
+        "onnxruntime-core=$pkgver")
+            [[ $pkgver == "$abi_ver" ]] ||
+                die 1 "depend $1: the recipe (onnxruntime-split/PKGBUILD) is pkgver $abi_ver, so the ABI pkgrel of $pkgver's core is unknown"
+            [[ $abi_rel == 1 ]] ||
+                die 1 "depend $1: every pkgrel of $pkgver meets it, but the core's ABI pkgrel is $abi_rel (_ortf_core_abi_pkgrel, onnxruntime-split/PKGBUILD): it admits cores of another provider bridge"
+            ;;
+        "onnxruntime-core>=$pkgver-"*)
+            n=${1#"onnxruntime-core>=$pkgver-"}
+            [[ $n =~ ^[1-9][0-9]*(\.[0-9]+)?$ ]] || return 1
+            [[ $pkgver == "$abi_ver" ]] ||
+                die 1 "depend $1: the recipe (onnxruntime-split/PKGBUILD) is pkgver $abi_ver, so the ABI pkgrel of $pkgver's core is unknown"
+            (($(vercmp "$n" "$abi_rel") >= 0)) ||
+                die 1 "depend $1: below the core's ABI pkgrel $abi_rel (_ortf_core_abi_pkgrel, onnxruntime-split/PKGBUILD): it admits cores of another provider bridge"
+            ;;
+        # Refused by pin_pair; never taken for the exclusive bound.
+        'onnxruntime-core<='*) return 1 ;;
+        'onnxruntime-core<'*) (($(vercmp "${1#onnxruntime-core<}" "$pkgver") > 0)) ;;
+        *) return 1 ;;
+    esac
+}
+# pin_pair <file> <depends, newline-separated>: the cuda12 line's pins on
+# the core come as the whole pair, onnxruntime-core>=... with
+# onnxruntime-core<...: either alone admits cores of another pkgver's
+# provider bridge (a lower bound alone, every later release; an upper
+# bound alone, every earlier pkgrel). The upper bound is exclusive:
+# onnxruntime-core<=V is refused.
+pin_pair() {
+    local lo=0 hi=0 d
+    while IFS= read -r d; do
+        case $d in
+            'onnxruntime-core>='*) lo=1 ;;
+            'onnxruntime-core<='*)
+                die 1 "$1: depend $d: the upper bound of the pin pair is exclusive, onnxruntime-core<<next release> (_ortf_core_next, onnxruntime-split/PKGBUILD)"
+                ;;
+            'onnxruntime-core<'*) hi=1 ;;
+        esac
+    done <<<"$2"
+    local what='an upper bound but no lower one'
+    ((hi)) || what='a lower bound but no upper one'
+    ((lo == hi)) ||
+        die 1 "$1: depends on onnxruntime-core with $what: the pin is the pair onnxruntime-core>=<pkgver>-<N> and onnxruntime-core<<next release>"
+}
 # What the -bin packages provide: their own names and their provides.
 offered=()
 for ((i = 0; i < n; i++)); do
@@ -205,11 +301,17 @@ for ((i = 0; i < n; i++)); do
 done
 for ((i = 0; i < n; i++)); do
     mapfile -t list < <(grep . <<<"${deps[i]}" || true)
+    [[ $srcbase != onnxruntime-split-cuda12 ]] || pin_pair "${files[i]}" "${deps[i]}"
     for d in "${list[@]}"; do
+        # The CUDA 12 line's NCCL is nccl-cuda12.9 by name: the bare nccl
+        # would let pacman install Arch's CUDA 13 build.
+        if [[ $srcbase == onnxruntime-split-cuda12 && ${d%%[<>=]*} == nccl ]]; then
+            die 1 "${files[i]}: depend $d: the cuda12 line's NCCL is nccl-cuda12.9 by name (onnxruntime-split/PKGBUILD, _ortf_nccl_pkg), not the bare nccl, which pacman resolves to Arch's CUDA 13 build"
+        fi
         [[ $d == onnxruntime-* || $d == python-onnxruntime* ]] || continue
-        # The CUDA 12 line has no core of its own: its pkgver-only pin is met by
-        # the main line's onnxruntime-core or onnxruntime-core-bin.
-        [[ $srcbase == onnxruntime-split-cuda12 && $d == "onnxruntime-core=$pkgver" ]] && continue
+        # The CUDA 12 line has no core of its own: its pins are met by the
+        # main line's onnxruntime-core or onnxruntime-core-bin.
+        if [[ $srcbase == onnxruntime-split-cuda12 ]] && core_pin "$d"; then continue; fi
         met=0
         for p in "${offered[@]}"; do
             if satisfies "$d" "$p"; then
