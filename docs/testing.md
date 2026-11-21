@@ -14,9 +14,11 @@ It runs, in order:
 - the PKGBUILD's syntax and metadata (`makepkg --printsrcinfo`, with the names, provides and conflicts that consumers rely on);
 - the CUDA 12 pkgbase `onnxruntime-split-cuda12` and the MIGraphX pkgbase `onnxruntime-split-migraphx`: their generated PKGBUILDs and `.SRCINFO` files are up to date, and the names in their committed `.SRCINFO` files;
 - `namcap`, when it is installed;
-- every `scripts/tests/*-test.sh` (tests of the licence guard, the smoke-test wrapper, `check-deps.sh`, `check-cuda-archs.sh`, `srcinfo.sh`, `gen-bin.sh`, `gen-cuda12.sh`, `gen-migraphx.sh` and the PKGBUILD's build inputs, including the `-nccloff` names);
+- every `scripts/tests/*-test.sh` (tests of the licence guard, the smoke-test wrapper, `check-deps.sh`, `check-cuda-archs.sh`, `srcinfo.sh`, `gen-bin.sh`, `gen-cuda12.sh`, `gen-migraphx.sh`, `make-source-archive.sh`, `check-upstream.sh` and the PKGBUILD's build inputs, including the `-nccloff` names and `ORTF_SOURCE`);
 - the byte-compile and `--help` of `tools/ort-model-check/model-check.py`;
 - the licence guard over the whole tree.
+
+The two source-mirror scripts ([release.md](release.md#the-source-mirror)) are tested without the network: `make-source-archive-test.sh` makes the archive from a small throw-away repository and a fixture PKGBUILD, and `check-upstream-test.sh` points `check-upstream.sh` at local repositories (`--url`, `ORTF_PKGBUILD`). `check-upstream.sh` itself, run for real, needs the network.
 
 Scratch files go to a `mktemp` directory, never into the working tree. The script exits non-zero when any check fails. It does not build the packages.
 

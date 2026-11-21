@@ -109,6 +109,8 @@ cd ..
 
 Then install the packages the build wrote, naming the exact files in one `pacman -U` (a glob can catch packages of an earlier build), and run the smoke test. The commands, the checks, the build inputs and the time and disk a build needs are in [docs/build-from-source.md](docs/build-from-source.md). A full build with one CUDA architecture (`ORTF_CUDA_ARCHS=120`) took 27 minutes on a 24-thread machine and needs tens of GiB of disk; the default `rtx` has four architectures and takes longer.
 
+`github.com/microsoft/onnxruntime` has returned 404 since 2026-11-17, so the recipes fetch the ONNX Runtime source from this project's release `source-v1.29.0` by default; `ORTF_SOURCE=upstream` selects the git tag again ([docs/build.md](docs/build.md#the-onnx-runtime-source-mirror-or-upstream)). The prebuilt packages are not affected.
+
 A subset of engines is fine: the core alone, the core and `onnxruntime-provider-openvino`, and so on. A build without CUDA needs `ORTF_NCCL=0` ([docs/build.md](docs/build.md#nccl-and-the-nccloff-packages)).
 
 ## Documentation
@@ -149,6 +151,8 @@ onnxruntime-split-migraphx/.SRCINFO its metadata for the AUR
 scripts/check-no-vendor.sh          licence guard: refuses vendor and binary files
 scripts/check-deps.sh               checks built packages' library dependencies and version bounds against this system
 scripts/check-cuda-archs.sh         checks which GPU architectures a built CUDA provider holds
+scripts/make-source-archive.sh      makes the ONNX Runtime source archive that the mirror release hosts, reproducibly
+scripts/check-upstream.sh           says whether github.com/microsoft/onnxruntime is back and still has our commit
 scripts/srcinfo.sh                  writes, checks or copies to an AUR clone a recipe's .SRCINFO
 scripts/gen-bin.sh                  generates the PKGBUILD, .SRCINFO and SHA256SUMS of a prebuilt (-bin) AUR package from a release's packages
 scripts/gen-cuda12.sh               generates onnxruntime-split-cuda12/PKGBUILD from onnxruntime-split/PKGBUILD

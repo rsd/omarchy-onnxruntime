@@ -316,36 +316,62 @@
 #     (precision flags and calibration removed, strongly typed networks);
 #   - OpenVINO 2026.x: the provider requires OpenVINO >= 2026.0.
 #
-# Build-time inputs, each from the environment variable of that name, else
-# the default. ORTF_EPS, ORTF_CUDA_ARCHS, ORTF_PYTHON and ORTF_NCCL take
-# theirs from the _ortf_default_* variables below the header, so that a copy of this
-# file builds other inputs where the environment does not reach makepkg (a
-# clean chroot, see there). prepare() checks and prints every value and
-# where it came from, and records it for build() and package()
-# (src/ortf.conf). Of the metadata, only the package NAMES (and, for
-# tensorrt and migraphx, makedepends) depend on them, read from the
-# environment when makepkg sources this file: ORTF_EPS decides which
-# provider packages exist, ORTF_CUDA_ARCHS the CUDA package's suffix,
-# ORTF_PYTHON whether python-onnxruntime-core does and ORTF_NCCL=0 the
-# -nccloff suffix of every name, as makepkg must know
-# every package name before prepare() runs (as must the CUDA major, from
-# cuda.h, see above). Each package function checks that the values
-# recorded in src/ortf.conf give the same names (they would not under
-# `makepkg -e` or `-R` with another environment, or after a CUDA upgrade),
-# and says what to pass.
-# Every other field of `makepkg --printsrcinfo` is the same for any inputs,
-# but makedepends, one optdepend and the NCCL fields: with tensorrt in
-# ORTF_EPS makedepends has tensorrt, with migraphx migraphx and
-# hip-runtime-amd (no other build pulls in ROCm); with NCCL (ORTF_NCCL=1)
-# it has the build's NCCL (nccl; nccl-cuda12.9 in the cuda12 line; rccl
-# in the migraphx line), onnxruntime-core and python-onnxruntime-core
-# depend on it (the CUDA package on nccl, or nccl-cuda12.9), and
-# the providers and the Python package conflict with
-# onnxruntime-core-nccloff; without it, the -nccloff packages provide and
-# conflict with their base names and depend on onnxruntime-core-nccloff;
-# and onnxruntime-core's and python-onnxruntime-core's
-# optdepends name onnxruntime-provider-dnnl only when ORTF_EPS has dnnl
-# (onnxruntime-provider-migraphx always, the MIGraphX line's package).
+# Source: the tree of tag v<pkgver>, commit _ortf_commit.
+# github.com/microsoft/onnxruntime has answered 404 since 2026-11-17, so by
+# default (ORTF_SOURCE=mirror, _ortf_default_source) the tree comes from
+# this project's copy of it: onnxruntime-<pkgver>.tar.gz, the asset of the
+# release source-v<pkgver> of rsd/omarchy-onnxruntime, made from the
+# commit by scripts/make-source-archive.sh (git archive --format=tar
+# --prefix=onnxruntime-<pkgver>/ <commit> | gzip -n -9, the same bytes on
+# every run; its PROVENANCE.md, beside the asset, says how it was made and
+# how to check it). b2sums pins the archive; prepare() checks the commit
+# git archive wrote into its pax header (git get-tar-commit-id) against
+# _ortf_commit and unpacks it anew into src/onnxruntime-<pkgver>
+# (_ortf_unpack_mirror). ORTF_SOURCE=upstream builds from the git tag, as
+# before: `ORTF_SOURCE=upstream makepkg ...`, or in a clean chroot a copy
+# with _ortf_default_source=upstream (the sed below). The two layouts never
+# share a directory (_ortf_srcroot): makepkg's git extraction, finding a
+# src/onnxruntime that is no git checkout, would run git fetch and git
+# checkout in the repository around it. scripts/check-upstream.sh says
+# whether the tag is back (exit 0: back, the same commit; 1: back, but the
+# tag is missing or moved; 3: still gone); switching the default back is
+# the maintainer's decision. The change of source has no pkgrel of its
+# own: the archive is the tagged tree, and the build information that
+# cmake/CMakeLists.txt asked git for is fixed to the values of the git
+# checkout (_ortf_patch_git_info), so libonnxruntime.so says
+# "git-branch=makepkg, git-commit-id=2e2543fbe9f" as 1.29.0-7's does.
+#
+# Build-time inputs, each from the environment variable of that name, else the
+# default. ORTF_EPS, ORTF_CUDA_ARCHS, ORTF_PYTHON, ORTF_NCCL and ORTF_SOURCE
+# take theirs from the _ortf_default_* variables below the header, so that a
+# copy of this file builds other inputs where the environment does not reach
+# makepkg (a clean chroot, see there). prepare() checks and prints every value
+# and where it came from, and records it for build() and package()
+# (src/ortf.conf). Of the metadata, only the package NAMES (and, for tensorrt
+# and migraphx, makedepends; and the source) depend on them, read from the
+# environment when makepkg sources this file: ORTF_EPS decides which provider
+# packages exist, ORTF_CUDA_ARCHS the CUDA package's suffix, ORTF_PYTHON
+# whether python-onnxruntime-core does and ORTF_NCCL=0 the -nccloff suffix of
+# every name, as makepkg must know every package name before prepare() runs
+# (as must the CUDA major, from cuda.h, see above); ORTF_SOURCE the first
+# entry of source and of b2sums, and whether noextract has the archive, as
+# makepkg downloads and extracts before prepare() runs. Each package function
+# checks that the values recorded in src/ortf.conf give the same names (they
+# would not under `makepkg -e` or `-R` with another environment, or after a
+# CUDA upgrade), and says what to pass. Every other field of `makepkg
+# --printsrcinfo` is the same for any inputs, but the source fields
+# (ORTF_SOURCE), makedepends, one optdepend and the NCCL fields: with tensorrt
+# in ORTF_EPS makedepends has tensorrt, with migraphx migraphx and
+# hip-runtime-amd (no other build pulls in ROCm); with NCCL (ORTF_NCCL=1) it
+# has the build's NCCL (nccl; nccl-cuda12.9 in the cuda12 line; rccl in the
+# migraphx line), onnxruntime-core and python-onnxruntime-core depend on it
+# (the CUDA package on nccl, or nccl-cuda12.9), and the providers and the
+# Python package conflict with onnxruntime-core-nccloff; without it, the
+# -nccloff packages provide and conflict with their base names and depend on
+# onnxruntime-core-nccloff; and onnxruntime-core's and
+# python-onnxruntime-core's optdepends name onnxruntime-provider-dnnl only
+# when ORTF_EPS has dnnl (onnxruntime-provider-migraphx always, the MIGraphX
+# line's package).
 #   ORTF_EPS           execution providers, space- or comma-separated, from
 #                      cuda, tensorrt, openvino, dnnl, migraphx; or `cpu`
 #                      alone for a CPU-only build (default: "cuda tensorrt
@@ -415,6 +441,15 @@
 #                      (NVIDIA's, which needs cuda in ORTF_EPS; RCCL in
 #                      the migraphx line, see NCCL above); 0 without it,
 #                      every package named -nccloff.
+#   ORTF_SOURCE        where the ONNX Runtime tree comes from (Source,
+#                      above): mirror (default, _ortf_default_source), the
+#                      archive of release source-v<pkgver> of
+#                      rsd/omarchy-onnxruntime, unpacked into
+#                      src/onnxruntime-<pkgver>; upstream, the git tag
+#                      v<pkgver> of microsoft/onnxruntime, checked out in
+#                      src/onnxruntime. Any other value: makepkg reads
+#                      the file with the mirror's source, and prepare()
+#                      refuses it.
 #   ORTF_CCACHE        auto (default: ccache as the C, C++ and CUDA compiler
 #                      launcher when it is on PATH), 1 (required) or 0.
 #   MAKEFLAGS          -jN sets the number of parallel compile jobs (ninja
@@ -435,7 +470,9 @@
 # architectures before the training ops and oneDNN (1.29.0-6; not yet
 # measured with them) (27 minutes with one, ORTF_CUDA_ARCHS=120), and it needs tens
 # of GiB of disk under the build directory (BUILDDIR=/path/with/space
-# makepkg ... moves it; SRCDEST=... moves the 1.6 GiB git clone). CUDA kernels (CUTLASS, flash
+# makepkg ... moves it; SRCDEST=... moves the downloads: the 264 MiB source
+# archive, or with ORTF_SOURCE=upstream the 1.6 GiB git clone). CUDA
+# kernels (CUTLASS, flash
 # attention) take several GiB of RAM per compile job, so the job count, not
 # the thread count, decides whether the build fits in memory. For 24
 # threads and 30 GiB of RAM:
@@ -472,12 +509,18 @@
 #                                     # the ROCm install)
 #   ORTF_EPS='cuda tensorrt openvino dnnl migraphx' MAKEFLAGS=-j8 makepkg -s -f
 #                                     # every provider (untested together)
+#   ORTF_SOURCE=upstream MAKEFLAGS=-j8 makepkg -f
+#                                     # from the git tag of
+#                                     # microsoft/onnxruntime, not the
+#                                     # mirror's archive (Source, above)
 # In a clean chroot (devtools: makechrootpkg, extra-x86_64-build) the
 # environment does not reach makepkg, so the PKGBUILD itself carries the
 # inputs: the _ortf_default_* lines below the header. A copy of the
 # recipe directory for another build sets them with one sed, e.g. the
 # `all` preset (the copy's .SRCINFO, if any, no longer matches it):
 #   sed -i 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' PKGBUILD
+# or the upstream source:
+#   sed -i 's/^_ortf_default_source=.*/_ortf_default_source=upstream/' PKGBUILD
 # The ORTF_* variables still win where the environment reaches makepkg.
 # A clean chroot has no TensorRT package in its repositories: the AUR's
 # tensorrt is built first and handed over (makechrootpkg -I).
@@ -533,9 +576,10 @@
 
 pkgbase=onnxruntime-split-migraphx
 
-# The defaults of ORTF_EPS, ORTF_CUDA_ARCHS, ORTF_PYTHON and ORTF_NCCL: the values
-# used when the environment variable is unset or empty, by the package
-# names and by prepare() alike (_ortf_resolve). The one place they are
+# The defaults of ORTF_EPS, ORTF_CUDA_ARCHS, ORTF_PYTHON, ORTF_NCCL and
+# ORTF_SOURCE: the values used when the environment variable is unset or
+# empty, by the package names and the source array and by prepare() alike
+# (_ortf_resolve). The one place they are
 # spelled. A copy of the recipe for another build (e.g. the `all` preset
 # in a clean chroot, where the environment does not reach makepkg) sets
 # them with one sed (the top of the file).
@@ -543,6 +587,7 @@ _ortf_default_eps='migraphx'
 _ortf_default_cuda_archs=rtx
 _ortf_default_python=0
 _ortf_default_nccl=1
+_ortf_default_source=mirror
 # The line this file builds: main, every package of the top of the file;
 # cuda12, the CUDA 12 legacy line (pkgbase onnxruntime-split-cuda12,
 # generated from this file by scripts/gen-cuda12.sh), whose only package
@@ -987,8 +1032,34 @@ _ortf_pycore_dep=("python-onnxruntime-core$_ortf_nccl_sfx>=$pkgver-$_ortf_core_a
 # provider's debug information alone runs to GiB.
 options=('!lto' '!debug')
 
-# The upstream tag and the commit it must point to (checked in prepare()).
+# The upstream tag and the commit it must point to (checked in prepare(),
+# in the git checkout or in the mirror's archive).
 _ortf_commit=2e2543fbe9fae542f921d47a72d21d5a4ef0b710
+
+# The ONNX Runtime source (Source, the top of the file), chosen when
+# makepkg reads this file, from ORTF_SOURCE as _ortf_resolve reads it:
+# _ortf_source is mirror or upstream. Any other value gives the mirror's
+# source here, so that reading the file never fails (makepkg
+# --printsrcinfo, an AUR helper), and prepare() refuses it.
+# _ortf_tree_source and _ortf_tree_b2sum are the first entries of source
+# and b2sums. The mirror's archive is the release asset of
+# rsd/omarchy-onnxruntime (sha256
+# 3aec9fa0c8f4064a8b043af1afbc3d5c2046443bb466243d5b843ca9b4a1fa94,
+# 276402461 bytes; scripts/make-source-archive.sh): git archive's tree of
+# _ortf_commit under onnxruntime-<pkgver>/, unpacked by prepare(), not
+# makepkg (noextract, _ortf_unpack_mirror). The git source's checksum is
+# makepkg's over the tag's tree (the same as Arch's for this tag).
+case ${ORTF_SOURCE:-$_ortf_default_source} in
+  upstream) _ortf_source=upstream ;;
+  *) _ortf_source=mirror ;;
+esac
+if [[ $_ortf_source == upstream ]]; then
+  _ortf_tree_source="onnxruntime::git+https://github.com/microsoft/onnxruntime.git#tag=v$pkgver"
+  _ortf_tree_b2sum=8fdc31605d139480199860fc303a537bf67635bf60eb1d40e850b0270b422b070855cf416e9ca774889b9fba0c52fa40ad6fde0bdaf074013e2aaba89b53e054
+else
+  _ortf_tree_source="onnxruntime-$pkgver.tar.gz::https://github.com/rsd/omarchy-onnxruntime/releases/download/source-v$pkgver/onnxruntime-$pkgver.tar.gz"
+  _ortf_tree_b2sum=28d0b3e08d28a8d9295a21f8a233671bdab89f2a9573e169398421bd5e7355f4ce8a50cf6d2480baa02e6fb266323dff2808c8e474d456bd2e236a70621533f0
+fi
 
 # ONNX Runtime fetches its C++ dependencies with CMake FetchContent, at the
 # versions pinned in cmake/deps.txt. They are downloaded here, as makepkg
@@ -1021,7 +1092,7 @@ _ortf_onednn_version=3.11.3
 # onnx comes from deps.txt like the others, the other two are for fuzzing
 # and WebAssembly builds.
 source=(
-  "onnxruntime::git+https://github.com/microsoft/onnxruntime.git#tag=v$pkgver"
+  "$_ortf_tree_source"
   'ortf-dep-abseil_cpp.zip::https://github.com/abseil/abseil-cpp/archive/refs/tags/20250814.0.zip'
   'ortf-dep-re2.zip::https://github.com/google/re2/archive/refs/tags/2024-07-02.zip'
   'ortf-dep-protobuf.zip::https://github.com/protocolbuffers/protobuf/archive/refs/tags/v21.12.zip'
@@ -1043,12 +1114,14 @@ source=(
   "ortf-dep-onednn.zip::https://github.com/uxlfoundation/oneDNN/archive/refs/tags/v$_ortf_onednn_version.zip"
 )
 # FetchContent extracts the archives itself, and the oneDNN ExternalProject
-# its own.
+# its own; prepare() the mirror's archive.
 noextract=("${_ortf_deps[@]/%/.zip}" onednn.zip)
 noextract=("${noextract[@]/#/ortf-dep-}")
-# The git source's checksum is makepkg's over the tag's tree (the same as
-# Arch's for this tag); prepare() also checks the commit, _ortf_commit.
-b2sums=('8fdc31605d139480199860fc303a537bf67635bf60eb1d40e850b0270b422b070855cf416e9ca774889b9fba0c52fa40ad6fde0bdaf074013e2aaba89b53e054'
+[[ $_ortf_source != mirror ]] || noextract+=("onnxruntime-$pkgver.tar.gz")
+# The first is the ONNX Runtime source's (_ortf_tree_b2sum, above: the
+# mirror's archive, or makepkg's over the git tag's tree); prepare() also
+# checks the commit, _ortf_commit, in either.
+b2sums=("$_ortf_tree_b2sum"
         'a6ef9897d1557f06991cdd6afe73fce31bcf6dc3e971a7fb03eb4bd9db4379e98aea4fff0ac612e26638d0e0a835124e0d52611d560a27c85a9ca30f5210fee1'
         '544f24a306b7b7adb924073e4319eae017bc82875cdfb20b668997ed212b343261f6c568b24ca945a69858ac9527fa22befac09138d38c9e5be1856bc11da8fd'
         'ecfb8890aea094c90f76062ca3eb88b24df467b2f1e9bd0531a8a1d66113869db02bff6f52f73a1dde8f7288914d5ca6345dfe395440baaf386028742981f4ea'
@@ -1405,7 +1478,7 @@ _ortf_resolve() {
   local trt_home='' trt_libdir='' host_cxx='' cuda_major='' cudnn_major='' cudnn_src nvcc_out cudnn_version
   local trt_version='' trt_installed='' ov_version='' python_version='' bounds rc
   local mgx_version='' hip_version='' mgx_soname='' hip_soname='' cudnn_minor=''
-  local nccl=0 nccl_src nccl_lib=''
+  local nccl=0 nccl_src nccl_lib='' tree
 
   case $_ortf_line in
     main) ;;
@@ -1413,6 +1486,17 @@ _ortf_resolve() {
     migraphx) lines+=("line migraphx (_ortf_line): the MIGraphX package and its Python add-on, for the main line's onnxruntime-core") ;;
     *) echo "_ortf_line: '$_ortf_line' is none of main, cuda12, migraphx" >&2; return 1 ;;
   esac
+
+  # The source (the top of the file), which makepkg has already fetched as
+  # the source array chose it, from the same value (_ortf_source): an
+  # invalid one, which gave the mirror's source there, is refused here.
+  _ortf_pick ORTF_SOURCE "$_ortf_default_source" _ortf_default_source
+  case $_ortf_val in
+    mirror) lines+=("ORTF_SOURCE=mirror ($_ortf_src; onnxruntime-$pkgver.tar.gz, release source-v$pkgver of rsd/omarchy-onnxruntime, in src/onnxruntime-$pkgver)") ;;
+    upstream) lines+=("ORTF_SOURCE=upstream ($_ortf_src; git tag v$pkgver of microsoft/onnxruntime, in src/onnxruntime)") ;;
+    *) echo "ORTF_SOURCE: '$_ortf_val' is neither mirror nor upstream (mirror, the default, is the archive of release source-v$pkgver of rsd/omarchy-onnxruntime; upstream the git tag v$pkgver of microsoft/onnxruntime)" >&2; return 1 ;;
+  esac
+  tree=$_ortf_val
 
   _ortf_pick ORTF_EPS "$_ortf_default_eps" _ortf_default_eps
   read -ra words <<<"${_ortf_val//,/ }"
@@ -1816,6 +1900,7 @@ _ortf_resolve() {
 
   printf '  %s\n' "${lines[@]}"
   {
+    printf 'ORTF_SOURCE=%s\n' "$tree"
     printf 'ORTF_EPS=%s\n' "$eps"
     printf 'ORTF_CUDA_ARCHS=%s\n' "$archs"
     printf 'ORTF_CUDA_PRESET=%s\n' "$preset"
@@ -1853,6 +1938,56 @@ _ortf_get() {
   done <"$srcdir/ortf.conf"
   echo "ortf.conf: no $1 (run makepkg without -e, so that prepare() runs)" >&2
   return 1
+}
+
+# _ortf_srcroot: prints the ONNX Runtime source tree of the layout
+# prepare() recorded (ORTF_SOURCE in src/ortf.conf), so that build() and
+# the package functions under makepkg -e or -R, whose environment may give
+# another source array, read the tree prepare() made: src/onnxruntime-
+# <pkgver> for the mirror (the archive's prefix), src/onnxruntime for the
+# git checkout. Two names on purpose: makepkg's git extraction (extract_git
+# in /usr/share/makepkg/source/git.sh) runs git fetch and git checkout
+# --force in a src/onnxruntime it finds, and in an unpacked archive, which
+# is no git checkout, git would act on the repository around it (this one,
+# or an AUR clone).
+_ortf_srcroot() {
+  local tree
+  tree=$(_ortf_get ORTF_SOURCE) || return 1
+  case $tree in
+    mirror) printf '%s\n' "$srcdir/onnxruntime-$pkgver" ;;
+    upstream) printf '%s\n' "$srcdir/onnxruntime" ;;
+    *) echo "ortf.conf: ORTF_SOURCE '$tree' is neither mirror nor upstream (run makepkg without -e, so that prepare() runs)" >&2; return 1 ;;
+  esac
+}
+
+# _ortf_unpack_mirror <archive> <root>: the mirror's tree, from <archive>
+# (onnxruntime-<pkgver>.tar.gz), in <root> (its prefix's directory, under
+# the archive's own parent, $srcdir). Fails when the commit git archive
+# recorded in the archive's pax header is not _ortf_commit (b2sums already
+# pins the bytes; this ties them to the tag), or when the archive does not
+# give <root>. <root> is removed first and the archive unpacked anew, so
+# that a run starts from the pristine tree, as git clean gives the
+# checkout: build() leaves build/ and *.egg-info in the tree, which would
+# enter the next wheel, and makepkg's own extraction would keep them.
+_ortf_unpack_mirror() {
+  local archive=$1 root=$2 id
+  if [[ ! -f $archive ]]; then
+    echo "$archive not found (ORTF_SOURCE=mirror)" >&2
+    return 1
+  fi
+  # get-tar-commit-id reads the first header and exits, so gzip may stop on
+  # a closed pipe: its status is not the archive's (b2sums checked that).
+  id=$({ gzip -dc -- "$archive" 2>/dev/null || :; } | git get-tar-commit-id 2>/dev/null) || id=''
+  if [[ $id != "$_ortf_commit" ]]; then
+    echo "${archive##*/} is commit ${id:-(none recorded)}, not $_ortf_commit: the archive is not the tag's tree; check it (scripts/make-source-archive.sh, PROVENANCE.md) and its b2sum" >&2
+    return 1
+  fi
+  rm -rf -- "$root"
+  bsdtar -xf "$archive" -C "${root%/*}" || return 1
+  if [[ ! -d $root ]]; then
+    echo "${archive##*/} does not unpack to ${root##*/}/ (its prefix is not onnxruntime-$pkgver/)" >&2
+    return 1
+  fi
 }
 
 # _ortf_has <provider>: whether ORTF_EPS, as recorded, has <provider>.
@@ -1913,7 +2048,9 @@ print(sysconfig.get_path("platlib", "posix_prefix", {"base": "/usr", "platbase":
 # skips the dependency check).
 _ortf_check_tools() {
   local tool missing=()
-  local -a tools=(cmake ninja git patch readelf ldd)
+  # git in both layouts: the checkout's, the mirror archive's commit
+  # (_ortf_unpack_mirror), and CMake's Git_FOUND (_ortf_patch_git_info).
+  local -a tools=(cmake ninja git patch readelf ldd gzip bsdtar)
   # patchelf gives the TensorRT provider its RUNPATH, and the Python module
   # its (package_python-onnxruntime-core).
   if _ortf_has tensorrt || [[ $(_ortf_get ORTF_PYTHON) == 1 ]]; then tools+=(patchelf); fi
@@ -2585,6 +2722,38 @@ _ortf_patch_dnnl_threadpool_args() {
 };'
 }
 
+# _ortf_patch_git_info <cmake/CMakeLists.txt>: the build information
+# ("ORT Build Info: git-branch=..., git-commit-id=..., ...", in
+# libonnxruntime.so) has the values of the tag's git checkout, whatever
+# the layout: branch makepkg (makepkg's extract_git checks the tag out as
+# that branch) and the commit's 11-digit abbreviation, from _ortf_commit,
+# which git log --format=%h gives in that checkout. Upstream asks git in
+# the source directory: in the mirror's unpacked archive, no checkout, git
+# walks up to the repository around it (this one, or an AUR clone) or to
+# none, and the library would say another branch and commit, or none.
+# The rest of the `if (Git_FOUND)` block stays as upstream has it: its
+# other entries (fp8-kv-cache=1 and the like) still need CMake to find
+# git, which every build has (_ortf_check_tools: the checkout and the
+# mirror's commit check need it too). The upstream text it replaces must
+# be there exactly once, or it fails and leaves the file untouched
+# (_ortf_patch_exact).
+# shellcheck disable=SC2016 # CMake's ${...}, not the shell's
+_ortf_patch_git_info() {
+  _ortf_patch_exact _ortf_patch_git_info "$1" \
+    '  execute_process(COMMAND ${GIT_EXECUTABLE} log -1 --format=%h
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      OUTPUT_VARIABLE ORT_GIT_COMMIT)
+  string(STRIP "${ORT_GIT_COMMIT}" ORT_GIT_COMMIT)
+  execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      OUTPUT_VARIABLE ORT_GIT_BRANCH)
+  string(STRIP "${ORT_GIT_BRANCH}" ORT_GIT_BRANCH)' \
+    "  # omarchy-onnxruntime (onnxruntime-split/PKGBUILD, _ortf_patch_git_info):
+  # the values of the tag's git checkout, whatever the source tree's layout.
+  set(ORT_GIT_COMMIT \"${_ortf_commit:0:11}\")
+  set(ORT_GIT_BRANCH \"makepkg\")"
+}
+
 prepare() {
   echo "ONNX Runtime build inputs:"
   _ortf_resolve "$srcdir/ortf.conf" || return 1
@@ -2594,18 +2763,30 @@ prepare() {
   _ortf_check_names || return 1
   echo "packages: ${_ortf_pkgname[*]}"
 
-  cd "$srcdir/onnxruntime"
-  local head
-  head=$(git rev-parse HEAD)
-  if [[ $head != "$_ortf_commit" ]]; then
-    echo "tag v$pkgver is commit $head, not $_ortf_commit: the tag moved; check it and update _ortf_commit" >&2
-    return 1
+  local root head
+  root=$(_ortf_srcroot) || return 1
+  if [[ $(_ortf_get ORTF_SOURCE) == upstream ]]; then
+    cd "$root" || return 1
+    head=$(git rev-parse HEAD)
+    if [[ $head != "$_ortf_commit" ]]; then
+      echo "tag v$pkgver is commit $head, not $_ortf_commit: the tag moved; check it and update _ortf_commit" >&2
+      return 1
+    fi
+    # The checkout as tagged: build() copies the Python package tree the
+    # build assembled into onnxruntime/ and setup.py leaves build/ and
+    # *.egg-info, untracked files that would survive into the next build in
+    # this BUILDDIR (makepkg resets tracked files only) and enter its wheel.
+    git clean -ffdxq
+    echo "source: the git checkout of tag v$pkgver, commit $_ortf_commit, in $root"
+  else
+    # The archive unpacked anew, as git clean leaves the checkout.
+    _ortf_unpack_mirror "$srcdir/onnxruntime-$pkgver.tar.gz" "$root" || return 1
+    cd "$root" || return 1
+    echo "source: onnxruntime-$pkgver.tar.gz, commit $_ortf_commit (git get-tar-commit-id), unpacked anew in $root"
   fi
-  # The checkout as tagged: build() copies the Python package tree the
-  # build assembled into onnxruntime/ and setup.py leaves build/ and
-  # *.egg-info, untracked files that would survive into the next build in
-  # this BUILDDIR (makepkg resets tracked files only) and enter its wheel.
-  git clean -ffdxq
+  # Whatever the layout, so that every build's tree is the same.
+  _ortf_patch_git_info cmake/CMakeLists.txt || return 1
+  echo "cmake/CMakeLists.txt: the build information says git-branch=makepkg, git-commit-id=${_ortf_commit:0:11}, the tag's checkout (_ortf_patch_git_info)"
   _ortf_mirror cmake/deps.txt "$srcdir/deps-mirror" || return 1
   echo "dependency mirror: ${#_ortf_deps[@]} archives checked against cmake/deps.txt"
   # Whatever ORTF_EPS has, so that every build's checkout is the same (the
@@ -2643,13 +2824,14 @@ prepare() {
 }
 
 build() {
-  local jobs ccache python archs host_cxx trt_home nccl_lib
+  local jobs ccache python archs host_cxx trt_home nccl_lib root
+  root=$(_ortf_srcroot) || return 1
   jobs=$(_ortf_get ORTF_JOBS) || return 1
   ccache=$(_ortf_get ORTF_CCACHE) || return 1
   python=$(_ortf_get ORTF_PYTHON) || return 1
 
   local -a args=(
-    -S "$srcdir/onnxruntime/cmake"
+    -S "$root/cmake"
     -B "$srcdir/build"
     -G Ninja
     -Wno-dev
@@ -2836,9 +3018,9 @@ build() {
     # setuptools' backend extends by --build-option): the wheel has the
     # onnxruntime.training packages and requirements-training.txt as its
     # requirements, under the name onnxruntime (_ortf_patch_setup).
-    cp -a -- "$srcdir/build/onnxruntime/." "$srcdir/onnxruntime/onnxruntime/"
+    cp -a -- "$srcdir/build/onnxruntime/." "$root/onnxruntime/"
     rm -rf -- "$srcdir/dist"
-    (cd "$srcdir/onnxruntime" &&
+    (cd "$root" &&
       "$(_ortf_get ORTF_PYTHON_EXE)" -m build --wheel --no-isolation --outdir "$srcdir/dist" \
         -C--build-option=--enable_training)
   fi
@@ -2857,8 +3039,10 @@ build() {
 # (MIT, BSD-2-Clause, BSD-3-Clause: three files at least). Fails when a
 # source archive or its licence entry is missing (_ortf_dep_license).
 _ortf_licenses() {
+  local root
+  root=$(_ortf_srcroot) || return 1
   install -Dm644 -t "$pkgdir/usr/share/licenses/${pkgname[0]}" \
-    "$srcdir/onnxruntime/LICENSE" "$srcdir/onnxruntime/ThirdPartyNotices.txt"
+    "$root/LICENSE" "$root/ThirdPartyNotices.txt"
   _ortf_dep_license pytorch_cpuinfo LICENSE cpuinfo-LICENSE || return 1
   _ortf_dep_license protobuf LICENSE protobuf-LICENSE || return 1
 }

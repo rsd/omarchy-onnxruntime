@@ -4,7 +4,7 @@ What the recipe builds, what each package holds and depends on, how the names ar
 
 ## The packages
 
-The recipe `onnxruntime-split/PKGBUILD` is one build of the upstream source tag `v1.29.0` (pkgbase `onnxruntime-split`), split into one package per engine:
+The recipe `onnxruntime-split/PKGBUILD` is one build of the upstream source tag `v1.29.0` (pkgbase `onnxruntime-split`), split into one package per engine. The source is this project's mirror of that tag by default ([build.md](build.md#the-onnx-runtime-source-mirror-or-upstream)).
 
 | Package | Contents | Depends on |
 |---|---|---|

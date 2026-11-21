@@ -86,7 +86,7 @@ scripts/srcinfo.sh --recipe onnxruntime-split-migraphx --aur aur/onnxruntime-spl
 (cd aur/onnxruntime-split-migraphx && SRCDEST="$PWD/../../onnxruntime-split-migraphx" makepkg --verifysource)   # drop SRCDEST=... when makepkg.conf sets it
 ```
 
-`--verifysource` checks every source against the sums the recipe holds, the 1.6 GiB ONNX Runtime clone included ([release-cuda12.md](release-cuda12.md#7-verify-the-sources-and-push-to-the-aur) explains the `SRCDEST`). Optionally run `namcap` on the PKGBUILD.
+`--verifysource` checks every source against the sums the recipe holds, the ONNX Runtime source archive of the mirror included ([the source mirror](release.md#the-source-mirror); [release-cuda12.md](release-cuda12.md#7-verify-the-sources-and-push-to-the-aur) explains the `SRCDEST`). Optionally run `namcap` on the PKGBUILD.
 
 **The first push of this new pkgbase needs the maintainer's approval, after the recipe has been shown to the maintainer.** Do not push on your own: no script in this repository pushes, and the push of a new AUR package base is a public act that is not taken back. When approved:
 

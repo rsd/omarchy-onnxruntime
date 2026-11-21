@@ -9,7 +9,7 @@ This page is the reference for the build inputs. The step-by-step build and inst
 Build inputs are environment variables.
 
 - `prepare()` resolves and checks them, prints each value with where it came from, and records them for `build()` and `package()`. It records the TensorRT version in its headers and the installed versions of OpenVINO, Python and (for MIGraphX) `migraphx` and `hip-runtime-amd`; the packages' dependency bounds are taken from these ([dependencies.md](dependencies.md#the-version-bounds)).
-- Only a few fields of the package metadata depend on the inputs: the package names (see [Package names](#package-names)); `makedepends`, which gains `tensorrt` when the TensorRT provider is built (the AUR's `tensorrt` and `nvidia-tensorrt-sdk-local` both provide it) and `migraphx` and `hip-runtime-amd` when `migraphx` is selected, and `nccl` (or `rccl` in the MIGraphX line); and the optional dependencies of `onnxruntime-core` and `python-onnxruntime-core`, which name `onnxruntime-provider-dnnl` when it is built. With `ORTF_NCCL=0` the names gain the suffix `-nccloff` and the dependencies on NCCL and on the core change ([below](#nccl-and-the-nccloff-packages)). Every other field of `makepkg --printsrcinfo` is the same for any inputs.
+- Only a few fields of the package metadata depend on the inputs: the package names (see [Package names](#package-names)); the source (`ORTF_SOURCE`, see [The ONNX Runtime source](#the-onnx-runtime-source-mirror-or-upstream)); `makedepends`, which gains `tensorrt` when the TensorRT provider is built (the AUR's `tensorrt` and `nvidia-tensorrt-sdk-local` both provide it) and `migraphx` and `hip-runtime-amd` when `migraphx` is selected, and `nccl` (or `rccl` in the MIGraphX line); and the optional dependencies of `onnxruntime-core` and `python-onnxruntime-core`, which name `onnxruntime-provider-dnnl` when it is built. With `ORTF_NCCL=0` the names gain the suffix `-nccloff` and the dependencies on NCCL and on the core change ([below](#nccl-and-the-nccloff-packages)). Every other field of `makepkg --printsrcinfo` is the same for any inputs.
 - After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
 
 | Variable | Default | Meaning |
@@ -20,11 +20,12 @@ Build inputs are environment variables.
 | `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so`. Its `include/NvInferVersion.h` gives the major.minor that the TensorRT provider's `tensorrt` dependency is bounded to |
 | `ORTF_PYTHON` | `1` | `1` also builds the Python module and `python-onnxruntime-core`; `0` skips both |
 | `ORTF_NCCL` | `1` | `1` builds with NCCL; `0` builds without it and names every package with the suffix `-nccloff` ([below](#nccl-and-the-nccloff-packages)). A build without `cuda` in `ORTF_EPS` needs `0` |
+| `ORTF_SOURCE` | `mirror` | Where the ONNX Runtime source comes from: `mirror`, this project's archive of the `v1.29.0` tree, or `upstream`, the git tag of `microsoft/onnxruntime`, which has answered 404 since 2026-11-17 ([below](#the-onnx-runtime-source-mirror-or-upstream)) |
 | `ORTF_CCACHE` | `auto` | `auto` uses `ccache` as compiler launcher when it is on `PATH`; `1` requires it; `0` disables it |
 | `MAKEFLAGS` | none | `-jN` sets the number of parallel compile jobs. Without it ninja runs `nproc+2` jobs |
 | `CFLAGS`, `CXXFLAGS` | `makepkg.conf`'s | Arch's `-march=x86-64 -mtune=generic` is the portable baseline; see [Portable baseline](#portable-baseline) |
 
-The defaults of `ORTF_EPS`, `ORTF_CUDA_ARCHS`, `ORTF_PYTHON` and `ORTF_NCCL` are the `_ortf_default_eps`, `_ortf_default_cuda_archs`, `_ortf_default_python` and `_ortf_default_nccl` lines of the PKGBUILD (`cuda tensorrt openvino dnnl`, `rtx`, `1`, `1`); a set, non-empty `ORTF_*` environment variable wins. The lines let a copy of the PKGBUILD build other inputs where the environment does not reach makepkg, as in a clean chroot (`extra-x86_64-build`): [release.md](release.md) builds the `all` preset that way, with `sed -i 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' PKGBUILD` on a copy.
+The defaults of `ORTF_EPS`, `ORTF_CUDA_ARCHS`, `ORTF_PYTHON`, `ORTF_NCCL` and `ORTF_SOURCE` are the `_ortf_default_eps`, `_ortf_default_cuda_archs`, `_ortf_default_python`, `_ortf_default_nccl` and `_ortf_default_source` lines of the PKGBUILD (`cuda tensorrt openvino dnnl`, `rtx`, `1`, `1`, `mirror`); a set, non-empty `ORTF_*` environment variable wins. The lines let a copy of the PKGBUILD build other inputs where the environment does not reach makepkg, as in a clean chroot (`extra-x86_64-build`): [release.md](release.md) builds the `all` preset that way, with `sed -i 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' PKGBUILD` on a copy.
 
 Examples:
 
@@ -38,6 +39,7 @@ ORTF_EPS=dnnl ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f     # the oneDNN provider 
 ORTF_EPS=migraphx ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f # AMD GPUs only, a local build without NCCL (untested): see below
 ORTF_EPS='cuda tensorrt openvino dnnl migraphx' MAKEFLAGS=-j8 makepkg -s -f   # every provider (untested together)
 ORTF_TENSORRT_HOME=/usr MAKEFLAGS=-j8 makepkg -f          # the AUR's tensorrt
+ORTF_SOURCE=upstream MAKEFLAGS=-j8 makepkg -f             # the source from the git tag, not the mirror's archive
 ```
 
 ### NCCL and the nccloff packages
@@ -133,11 +135,24 @@ ONNX Runtime fetches its C++ dependencies with CMake FetchContent at the version
 
 - `build()` needs no network, and ONNX Runtime still applies its own patches to the dependencies.
 - The system's protobuf and abseil are not used (`FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER`). Arch's versions differ from the pinned ones, and mixing them is what makes Arch's own recipe carry several patches. The pinned versions are the combination upstream tests; they are linked statically and hidden by the libraries' version scripts.
-- `prepare()` checks each mirrored archive's URL and SHA-1 against `cmake/deps.txt`, and the source tag against its commit (`_ortf_commit`). A version bump that misses one fails there, not in the middle of the build.
+- `prepare()` checks each mirrored archive's URL and SHA-1 against `cmake/deps.txt`, and the source's commit against `_ortf_commit` (the commit embedded in the mirror's archive, or the git tag's). A version bump that misses one fails there, not in the middle of the build.
 - Not mirrored, because this build does not use them: the unit-test, benchmark, XNNPACK, CoreML, WebGPU, DirectML, telemetry and Arm dependencies, and `onnx_tensorrt` (the TensorRT provider uses TensorRT's own ONNX parser). The training operators add two that are mirrored, `cxxopts` and `tensorboard`.
 - oneDNN is not in `cmake/deps.txt`: upstream clones oneDNN 3.0.1 from git at build time, which would need the network. The recipe downloads a pinned, checksummed archive of oneDNN 3.11.3 (`ortf-dep-onednn.zip`, a `makepkg` source like the others) and patches `cmake/external/dnnl.cmake` to build from it, as a static library ([engines.md](engines.md#onednn)).
 
-The sources totalled about 3.2 GiB before the oneDNN and training archives were added (not re-measured), of which the upstream git clone is 1.6 GiB.
+The sources totalled about 3.2 GiB before the oneDNN and training archives were added (not re-measured), of which the upstream git clone is 1.6 GiB. With the default mirror the clone is replaced by a 264 MiB archive, so the total is smaller by about that difference (not re-measured).
+
+## The ONNX Runtime source: mirror or upstream
+
+`github.com/microsoft/onnxruntime` has returned 404 since 2026-11-17, with no explanation from Microsoft or GitHub, and related repositories are gone too. A build that clones the `v1.29.0` tag from it fails for anyone without a copy already in `SRCDEST`. The recipes therefore take the source from this project's copy by default. The `-bin` packages are not affected: they download this project's release assets.
+
+`ORTF_SOURCE` chooses, in all three recipes (`onnxruntime-split`, `onnxruntime-split-cuda12` and `onnxruntime-split-migraphx`):
+
+- **`mirror`** (the default, `_ortf_default_source`) downloads `onnxruntime-1.29.0.tar.gz`, an asset of the release `source-v1.29.0` of `rsd/omarchy-onnxruntime` (<https://github.com/rsd/omarchy-onnxruntime/releases/download/source-v1.29.0/onnxruntime-1.29.0.tar.gz>, 276402461 bytes). It is the output of `git archive --format=tar --prefix=onnxruntime-1.29.0/ 2e2543fbe9fae542f921d47a72d21d5a4ef0b710 | gzip -n -9`: the tree of the tag `v1.29.0` and nothing else, the same bytes on every run. The PKGBUILD pins it by b2sum.
+- **`upstream`** clones the git tag, as the recipes did before: `ORTF_SOURCE=upstream makepkg ...`. In a clean chroot, where the environment does not reach `makepkg`, set it in a copy of the PKGBUILD: `sed -i 's/^_ortf_default_source=.*/_ortf_default_source=upstream/' PKGBUILD` (as for the other inputs, [release.md](release.md#2-build-the-all-cuda-package)). It works only while the repository answers.
+
+Switching needs nothing else, not even a clean `src/`. `prepare()` checks the source's commit against `_ortf_commit` in both: for the mirror it reads the commit that `git archive` wrote into the archive (`git get-tar-commit-id`), and it unpacks the archive afresh on every run. The two sources unpack into different directories under `src/`, `onnxruntime-1.29.0` for the mirror and `onnxruntime` for the git tag, so they never meet. A patch fixes the build information, so `libonnxruntime.so` reports `git-branch=makepkg, git-commit-id=2e2543fbe9f` from either source, and the packages are the same as the ones released as 1.29.0-7: the change of source location changed no `pkgrel`. Any value other than `mirror` or `upstream` is refused.
+
+The mirror is checkable. Its release notes are `PROVENANCE.md`: how the archive was made, its sha256 (`3aec9fa0c8f4064a8b043af1afbc3d5c2046443bb466243d5b843ca9b4a1fa94`) and b2sum, and the steps that compare it with the upstream commit from any clone that still has it: the uncompressed tar stream equals `git archive` of the commit, `git get-tar-commit-id` prints the commit, and the tree without the prefix has the b2sum that the recipe's git source and Arch's `onnxruntime` PKGBUILD pin for this tag. The maintainer's side, which makes and publishes the archive and watches for upstream's return, is in [release.md](release.md#the-source-mirror).
 
 ## ccache
 
@@ -147,7 +162,7 @@ With `ccache` on `PATH` the recipe uses it as the C, C++ and CUDA compiler launc
 
 - **Time.** CUDA kernels (CUTLASS, flash attention) dominate a build with CUDA, and the time grows about linearly with the number of architectures in `ORTF_CUDA_ARCHS` ([presets](#cuda-architectures): `rtx` has four targets, `all` eight). A full build with one architecture (`ORTF_CUDA_ARCHS=120`) took under half an hour on the machine below; no build of the default `rtx` or of `all` has been timed. See the measurements at the end of this section.
 - **Memory.** A CUDA compile job takes several GiB of RAM, so the job count (`MAKEFLAGS=-jN`), not the thread count, decides whether the build fits in memory. The PKGBUILD's guidance for 24 threads and 30 GiB of RAM is `MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1`; lower it to `-j6` if the build is killed for lack of memory. Each job's nvcc threads multiply on top of the job count, so raise `ORTF_NVCC_THREADS` only with memory to spare.
-- **Disk.** Tens of GiB under the build directory. `BUILDDIR=/path/with/space makepkg ...` moves the build tree, and `SRCDEST=/path/with/space` moves the downloaded sources, including the 1.6 GiB git clone. Set both in `makepkg.conf` to make this permanent.
+- **Disk.** Tens of GiB under the build directory. `BUILDDIR=/path/with/space makepkg ...` moves the build tree, and `SRCDEST=/path/with/space` moves the downloaded sources, including the 264 MiB source archive, or with `ORTF_SOURCE=upstream` the 1.6 GiB git clone. Set both in `makepkg.conf` to make this permanent.
 - **No LTO, no debug package.** The recipe sets `!lto` (link-time optimisation of the CUDA provider costs hours and many GiB of RAM; upstream's releases are not LTO builds) and `!debug` (the CUDA provider's debug information alone runs to GiB).
 
 Measured so far, on a 24-thread Intel Core Ultra 9 275HX with 30 GiB of RAM:
@@ -155,7 +170,7 @@ Measured so far, on a 24-thread Intel Core Ultra 9 275HX with 30 GiB of RAM:
 | Build | Time | Conditions |
 |---|---|---|
 | CPU-only (`ORTF_EPS=cpu`) | about 7 to 8.5 minutes | `-j8`, without ccache |
-| Full (`ORTF_EPS` default, `ORTF_CUDA_ARCHS=120`) | 27 minutes, including the download of the 3.2 GiB of sources | `MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1`, under `nice -n 19` and `ionice -c 3`, cold ccache, with other builds running on the machine |
+| Full (`ORTF_EPS` default, `ORTF_CUDA_ARCHS=120`) | 27 minutes, including the download of the 3.2 GiB of sources (with the git clone: measured before the mirror existed) | `MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1`, under `nice -n 19` and `ionice -c 3`, cold ccache, with other builds running on the machine |
 
 The full build succeeded without any change to the recipe against CUDA 13.4.3 (nvcc 13.4, host gcc 16.2.1), cuDNN 9.27.0.42, TensorRT 11.4.0.106 (`nvidia-tensorrt-sdk-local`, under `/opt/nvidia/tensorrt`) and OpenVINO 2026.4.1 with its GPU and NPU plugins (`intel-compute-runtime`, `level-zero-loader`, `intel-npu-driver` 1.38.0). That build made the single `onnxruntime-full` 1.29.0-1, which held every provider: 52 MiB (`.pkg.tar.zst`; 121 MiB installed), and `python-onnxruntime-full` at 13 MiB. Since 1.29.0-2 the same files are split into the packages of [Package names](#package-names); their sizes are in [packages.md](packages.md#sizes). The CUDA provider holds `sm_120a` machine code, plus a few `sm_90a` kernels that upstream compiles unconditionally.
 

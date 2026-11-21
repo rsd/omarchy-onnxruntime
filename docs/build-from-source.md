@@ -46,7 +46,7 @@ sudo pacman -U onnxruntime-core-1.29.0-7-x86_64.pkg.tar.zst \
 
 The install needs [TensorRT](install.md#2-tensorrt) done first: pacman refuses the TensorRT provider package until an installed package provides `tensorrt` within its bound.
 
-`makepkg` downloads the upstream source and the pinned dependencies as its sources, then builds the library once and writes one package per engine. A full build with one CUDA architecture took 27 minutes on a 24-thread machine ([build.md](build.md#parallelism-memory-and-disk)); it needs tens of GiB of disk, so choose `-jN` for your memory and read that section before the first run. If `ccache` is installed it is used automatically.
+`makepkg` downloads the ONNX Runtime source and the pinned dependencies as its sources (the source from this project's mirror, because `github.com/microsoft/onnxruntime` has been gone since 2026-11-17: [build.md](build.md#the-onnx-runtime-source-mirror-or-upstream), where `ORTF_SOURCE=upstream` selects the git tag), then builds the library once and writes one package per engine. A full build with one CUDA architecture took 27 minutes on a 24-thread machine ([build.md](build.md#parallelism-memory-and-disk)); it needs tens of GiB of disk, so choose `-jN` for your memory and read that section before the first run. If `ccache` is installed it is used automatically.
 
 ### Naming the files
 
@@ -77,11 +77,11 @@ See [install.md](install.md#upgrading-from-the-single-package-1290-1): all new f
 
 ### Before installing: the build tree
 
-`makepkg` leaves the build tree in `onnxruntime-split/src/build`, and the upstream source in `onnxruntime-split/src/onnxruntime`. The build tree holds `libonnxruntime.so`, the provider libraries and the Python package, so both tools can check the build before `pacman -U` replaces anything. From the repository root:
+`makepkg` leaves the build tree in `onnxruntime-split/src/build`, and the ONNX Runtime source in `onnxruntime-split/src/onnxruntime-1.29.0` (with `ORTF_SOURCE=upstream`: `onnxruntime-split/src/onnxruntime`). The build tree holds `libonnxruntime.so`, the provider libraries and the Python package, so both tools can check the build before `pacman -U` replaces anything. From the repository root:
 
 ```bash
 # the C smoke test against the build tree
-scripts/smoke-test.sh --include onnxruntime-split/src/onnxruntime/include/onnxruntime \
+scripts/smoke-test.sh --include onnxruntime-split/src/onnxruntime-1.29.0/include/onnxruntime \
     --libdir onnxruntime-split/src/build \
     --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
 
@@ -90,7 +90,7 @@ set -a; . /usr/share/nvidia-tensorrt/nvidia-tensorrt.env; set +a
 PYTHONPATH=onnxruntime-split/src/build tools/ort-model-check/model-check.py model.onnx
 ```
 
-`--include` points at the upstream source tree and `--libdir` at the build tree. `model.onnx` is a model of your own: the repository ships none. The environment file belongs to `nvidia-tensorrt-sdk-local` and puts TensorRT's `lib/` on `LD_LIBRARY_PATH`; skip that line when TensorRT is under `/usr`, because the AUR's `tensorrt` does not install the file. Pass only the targets your machine has to `--require`. Their meaning is in the [smoke test](../tools/ort-smoke/README.md#running-it) and [model check](../tools/ort-model-check/README.md#running-it) READMEs; results of both on a full build are in [results.md](results.md).
+`--include` points at the source tree and `--libdir` at the build tree. `model.onnx` is a model of your own: the repository ships none. The environment file belongs to `nvidia-tensorrt-sdk-local` and puts TensorRT's `lib/` on `LD_LIBRARY_PATH`; skip that line when TensorRT is under `/usr`, because the AUR's `tensorrt` does not install the file. Pass only the targets your machine has to `--require`. Their meaning is in the [smoke test](../tools/ort-smoke/README.md#running-it) and [model check](../tools/ort-model-check/README.md#running-it) READMEs; results of both on a full build are in [results.md](results.md).
 
 ### After installing
 

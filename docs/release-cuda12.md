@@ -91,7 +91,7 @@ gh release create cuda12-v1.29.0-2 ~/release-cuda12/*.pkg.tar.zst ~/release-cuda
 
 ## 7. Verify the sources and push to the AUR
 
-Push the source package first, as in [the main line's step 5](release.md#5-push-to-the-aur). `makepkg --verifysource` checks each recipe's sources against the sums it holds. The `-bin` one downloads the release's asset. The source recipe's sources include the 1.6 GiB ONNX Runtime clone. The one-time setup assumes `SRCDEST` in `~/.config/pacman/makepkg.conf`, which makes `makepkg` reuse the clone of your builds; without it, `makepkg --verifysource` in `aur/onnxruntime-split-cuda12` clones the whole tree again. If `makepkg.conf` does not set it, point `SRCDEST` at the directory that holds the existing clone and zips, here the recipe directory `onnxruntime-split-cuda12` (an absolute path):
+Push the source package first, as in [the main line's step 5](release.md#5-push-to-the-aur). `makepkg --verifysource` checks each recipe's sources against the sums it holds. The `-bin` one downloads the release's asset. The source recipe's sources include the ONNX Runtime source: the mirror's 264 MiB archive, which is the same asset as the main line's ([the source mirror](release.md#the-source-mirror)), or with `ORTF_SOURCE=upstream` the 1.6 GiB clone. The one-time setup assumes `SRCDEST` in `~/.config/pacman/makepkg.conf`, which makes `makepkg` reuse the downloads of your builds; without it, `makepkg --verifysource` in `aur/onnxruntime-split-cuda12` downloads everything again. If `makepkg.conf` does not set it, point `SRCDEST` at the directory that holds the existing downloads, here the recipe directory `onnxruntime-split-cuda12` (an absolute path):
 
 ```bash
 (cd aur/onnxruntime-split-cuda12-bin && makepkg --verifysource)

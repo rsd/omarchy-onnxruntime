@@ -16,7 +16,7 @@ flowchart LR
 
 What is released: the six packages of the `rtx` build (the recipe as committed: `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core`) and the CUDA package of an `all` build (`onnxruntime-provider-cuda13-all`). Nothing else: no MIGraphX package, provider or add-on (the provider has never run on AMD hardware, and `gen-bin.sh` refuses the line) and no `-nccloff` package (a build with `ORTF_NCCL=0` is for local use). No package contains a vendor library; the vendor runtimes are dependencies ([README](../README.md#licence-and-redistribution)).
 
-Before releasing, run `scripts/test.sh` ([testing.md](testing.md)). If the PKGBUILD changed, regenerate and check the `.SRCINFO`: `scripts/srcinfo.sh --write`, then `scripts/srcinfo.sh --check`.
+Before releasing, run `scripts/test.sh` ([testing.md](testing.md)), and `scripts/check-upstream.sh` ([below](#the-source-mirror)): it says whether upstream is back, and the release needs the source mirror published. If the PKGBUILD changed, regenerate and check the `.SRCINFO`: `scripts/srcinfo.sh --write`, then `scripts/srcinfo.sh --check`.
 
 ## Joint release
 
@@ -28,6 +28,37 @@ Training and NCCL change the interface between `onnxruntime-core` and a provider
 - **The main line's own providers** depend on the exact `onnxruntime-core=<pkgver>-<pkgrel>` of the build, so they need nothing extra.
 
 `scripts/gen-bin.sh` enforces the pair for the CUDA 12 line's assets, and refuses `cuda12-v1.29.0-1` and the bare pin `onnxruntime-core=1.29.0`, which fit the cores from before 1.29.0-7 ([release-cuda12.md](release-cuda12.md#6-generate-the--bin-recipe-and-publish)).
+
+## The source mirror
+
+`github.com/microsoft/onnxruntime` has returned 404 since 2026-11-17, so the recipes build from `onnxruntime-<pkgver>.tar.gz`, an asset of the release `source-v<pkgver>` of this repository, by default (`ORTF_SOURCE=mirror`: [build.md](build.md#the-onnx-runtime-source-mirror-or-upstream)). One archive serves all three recipes. It is not a package: it has no `pkgrel`, and putting a build on it instead of the git tag is a change of source location, not a rebuild, so it did not bump the release version.
+
+**Make and publish it before the recipe's release.** The recipe's `source` and `b2sums` name it, so `makepkg --verifysource` and every user's build fail until the asset is public. For `1.29.0` it is published; for a new `pkgver` ([below](#later-releases)) do this first, from a clone of `microsoft/onnxruntime` that has the commit (`onnxruntime-split/onnxruntime` is makepkg's clone of an earlier build; the script's default `--repo`):
+
+```bash
+scripts/make-source-archive.sh --out /path/to/outdir
+```
+
+It reads `pkgver` and `_ortf_commit` from `onnxruntime-split/PKGBUILD` and refuses (exit 1, nothing written) unless the tag `v<pkgver>` in the repository resolves to that commit. It writes the archive (`git archive --format=tar --prefix=onnxruntime-<pkgver>/ <commit> | gzip -n -9`, the same bytes on every run), `onnxruntime-<pkgver>.tar.gz.sha256` and `PROVENANCE.md`, and prints the sha256, the b2sum and the size, and the `gh release create` command without running it. Put the b2sum in the PKGBUILD as `_ortf_tree_b2sum` of the mirror's branch (the upstream branch's is the git tag's tree, which `PROVENANCE.md` step 4 shows how to compute), then regenerate the CUDA 12 and MIGraphX recipes and the three `.SRCINFO` files as usual. Then publish, from the output directory:
+
+```bash
+gh release create source-v1.29.0 --repo rsd/omarchy-onnxruntime --latest=false \
+  --title 'ONNX Runtime 1.29.0 source (mirror)' --notes-file PROVENANCE.md \
+  onnxruntime-1.29.0.tar.gz onnxruntime-1.29.0.tar.gz.sha256
+```
+
+`--latest=false` keeps the release from becoming the repository's latest: the package releases, `v<pkgver>-<pkgrel>`, are what the prebuilt recipes and users look for. The release notes are `PROVENANCE.md`, which tells anyone how to verify the archive against upstream's commit.
+
+**Watch for upstream's return.** Run `scripts/check-upstream.sh` before each release, and from time to time while the mirror is the default. It runs `git ls-remote` for the tag `v<pkgver>` with no credentials and no prompts, ignoring the git configuration of the user running it (no `insteadOf`, no stored credentials, no SSH). The exit status says what to do:
+
+| Exit | Meaning | What to do |
+|---|---|---|
+| 0 | Upstream answers, and `v<pkgver>` is `_ortf_commit` | Switching `_ortf_default_source` back to `upstream` is possible. It is the maintainer's decision, never automatic |
+| 1 | Upstream answers, but the tag is missing or points at another commit (the output says which) | Do not switch. A moved tag is different source: investigate |
+| 3 | Still gone, or no network (the two are not told apart; git's error line is printed) | Keep the mirror |
+| 2 | Usage error, or the PKGBUILD cannot be read | Fix the call |
+
+Both scripts are tested by `scripts/test.sh` ([testing.md](testing.md)), without the network.
 
 ## One-time setup
 
@@ -42,7 +73,7 @@ Training and NCCL change the interface between `onnxruntime-core` and a provider
    ```bash
    PACKAGER='Your Name <you@example.org>'
    MAKEFLAGS='-j8'
-   SRCDEST=/path/with/space/sources   # shares the 1.6 GiB ONNX Runtime clone between builds
+   SRCDEST=/path/with/space/sources   # shares the source archive (264 MiB; with ORTF_SOURCE=upstream the 1.6 GiB clone) and the dependency zips between builds
    ```
 
    `makechrootpkg` copies `PACKAGER` and `MAKEFLAGS` into the chroot and builds in `/build`, so a package's `.BUILDINFO` has `builddir = /build` and no `/home` path. Check a built package with:
@@ -137,7 +168,7 @@ scripts/srcinfo.sh --aur aur/onnxruntime-split          # checks .SRCINFO is cur
 (cd aur/onnxruntime-split-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-7' && git push)
 ```
 
-`scripts/srcinfo.sh --aur` commits nothing and fails when the committed `onnxruntime-split/.SRCINFO` is stale: regenerate it with `scripts/srcinfo.sh --write` after a PKGBUILD change.
+The source package's `makepkg` downloads the mirror's archive, so the release `source-v<pkgver>` must be public before this push ([the source mirror](#the-source-mirror)). `scripts/srcinfo.sh --aur` commits nothing and fails when the committed `onnxruntime-split/.SRCINFO` is stale: regenerate it with `scripts/srcinfo.sh --write` after a PKGBUILD change.
 
 ## 6. The CUDA 12 legacy line
 
@@ -158,4 +189,4 @@ The packages `onnxruntime-provider-migraphx` and `python-onnxruntime-provider-mi
   The assets' version still drives the version check and the `<name>=<pkgver>-<pkgrel>` provides. Verify and push as in [4](#4-collect-generate-publish) and [5](#5-push-to-the-aur), without a new release.
 - **A change to the packages** needs a rebuild, a new `pkgrel` in `onnxruntime-split/PKGBUILD`, a new `.SRCINFO` and a new release (a new tag). The CUDA 12 and MIGraphX lines are rebuilt with it only when the change alters the interface between the core and the providers, which raises `_ortf_core_abi_pkgrel`: [the core pin](release-cuda12.md#the-core-pin).
 - **A vendor bump past a dependency bound** (OpenVINO 2026.5, Python 3.15, a new TensorRT minor, and so on; [the bounds](dependencies.md#the-version-bounds)) makes pacman refuse the vendor upgrade until the packages are rebuilt: rebuild against the new version, bump `pkgrel`, and release again. `scripts/check-deps.sh` on the released files shows when one is due.
-- **A new upstream ONNX Runtime version** is not described here. `prepare()` checks the source tag against its commit (`_ortf_commit`) and each mirrored archive's URL and SHA-1 against `cmake/deps.txt` ([build.md](build.md#dependencies-are-mirrored-not-fetched)), so a bump that misses one fails at the start of the build.
+- **A new upstream ONNX Runtime version** is not described here, except that its source mirror comes first: [the source mirror](#the-source-mirror) is made and published before the recipe's release, and the recipe's mirror checksum is the new archive's. `prepare()` checks the source's commit against `_ortf_commit` and each mirrored archive's URL and SHA-1 against `cmake/deps.txt` ([build.md](build.md#dependencies-are-mirrored-not-fetched)), so a bump that misses one fails at the start of the build.

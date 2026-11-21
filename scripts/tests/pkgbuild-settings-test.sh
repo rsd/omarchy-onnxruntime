@@ -68,6 +68,14 @@
 # module: in the migraphx line too (no Python package in its build), with
 # python bounded to its site-packages' minor and a python-onnxruntime-core
 # optdepend, and prepare()'s early check of the system python there.
+# The source (ORTF_SOURCE): the mirror's archive by default, with its
+# b2sum and in noextract, the git tag with upstream, an invalid value still
+# sourced (the mirror's) and refused by prepare(); the tree of the recorded
+# layout (_ortf_srcroot) for build(), the wheel and the licences; the
+# archive's commit check and fresh unpacking (_ortf_unpack_mirror) on
+# git archive fixtures; and the build information patch
+# (_ortf_patch_git_info), whose string CMake makes exactly as 1.29.0-7's
+# library has it, failing loudly on a patched or changed file.
 # The PKGBUILD is copied with its CUDA root pointed at a fixture (the
 # package names read its cuda.h when the file is sourced) and sourced in a
 # subshell per case, with its other vendor locations pointed at fixtures
@@ -336,7 +344,7 @@ resolve() {
     status=0
     # shellcheck disable=SC2016 # the script expands its own arguments
     out=$(env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_NVCC_THREADS -u ORTF_TENSORRT_HOME \
-        -u ORTF_PYTHON -u ORTF_CCACHE -u ORTF_NCCL -u MAKEFLAGS -u NVCC_CCBIN -u CFLAGS -u CXXFLAGS \
+        -u ORTF_PYTHON -u ORTF_CCACHE -u ORTF_NCCL -u ORTF_SOURCE -u MAKEFLAGS -u NVCC_CCBIN -u CFLAGS -u CXXFLAGS \
         ORTF_PYTHON=0 ORTF_CCACHE=0 "${nccl_off[@]}" "$@" bash -c '
             set -euo pipefail
             # shellcheck disable=SC1090
@@ -1440,7 +1448,9 @@ chmod +x "$fx/pkgbin/cmake" "$fx/pkgbin/readelf" "$fx/pkgbin/patchelf" "$fx/pkgb
 # package_run <ortf.conf lines> <library=NEEDED list...> -- <env...>: runs
 # the package function of every package the environment names (ORTF_PYTHON
 # as the ortf.conf lines record it unless given, else 0; ORTF_NCCL as they
-# record it unless given, else 1; the Python package
+# record it unless given, else 1; ORTF_SOURCE as they record it, else
+# mirror, whose tree, src/onnxruntime-1.29.0, or the checkout's,
+# src/onnxruntime, holds ONNX Runtime's licence; the Python package
 # installs the stub wheel), in makepkg's order, each
 # in a subshell with set -eE and an ERR trap as makepkg does, pkgname set
 # to the package and pkgdir to its own directory. The NEEDED lists default
@@ -1451,15 +1461,17 @@ chmod +x "$fx/pkgbin/cmake" "$fx/pkgbin/readelf" "$fx/pkgbin/patchelf" "$fx/pkgb
 # its files, or its output when it failed. FX_SYSTEM_PYTHON replaces the
 # system python (default: the build python's stub).
 package_run() {
-    local dir conf=$1 kv python=0 nccl=1
+    local dir conf=$1 kv python=0 nccl=1 root=onnxruntime-1.29.0
     shift
     [[ $'\n'$conf$'\n' != *$'\nORTF_PYTHON=1\n'* ]] || python=1
     [[ $'\n'$conf$'\n' != *$'\nORTF_NCCL=0\n'* ]] || nccl=0
+    [[ $'\n'$conf$'\n' == *$'\nORTF_SOURCE='* ]] || conf+=$'\nORTF_SOURCE=mirror'
+    [[ $'\n'$conf$'\n' != *$'\nORTF_SOURCE=upstream\n'* ]] || root=onnxruntime
     dir=$(mktemp -d "$tmp/pkgfn.XXXXXX")
-    mkdir -p "$dir/src/onnxruntime" "$dir/src/build" "$dir/src/dist" "$dir/pkg" "$dir/needed" "$dir/rpath"
+    mkdir -p "$dir/src/$root" "$dir/src/build" "$dir/src/dist" "$dir/pkg" "$dir/needed" "$dir/rpath"
     : >"$dir/src/dist/onnxruntime-1.29.0-cp314-cp314-linux_x86_64.whl"
-    echo 'MIT License' >"$dir/src/onnxruntime/LICENSE"
-    echo 'notices' >"$dir/src/onnxruntime/ThirdPartyNotices.txt"
+    echo 'MIT License' >"$dir/src/$root/LICENSE"
+    echo 'notices' >"$dir/src/$root/ThirdPartyNotices.txt"
     # cudnn-frontend's source archive, a tiny zip holding <top>/LICENSE.txt
     # (a stand-in text); FX_NO_CUDNN_FRONTEND_LICENSE=1 leaves it out.
     if [[ -z ${FX_NO_CUDNN_FRONTEND_LICENSE:-} ]]; then
@@ -2133,6 +2145,8 @@ build_flags() {
     dir=$(mktemp -d "$tmp/build.XXXXXX")
     mkdir -p "$dir/src"
     printf '%s\n' "$1" >"$dir/src/ortf.conf"
+    # The mirror's layout unless the lines record another.
+    grep -q '^ORTF_SOURCE=' "$dir/src/ortf.conf" || echo 'ORTF_SOURCE=mirror' >>"$dir/src/ortf.conf"
     # shellcheck disable=SC2016 # the script expands its own arguments
     env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u CMAKE_BUILD_PARALLEL_LEVEL \
         PATH="$fx/buildbin:$PATH" FX_CMAKE_ARGS="$dir/args" \
@@ -2204,9 +2218,9 @@ printf '%s\n' "$PWD" "$@" >"$FX_PY_ARGS"
 EOF2
 chmod +x "$fx/buildbin/pyrec"
 wheel_dir=$(mktemp -d "$tmp/wheel.XXXXXX")
-mkdir -p "$wheel_dir/src/build/onnxruntime/capi" "$wheel_dir/src/onnxruntime/onnxruntime"
+mkdir -p "$wheel_dir/src/build/onnxruntime/capi" "$wheel_dir/src/onnxruntime-1.29.0/onnxruntime"
 : >"$wheel_dir/src/build/onnxruntime/capi/onnxruntime_pybind11_state.so"
-printf '%s\n' "${conf_build/ORTF_PYTHON=0/ORTF_PYTHON=1}" "ORTF_PYTHON_EXE=$fx/buildbin/pyrec" >"$wheel_dir/src/ortf.conf"
+printf '%s\n' "${conf_build/ORTF_PYTHON=0/ORTF_PYTHON=1}" "ORTF_PYTHON_EXE=$fx/buildbin/pyrec" 'ORTF_SOURCE=mirror' >"$wheel_dir/src/ortf.conf"
 # shellcheck disable=SC2016 # the script expands its own arguments
 if env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u CMAKE_BUILD_PARALLEL_LEVEL \
     PATH="$fx/buildbin:$PATH" FX_CMAKE_ARGS="$wheel_dir/args" FX_PY_ARGS="$wheel_dir/py" \
@@ -2217,9 +2231,9 @@ if env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u CMAKE_BUILD_PARALLEL_LEV
     srcdir=$2/src CARCH=x86_64 CFLAGS="-O2" CXXFLAGS="-O2"
     build
 ' _ "$pkgbuild" "$wheel_dir" >"$wheel_dir/log" 2>&1 &&
-    [[ $(<"$wheel_dir/py") == "$wheel_dir/src/onnxruntime"$'\n-m\nbuild\n--wheel\n--no-isolation\n--outdir\n'"$wheel_dir/src/dist"$'\n-C--build-option=--enable_training' ]] &&
-    [[ -f $wheel_dir/src/onnxruntime/onnxruntime/capi/onnxruntime_pybind11_state.so ]]; then
-    ok "build(): the wheel is built from the source tree with setup.py's --enable_training"
+    [[ $(<"$wheel_dir/py") == "$wheel_dir/src/onnxruntime-1.29.0"$'\n-m\nbuild\n--wheel\n--no-isolation\n--outdir\n'"$wheel_dir/src/dist"$'\n-C--build-option=--enable_training' ]] &&
+    [[ -f $wheel_dir/src/onnxruntime-1.29.0/onnxruntime/capi/onnxruntime_pybind11_state.so ]]; then
+    ok "build(): the wheel is built from the source tree (the mirror's) with setup.py's --enable_training"
 else
     fail "build() of the wheel: $(cat "$wheel_dir/log" "$wheel_dir/py" 2>&1)"
 fi
@@ -3198,11 +3212,337 @@ else
     echo "skip the Python install directory (no /usr/bin/python)"
 fi
 
+echo "== the source (ORTF_SOURCE): the mirror's archive or the upstream git tag"
+mirror_url='onnxruntime-1.29.0.tar.gz::https://github.com/rsd/omarchy-onnxruntime/releases/download/source-v1.29.0/onnxruntime-1.29.0.tar.gz'
+mirror_b2=28d0b3e08d28a8d9295a21f8a233671bdab89f2a9573e169398421bd5e7355f4ce8a50cf6d2480baa02e6fb266323dff2808c8e474d456bd2e236a70621533f0
+git_url='onnxruntime::git+https://github.com/microsoft/onnxruntime.git#tag=v1.29.0'
+git_b2=8fdc31605d139480199860fc303a537bf67635bf60eb1d40e850b0270b422b070855cf416e9ca774889b9fba0c52fa40ad6fde0bdaf074013e2aaba89b53e054
+# source_arrays <PKGBUILD> <env...>: sources the file with that environment
+# (ORTF_SOURCE unset otherwise) and prints the first source and b2sums
+# entries, the counts of both, and noextract, one per line; FAILED when
+# sourcing fails.
+source_arrays() {
+    local f=$1
+    shift
+    # shellcheck disable=SC2016 # the script expands its own arguments
+    env -u ORTF_SOURCE "$@" bash -c '
+        set -euo pipefail
+        # shellcheck disable=SC1090
+        . "$1"
+        printf "%s\n" "${source[0]}" "${b2sums[0]}" "${#source[@]} ${#b2sums[@]}" "${noextract[*]}"
+    ' _ "$f" 2>&1 || echo FAILED
+}
+sa_mirror=$(source_arrays "$pkgbuild")
+sa_up=$(source_arrays "$pkgbuild" ORTF_SOURCE=upstream)
+sa_bad=$(source_arrays "$pkgbuild" ORTF_SOURCE=github)
+if [[ $(sed -n 1p <<<"$sa_mirror") == "$mirror_url" && $(sed -n 2p <<<"$sa_mirror") == "$mirror_b2" &&
+    $(sed -n 3p <<<"$sa_mirror") == '20 20' && " $(sed -n 4p <<<"$sa_mirror") " == *' onnxruntime-1.29.0.tar.gz '* ]]; then
+    ok "the default source is the mirror's archive, with its b2sum, in noextract"
+else
+    fail "the default source arrays: $sa_mirror"
+fi
+if [[ $(sed -n 1p <<<"$sa_up") == "$git_url" && $(sed -n 2p <<<"$sa_up") == "$git_b2" &&
+    $(sed -n 3p <<<"$sa_up") == '20 20' && " $(sed -n 4p <<<"$sa_up") " != *' onnxruntime-1.29.0.tar.gz '* ]]; then
+    ok "ORTF_SOURCE=upstream: the git tag with makepkg's checksum of its tree, no archive in noextract"
+else
+    fail "ORTF_SOURCE=upstream source arrays: $sa_up"
+fi
+# Every other entry is the same either way.
+if [[ $(sed 1,2d <<<"$sa_mirror" | sed 's/ onnxruntime-1.29.0.tar.gz$//') == "$(sed 1,2d <<<"$sa_up")" ]]; then
+    ok "the other sources, checksums and noextract entries do not depend on ORTF_SOURCE"
+else
+    fail "the rest differs: $(diff <(echo "$sa_mirror") <(echo "$sa_up"))"
+fi
+if [[ $sa_bad == "$sa_mirror" ]]; then
+    ok "an invalid ORTF_SOURCE still sources, with the mirror's source"
+else
+    fail "ORTF_SOURCE=github: $sa_bad"
+fi
+mkdir -p "$tmp/recipe-up"
+sed 's/^_ortf_default_source=.*/_ortf_default_source=upstream/' "$pkgbuild" >"$tmp/recipe-up/PKGBUILD"
+if grep -qxF '_ortf_default_source=upstream' "$tmp/recipe-up/PKGBUILD" &&
+    [[ $(source_arrays "$tmp/recipe-up/PKGBUILD") == "$sa_up" &&
+    $(source_arrays "$tmp/recipe-up/PKGBUILD" ORTF_SOURCE=mirror) == "$sa_mirror" ]]; then
+    ok "a copy with _ortf_default_source=upstream builds from the tag; the environment still wins"
+else
+    fail "_ortf_default_source=upstream: $(source_arrays "$tmp/recipe-up/PKGBUILD")"
+fi
+# Only one checksum array, the house one.
+if ! grep -qE '^(sha256sums|sha512sums|md5sums|b2sums_x86_64)=' "$pkgbuild"; then
+    ok "b2sums is the only checksum array"
+else
+    fail "another checksum array: $(grep -nE '^(sha256sums|sha512sums|md5sums)=' "$pkgbuild")"
+fi
+if command -v makepkg >/dev/null 2>&1; then
+    si_src() { (cd "$tmp/recipe" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_NCCL "$@" makepkg --printsrcinfo 2>&1) || echo FAILED; }
+    si_m=$(si_src) si_u=$(si_src ORTF_SOURCE=upstream)
+    # The .SRCINFO differs in the first source, its b2sum and the noextract
+    # line of the archive, nothing else.
+    si_diff=$( (diff <(echo "$si_m") <(echo "$si_u") || :) | grep '^[<>]' | LC_ALL=C sort)
+    si_want=$(printf '%s\n' "< "$'\t'"b2sums = $mirror_b2" "< "$'\t'"noextract = onnxruntime-1.29.0.tar.gz" \
+        "< "$'\t'"source = $mirror_url" "> "$'\t'"b2sums = $git_b2" "> "$'\t'"source = $git_url" | LC_ALL=C sort)
+    if [[ $si_m != *FAILED* && $si_u != *FAILED* && $si_diff == "$si_want" ]]; then
+        ok "makepkg --printsrcinfo: ORTF_SOURCE changes the first source, its b2sum and the archive's noextract only"
+    else
+        fail "the .SRCINFO per ORTF_SOURCE: $si_diff"
+    fi
+    if [[ $(si_src ORTF_SOURCE=github) == "$si_m" ]]; then ok "makepkg --printsrcinfo with an invalid ORTF_SOURCE: the mirror's"; else
+        fail "makepkg --printsrcinfo with ORTF_SOURCE=github: $(si_src ORTF_SOURCE=github | head -5)"; fi
+else
+    echo "skip the .SRCINFO per ORTF_SOURCE (makepkg not found)"
+fi
+
+expect_ok "ORTF_SOURCE: the mirror by default" 'ORTF_SOURCE=mirror' -- ORTF_EPS=cpu FX_NO_VENDOR=1
+if grep -qF 'ORTF_SOURCE=mirror (PKGBUILD default, _ortf_default_source; onnxruntime-1.29.0.tar.gz, release source-v1.29.0 of rsd/omarchy-onnxruntime, in src/onnxruntime-1.29.0)' <<<"$out"; then
+    ok "prepare() prints the source and where the value came from"
+else
+    fail "printed: $out"
+fi
+expect_ok "ORTF_SOURCE=upstream is recorded" 'ORTF_SOURCE=upstream' -- ORTF_EPS=cpu FX_NO_VENDOR=1 ORTF_SOURCE=upstream
+if grep -qF 'ORTF_SOURCE=upstream (environment; git tag v1.29.0 of microsoft/onnxruntime, in src/onnxruntime)' <<<"$out"; then
+    ok "and printed as the environment's"
+else
+    fail "printed: $out"
+fi
+expect_fail "an invalid ORTF_SOURCE is refused by prepare()" "ORTF_SOURCE: 'github' is neither mirror nor upstream" \
+    ORTF_EPS=cpu FX_NO_VENDOR=1 ORTF_SOURCE=github
+
+# srcroot_case <ortf.conf lines>: _ortf_srcroot with that record; sets
+# status and out.
+srcroot_case() {
+    local dir
+    dir=$(mktemp -d "$tmp/srcroot.XXXXXX")
+    printf '%s\n' "$1" >"$dir/ortf.conf"
+    status=0
+    # shellcheck disable=SC2016 # the script expands its own arguments
+    out=$(env ORTF_SOURCE=upstream bash -c 'set -euo pipefail; . "$1"; srcdir=$2; _ortf_srcroot' _ "$pkgbuild" "$dir" 2>&1) || status=$?
+    out=${out//$dir/SRC}
+}
+srcroot_case 'ORTF_SOURCE=mirror'
+if ((status == 0)) && [[ $out == SRC/onnxruntime-1.29.0 ]]; then
+    ok "the mirror's tree is src/onnxruntime-1.29.0, as recorded (whatever the environment says now)"
+else
+    fail "_ortf_srcroot for the mirror (exit $status): $out"
+fi
+srcroot_case 'ORTF_SOURCE=upstream'
+if ((status == 0)) && [[ $out == SRC/onnxruntime ]]; then ok "the checkout's is src/onnxruntime"; else
+    fail "_ortf_srcroot for upstream (exit $status): $out"; fi
+srcroot_case 'ORTF_EPS=cpu'
+if ((status != 0)) && grep -qF 'ortf.conf: no ORTF_SOURCE (run makepkg without -e' <<<"$out"; then
+    ok "a record without ORTF_SOURCE (an older prepare()) fails, naming the fix"
+else
+    fail "_ortf_srcroot without ORTF_SOURCE (exit $status): $out"
+fi
+srcroot_case 'ORTF_SOURCE=github'
+if ((status != 0)) && grep -qF "ORTF_SOURCE 'github' is neither mirror nor upstream" <<<"$out"; then
+    ok "a recorded value that is neither fails"
+else
+    fail "_ortf_srcroot with github (exit $status): $out"
+fi
+# Every use of the tree goes through it: no "$srcdir/onnxruntime" of its
+# own outside _ortf_srcroot and the archive's path.
+# shellcheck disable=SC2016 # the PKGBUILD's text
+if [[ $(grep -c 'srcdir/onnxruntime' "$pkgbuild") == 3 ]] &&
+    grep -qF 'upstream) printf' "$pkgbuild" &&
+    grep -qF '_ortf_unpack_mirror "$srcdir/onnxruntime-$pkgver.tar.gz" "$root"' "$pkgbuild" &&
+    grep -qF -- '-S "$root/cmake"' "$pkgbuild"; then
+    ok "build(), the wheel and the licences read the tree _ortf_srcroot names"
+else
+    fail "\$srcdir/onnxruntime outside _ortf_srcroot: $(grep -n 'srcdir/onnxruntime' "$pkgbuild")"
+fi
+package_run "$conf_all"$'\nORTF_SOURCE=upstream' --
+if ((status == 0)) && [[ ! -e ${pkgroot%/pkg}/src/onnxruntime-1.29.0 ]] &&
+    [[ -f $pkgroot/onnxruntime-core/usr/share/licenses/onnxruntime-core/LICENSE ]]; then
+    ok "the packages of an upstream build take ONNX Runtime's licence from the checkout"
+else
+    fail "package() with ORTF_SOURCE=upstream (exit $status): $out"
+fi
+for kind in mirror upstream; do
+    build_flags "$conf_build"$'\n'"ORTF_SOURCE=$kind" "$pkgbuild" "src-$kind" >/dev/null
+done
+if grep -qxF 'DIR/src/onnxruntime-1.29.0/cmake' "$tmp/build-rest-src-mirror" &&
+    grep -qxF 'DIR/src/onnxruntime/cmake' "$tmp/build-rest-src-upstream"; then
+    ok "build(): cmake -S is the recorded layout's tree"
+else
+    fail "build() -S: $(grep -h -A1 -- '^-S$' "$tmp/build-rest-src-mirror" "$tmp/build-rest-src-upstream")"
+fi
+
+# The mirror's archive: git archive of a fixture commit, as
+# scripts/make-source-archive.sh makes it, and of another commit.
+arc_repo=$tmp/arc-repo
+git init -q "$arc_repo"
+mkdir -p "$arc_repo/cmake"
+echo 'first' >"$arc_repo/cmake/CMakeLists.txt"
+git -C "$arc_repo" add -A
+git -C "$arc_repo" -c user.name=t -c user.email=t@example.invalid commit -qm first
+arc_c1=$(git -C "$arc_repo" rev-parse HEAD)
+echo 'second' >"$arc_repo/cmake/CMakeLists.txt"
+git -C "$arc_repo" -c user.name=t -c user.email=t@example.invalid commit -qam second
+arc_c2=$(git -C "$arc_repo" rev-parse HEAD)
+mkdir -p "$tmp/arc"
+git -C "$arc_repo" archive --format=tar --prefix=onnxruntime-1.29.0/ "$arc_c1" | gzip -n -9 >"$tmp/arc/c1.tar.gz"
+git -C "$arc_repo" archive --format=tar --prefix=onnxruntime-1.29.0/ "$arc_c2" | gzip -n -9 >"$tmp/arc/c2.tar.gz"
+git -C "$arc_repo" archive --format=tar --prefix=other/ "$arc_c1" | gzip -n -9 >"$tmp/arc/prefix.tar.gz"
+# unpack_case <archive> <commit>: _ortf_unpack_mirror of <archive> (as
+# src/onnxruntime-1.29.0.tar.gz) with _ortf_commit=<commit>, into a src/
+# whose src/onnxruntime-1.29.0 holds a leftover of an earlier build; sets
+# status, out and udir (that src/).
+unpack_case() {
+    udir=$(mktemp -d "$tmp/unpack.XXXXXX")
+    [[ ! -f $1 ]] || cp -- "$1" "$udir/onnxruntime-1.29.0.tar.gz"
+    mkdir -p "$udir/onnxruntime-1.29.0/build"
+    : >"$udir/onnxruntime-1.29.0/build/leftover"
+    status=0
+    # shellcheck disable=SC2016 # the script expands its own arguments
+    out=$(cd "$tmp" && bash -c 'set -euo pipefail; . "$1"; _ortf_commit=$3
+        _ortf_unpack_mirror "$2/onnxruntime-1.29.0.tar.gz" "$2/onnxruntime-1.29.0"' _ "$pkgbuild" "$udir" "$2" 2>&1) ||
+        status=$?
+}
+unpack_case "$tmp/arc/c1.tar.gz" "$arc_c1"
+if ((status == 0)) && [[ $(<"$udir/onnxruntime-1.29.0/cmake/CMakeLists.txt") == first &&
+    ! -e $udir/onnxruntime-1.29.0/build ]]; then
+    ok "the archive of _ortf_commit is unpacked anew: its tree, no leftover of an earlier build"
+else
+    fail "_ortf_unpack_mirror of the right commit (exit $status): $out"
+fi
+unpack_case "$tmp/arc/c2.tar.gz" "$arc_c1"
+if ((status != 0)) && grep -qF "onnxruntime-1.29.0.tar.gz is commit $arc_c2, not $arc_c1: the archive is not the tag's tree" <<<"$out" &&
+    [[ -e $udir/onnxruntime-1.29.0/build/leftover && ! -e $udir/onnxruntime-1.29.0/cmake ]]; then
+    ok "an archive of another commit fails, naming both, and unpacks nothing"
+else
+    fail "_ortf_unpack_mirror of another commit (exit $status): $out"
+fi
+printf 'not an archive\n' | gzip -n >"$tmp/arc/plain.gz"
+unpack_case "$tmp/arc/plain.gz" "$arc_c1"
+if ((status != 0)) && grep -qF "is commit (none recorded), not $arc_c1" <<<"$out"; then
+    ok "a file with no commit recorded fails"
+else
+    fail "_ortf_unpack_mirror of a plain gzip (exit $status): $out"
+fi
+unpack_case "$tmp/arc/prefix.tar.gz" "$arc_c1"
+if ((status != 0)) && grep -qF 'does not unpack to onnxruntime-1.29.0/ (its prefix is not onnxruntime-1.29.0/)' <<<"$out"; then
+    ok "an archive under another prefix fails"
+else
+    fail "_ortf_unpack_mirror with another prefix (exit $status): $out"
+fi
+unpack_case "$tmp/arc/none.tar.gz" "$arc_c1"
+if ((status != 0)) && grep -qF 'onnxruntime-1.29.0.tar.gz not found (ORTF_SOURCE=mirror)' <<<"$out"; then
+    ok "a missing archive fails"
+else
+    fail "_ortf_unpack_mirror without the archive (exit $status): $out"
+fi
+
+# The clean chroot: no git repository around the working directory.
+nogit=$(mktemp -d "$tmp/nogit.XXXXXX")
+mkdir "$nogit/wd"
+unpack_case "$tmp/arc/c1.tar.gz" "$arc_c1"
+status=0
+# shellcheck disable=SC2016 # the script expands its own arguments
+out=$(cd "$nogit/wd" && GIT_CEILING_DIRECTORIES=$nogit bash -c 'set -euo pipefail; . "$1"; _ortf_commit=$3
+    _ortf_unpack_mirror "$2/onnxruntime-1.29.0.tar.gz" "$2/onnxruntime-1.29.0"' _ "$pkgbuild" "$udir" "$arc_c1" 2>&1) ||
+    status=$?
+if ((status == 0)) && [[ $(<"$udir/onnxruntime-1.29.0/cmake/CMakeLists.txt") == first ]]; then
+    ok "_ortf_unpack_mirror works from a directory outside any git repository"
+else
+    fail "_ortf_unpack_mirror outside a git repository (exit $status): $out"
+fi
+
+echo "== the build information (_ortf_patch_git_info)"
+# The upstream file: the v1.29.0 checkout's, when one is at hand, else a
+# copy of its block.
+gi_up=$tmp/git-info.CMakeLists.txt.upstream
+moe_git cmake/CMakeLists.txt "$gi_up" || cat >"$gi_up" <<'EOF2'
+set(ORT_BUILD_INFO "ORT Build Info: ")
+find_package(Git)
+if (Git_FOUND)
+  execute_process(COMMAND ${GIT_EXECUTABLE} log -1 --format=%h
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      OUTPUT_VARIABLE ORT_GIT_COMMIT)
+  string(STRIP "${ORT_GIT_COMMIT}" ORT_GIT_COMMIT)
+  execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      OUTPUT_VARIABLE ORT_GIT_BRANCH)
+  string(STRIP "${ORT_GIT_BRANCH}" ORT_GIT_BRANCH)
+  string(APPEND ORT_BUILD_INFO "git-branch=${ORT_GIT_BRANCH}, git-commit-id=${ORT_GIT_COMMIT}, ")
+  if (onnxruntime_QUICK_BUILD)
+    string(APPEND ORT_BUILD_INFO "quick-build=1, ")
+  endif()
+  if (onnxruntime_USE_FP8_KV_CACHE)
+    string(APPEND ORT_BUILD_INFO "fp8-kv-cache=1, ")
+  endif()
+endif()
+string(APPEND ORT_BUILD_INFO "build type=${CMAKE_BUILD_TYPE}")
+EOF2
+gi=$tmp/git-info/cmake/CMakeLists.txt
+mkdir -p "${gi%/*}"
+cp -- "$gi_up" "$gi"
+patch_tops _ortf_patch_git_info "$gi"
+# Two upstream statements pairs replaced by two set()s under a marked
+# comment; the rest of the block (Git_FOUND, the other entries) as is.
+# shellcheck disable=SC2016 # CMake's ${...}
+if ((status == 0)) && grep -qxF '  set(ORT_GIT_COMMIT "2e2543fbe9f")' "$gi" && grep -qxF '  set(ORT_GIT_BRANCH "makepkg")' "$gi" &&
+    grep -qF 'omarchy-onnxruntime (onnxruntime-split/PKGBUILD, _ortf_patch_git_info)' "$gi" &&
+    ! grep -qF 'GIT_EXECUTABLE' "$gi" && grep -qxF 'if (Git_FOUND)' "$gi" &&
+    [[ $(diff "$gi_up" "$gi" | grep -c '^<') == 8 ]]; then
+    ok "the patch: the branch and commit are fixed, the rest of the block is upstream's"
+else
+    fail "the build information patch (exit $status): $out"$'\n'"$(diff "$gi_up" "$gi")"
+fi
+# The string itself, as CMake makes it, outside any git repository (as an
+# unpacked archive in a BUILDDIR that is no checkout; with the default
+# BUILDDIR, inside a recipe repository, upstream's git calls would read
+# that repository instead), with the default build's options.
+if command -v cmake >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+    gi_run=$tmp/git-info-run
+    mkdir -p "$gi_run"
+    {
+        printf 'set(CMAKE_BUILD_TYPE Release)\nset(onnxruntime_USE_FP8_KV_CACHE ON)\n'
+        sed -n '/^set(ORT_BUILD_INFO "ORT Build Info: ")$/,/^string(APPEND ORT_BUILD_INFO "build type=/p' "$gi"
+        # shellcheck disable=SC2016 # CMake's ${...}
+        printf 'message(STATUS "${ORT_BUILD_INFO}")\n'
+    } >"$gi_run/info.cmake"
+    gi_out=$(cd "$gi_run" && GIT_CEILING_DIRECTORIES=$tmp cmake -P info.cmake 2>&1) || gi_out="FAILED: $gi_out"
+    # (find_package(Git) says what it found first.)
+    if [[ $(grep -v '^-- Found Git: ' <<<"$gi_out") == '-- ORT Build Info: git-branch=makepkg, git-commit-id=2e2543fbe9f, fp8-kv-cache=1, build type=Release' ]]; then
+        ok "CMake's build information is exactly 1.29.0-7's: git-branch=makepkg, git-commit-id=2e2543fbe9f, fp8-kv-cache=1, build type=Release"
+    else
+        fail "the build information: $gi_out"
+    fi
+else
+    echo "skip CMake's build information string (no cmake or git)"
+fi
+cp -- "$gi" "$gi.once"
+patch_tops _ortf_patch_git_info "$gi"
+if ((status != 0)) && grep -qF 'or the file is patched already; look at the file and update _ortf_patch_git_info' <<<"$out" &&
+    cmp -s "$gi" "$gi.once" && [[ ! -e $gi.tmp ]]; then
+    ok "a second run fails loudly and leaves the file as it was"
+else
+    fail "a second build information patch (exit $status): $out"
+fi
+sed 's/--format=%h/--format=%H/' "$gi_up" >"$gi.changed"
+cp -- "$gi.changed" "$gi.changed.before"
+patch_tops _ortf_patch_git_info "$gi.changed"
+if ((status != 0)) && grep -qF '0 copies of the upstream text below' <<<"$out" && cmp -s "$gi.changed" "$gi.changed.before"; then
+    ok "a file without the upstream text (another release) fails and is left untouched"
+else
+    fail "the build information patch on a changed file (exit $status): $out"
+fi
+# At the function's own level (not in either branch), after both.
+gi_prep=$(sed -n '/^prepare() {/,/^}/p' "$pkgbuild")
+gi_at=$(grep -nxF '  _ortf_patch_git_info cmake/CMakeLists.txt || return 1' <<<"$gi_prep" | cut -d: -f1)
+gi_clean=$(grep -nxF '    git clean -ffdxq' <<<"$gi_prep" | cut -d: -f1)
+gi_unpack=$(grep -n '^    _ortf_unpack_mirror ' <<<"$gi_prep" | cut -d: -f1)
+if [[ -n $gi_at && -n $gi_clean && -n $gi_unpack ]] && ((gi_at > gi_clean && gi_at > gi_unpack)); then
+    ok "prepare() applies it after either layout's tree is made"
+else
+    fail "prepare() does not run _ortf_patch_git_info after the layout's if/else"
+fi
+
 echo "== metadata"
 if command -v makepkg >/dev/null 2>&1; then
     # srcinfo <env...>: makepkg --printsrcinfo with that environment.
     srcinfo() {
-        (cd "${pkgbuild%/*}" && env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_TENSORRT_HOME \
+        (cd "${pkgbuild%/*}" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_TENSORRT_HOME \
             -u MAKEFLAGS -u FX_CUDA_HOME "$@" makepkg --printsrcinfo 2>&1) || echo "FAILED"
     }
     # only_blocks <pkgname...>: the .SRCINFO on stdin, with the pkgbase
@@ -3283,7 +3623,7 @@ if command -v makepkg >/dev/null 2>&1; then
     mkdir -p "$tmp/recipe-all"
     sed 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' "$pkgbuild" >"$tmp/recipe-all/PKGBUILD"
     srcinfo_all() {
-        (cd "$tmp/recipe-all" && env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON "$@" makepkg --printsrcinfo 2>&1) ||
+        (cd "$tmp/recipe-all" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON "$@" makepkg --printsrcinfo 2>&1) ||
             echo "FAILED"
     }
     f=$(srcinfo_all)
@@ -3411,7 +3751,7 @@ if command -v makepkg >/dev/null 2>&1; then
     # main line's onnxruntime-core by pkgver; no TensorRT, OpenVINO or
     # Python-module build inputs (python itself stays: ONNX's CMake runs it).
     srcinfo12() {
-        (cd "${pkgbuild12%/*}" && env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_TENSORRT_HOME \
+        (cd "${pkgbuild12%/*}" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_TENSORRT_HOME \
             -u MAKEFLAGS -u FX_CUDA_HOME "$@" makepkg --printsrcinfo 2>&1) || echo "FAILED"
     }
     k=$(srcinfo12 FX_CUDA_HOME="$fx/empty")
@@ -3471,7 +3811,7 @@ if command -v makepkg >/dev/null 2>&1; then
     # the pin pair and python (the bounds come at package time); ROCm, no
     # CUDA, OpenVINO or Python-module build input.
     srcinfomgx() {
-        (cd "${pkgbuildmgx%/*}" && env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_TENSORRT_HOME \
+        (cd "${pkgbuildmgx%/*}" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_TENSORRT_HOME \
             -u MAKEFLAGS -u FX_CUDA_HOME "$@" makepkg --printsrcinfo 2>&1) || echo "FAILED"
     }
     x=$(srcinfomgx FX_CUDA_HOME="$fx/empty")
@@ -3554,7 +3894,7 @@ if command -v makepkg >/dev/null 2>&1; then
     # the environment still wins.
     mkdir -p "$tmp/recipe-off"
     sed 's/^_ortf_default_nccl=.*/_ortf_default_nccl=0/' "$pkgbuild" >"$tmp/recipe-off/PKGBUILD"
-    srcinfo_off() { (cd "$tmp/recipe-off" && env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_NCCL "$@" makepkg --printsrcinfo 2>&1) || echo "FAILED"; }
+    srcinfo_off() { (cd "$tmp/recipe-off" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_NCCL "$@" makepkg --printsrcinfo 2>&1) || echo "FAILED"; }
     if [[ $(srcinfo_off) == "$o" && $(srcinfo_off ORTF_NCCL=1) == "$a" ]]; then
         ok "a copy with _ortf_default_nccl=0 gives the ORTF_NCCL=0 .SRCINFO; ORTF_NCCL=1 still overrides it"
     else
@@ -3565,8 +3905,8 @@ if command -v makepkg >/dev/null 2>&1; then
     mkdir -p "$tmp/recipe12-off" "$tmp/recipemgx-off"
     sed 's/^_ortf_default_nccl=.*/_ortf_default_nccl=0/' "$pkgbuild12" >"$tmp/recipe12-off/PKGBUILD"
     sed 's/^_ortf_default_nccl=.*/_ortf_default_nccl=0/' "$pkgbuildmgx" >"$tmp/recipemgx-off/PKGBUILD"
-    k0=$( (cd "$tmp/recipe12-off" && env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_NCCL FX_CUDA_HOME="$fx/empty" makepkg --printsrcinfo 2>&1) || echo FAILED)
-    x0=$( (cd "$tmp/recipemgx-off" && env -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_NCCL FX_CUDA_HOME="$fx/empty" makepkg --printsrcinfo 2>&1) || echo FAILED)
+    k0=$( (cd "$tmp/recipe12-off" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_NCCL FX_CUDA_HOME="$fx/empty" makepkg --printsrcinfo 2>&1) || echo FAILED)
+    x0=$( (cd "$tmp/recipemgx-off" && env -u ORTF_SOURCE -u ORTF_EPS -u ORTF_CUDA_ARCHS -u ORTF_PYTHON -u ORTF_NCCL FX_CUDA_HOME="$fx/empty" makepkg --printsrcinfo 2>&1) || echo FAILED)
     k0_block=$(only_blocks onnxruntime-provider-cuda12-legacy-nccloff <<<"$k0" | sed '1,/^$/d')
     x0_block=$(only_blocks onnxruntime-provider-migraphx-nccloff <<<"$x0" | sed '1,/^$/d')
     x0p_block=$(only_blocks python-onnxruntime-provider-migraphx-nccloff <<<"$x0" | sed '1,/^$/d')
