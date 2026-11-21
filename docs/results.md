@@ -1,6 +1,8 @@
 # Measured results
 
-What the recipe's checks reported for two builds, and the conditions they were run under: first the single-package build 1.29.0-1 (and the CUDA 12 legacy provider 1.29.0-1), then the [1.29.0-7 packages](#release-1290-7), which add ONNX Runtime's training support, the oneDNN provider and the MIGraphX packages. The figures are ONNX Runtime figures for the raw model only, without any pre- or post-processing, and are indicative: the desktop was in use during the runs. The tools that produced them are the [smoke test](../tools/ort-smoke/README.md) and the [model check](../tools/ort-model-check/README.md); terms such as TF32 and fp16 are in the [glossary](glossary.md).
+This page reports what the recipe's checks measured for two builds, and the conditions of each run. The first build is the single-package 1.29.0-1 (with the CUDA 12 legacy provider 1.29.0-1). The second is the [1.29.0-7 packages](#release-1290-7), which add ONNX Runtime's training support, the oneDNN provider and the MIGraphX packages.
+
+The figures are for the raw model only, without any pre- or post-processing. They are indicative: the desktop was in use during the runs. The [smoke test](../tools/ort-smoke/README.md) and the [model check](../tools/ort-model-check/README.md) produced them. Terms such as TF32 and fp16 are in the [glossary](glossary.md).
 
 ## Conditions
 
@@ -81,7 +83,7 @@ MODNet with `--precision fp32`, which asks each provider for fp32 arithmetic whe
 
 ## Reading the figures
 
-- **Precision.** By default CUDA and TensorRT compute in TF32 and the OpenVINO GPU and NPU in fp16. That is why MODNet's default-mode errors are larger than the other models': a deep network fed noise amplifies the rounding of a 10-bit mantissa. With fp32 arithmetic the same model is within 2.8e-4 of the CPU on every target that has fp32, so the errors come from the arithmetic and not from a faulty provider. The NPU has no fp32 inference, so its fp32 row repeats the default. The error bounds and the reasoning are in the model-check README's [Precision modes](../tools/ort-model-check/README.md#precision-modes). TensorRT can be switched to fp32 with `NVIDIA_TF32_OVERRIDE=0` ([engines.md](engines.md#tensorrt)); the OpenVINO GPU needs `INFERENCE_PRECISION_HINT` ([engines.md](engines.md#openvino)).
+- **Precision.** By default CUDA and TensorRT compute in TF32, and the OpenVINO GPU and NPU in fp16. That is why MODNet's default-mode errors are larger than the other models': a deep network fed noise amplifies the rounding of a 10-bit mantissa. With fp32 arithmetic the same model is within 2.8e-4 of the CPU on every target that has fp32. The errors come from the arithmetic, not from a faulty provider. The NPU has no fp32 inference, so its fp32 row repeats the default. The error bounds and the reasoning are in the model-check README's [Precision modes](../tools/ort-model-check/README.md#precision-modes). Switch TensorRT to fp32 with `NVIDIA_TF32_OVERRIDE=0` ([engines.md](engines.md#tensorrt)). The OpenVINO GPU needs `INFERENCE_PRECISION_HINT` ([engines.md](engines.md#openvino)).
 - **TensorRT's `create` is the engine build**, about 10 s per model with static shapes here, with no engine cache. With dynamic shapes it moves to the first run, as for MODNet. `--trt-cache` removes it from later invocations.
 - **OpenVINO GPU** pays seconds of kernel compilation at session creation.
 - **`first ms`** includes lazy initialisation: CUDA's first run takes hundreds of milliseconds for that reason.
@@ -139,7 +141,14 @@ The 1.29.0-2 provider was run again, on the same GPU, in the [1.29.0-7 round](#r
 
 ## Release 1.29.0-7
 
-The second set of measurements, of the packages `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core` 1.29.0-7, the preset `onnxruntime-provider-cuda13-all` 1.29.0-7, `onnxruntime-provider-cuda12-legacy` 1.29.0-2, and `onnxruntime-provider-migraphx` and `python-onnxruntime-provider-migraphx` 1.29.0-1 ([packages.md](packages.md)). These are built with ONNX Runtime's training support and NCCL, so they are larger than 1.29.0-6 (see [sizes](#package-sizes)). The first build of 1.29.0-7 had two faults that only running it showed; they are described [below](#faults-found-and-fixed) and the figures here are of the rebuilt packages.
+This is the second set of measurements. It covers these packages ([packages.md](packages.md)):
+
+- `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core`, all 1.29.0-7;
+- `onnxruntime-provider-cuda13-all` 1.29.0-7;
+- `onnxruntime-provider-cuda12-legacy` 1.29.0-2;
+- `onnxruntime-provider-migraphx` and `python-onnxruntime-provider-migraphx` 1.29.0-1.
+
+They are built with ONNX Runtime's training support and NCCL, so they are larger than 1.29.0-6 (see [sizes](#package-sizes)). The first build of 1.29.0-7 had two faults that only running it showed. They are described [below](#faults-found-and-fixed). The figures here are of the rebuilt packages.
 
 ### Conditions
 
