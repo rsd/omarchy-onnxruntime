@@ -29,7 +29,7 @@ The terms the other pages use, each in one or two sentences.
 | **Preset** | A named list of CUDA architectures for `ORTF_CUDA_ARCHS`: `rtx`, `all`, `legacy`. |
 | **TF32, fp16, fp32** | Arithmetic precisions. fp32 is 32-bit floating point, fp16 is 16-bit, and TF32 is NVIDIA's reduced-precision mode for matrix and convolution maths (a 10-bit mantissa, fp32 range). CUDA and TensorRT use TF32 by default on GPUs that have it. |
 | **CUDA 13 line, CUDA 12 line** | The packages built with CUDA 13 (the main recipe) and the one package built with CUDA 12.9 for older cards (`onnxruntime-provider-cuda12-legacy`). |
-| **MIGraphX line** | The provider `onnxruntime-provider-migraphx` for AMD GPUs and its Python add-on `python-onnxruntime-provider-migraphx`, built from their own recipe `onnxruntime-split-migraphx`. It is source only and untested on AMD hardware. |
+| **MIGraphX line** | The provider `onnxruntime-provider-migraphx` for AMD GPUs and its Python add-on `python-onnxruntime-provider-migraphx`, built from their own recipe `onnxruntime-split-migraphx`. It is source only (no prebuilt package), supported for the GPUs in Arch's ROCm build list and not tested on AMD hardware. |
 
 ## Arch packaging
 
@@ -58,3 +58,5 @@ The terms the other pages use, each in one or two sentences.
 | **RUNPATH** | A list of directories stored in a binary where the loader looks for the libraries that binary needs. `$ORIGIN` means the directory of the binary itself. |
 | **ABI** | The binary interface between a library and its users. Where it can change with a vendor's minor version (TensorRT), the dependency is bounded to that version. |
 | **MLAS** | ONNX Runtime's CPU math library. It picks its AVX2 or AVX-512 kernels at run time. |
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

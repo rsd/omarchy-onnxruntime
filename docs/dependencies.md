@@ -22,7 +22,7 @@ NCCL is the one exception to "depends on what it links". NCCL is a library of th
 | `onnxruntime-provider-tensorrt-cuda<M>` | everything the CUDA package depends on except `nccl`, plus `onnxruntime-provider-cuda<M>=<pkgver>` and `tensorrt` (bounded as below) |
 | `onnxruntime-provider-openvino` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `openvino` |
 | `onnxruntime-provider-dnnl` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `libgomp` (oneDNN's OpenMP runtime). No `onednn`: oneDNN is inside the provider ([below](#onednn-is-bundled-statically)) |
-| `onnxruntime-provider-migraphx` ([the MIGraphX line](amd.md); untested on AMD hardware) | `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`, `glibc`, `libgcc`, `libstdc++`, `migraphx`, `hip-runtime-amd` (bounded as below; never `rocm-hip-sdk`, and no `rccl`) |
+| `onnxruntime-provider-migraphx` ([the MIGraphX line](amd.md); supported, not tested on AMD hardware) | `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`, `glibc`, `libgcc`, `libstdc++`, `migraphx`, `hip-runtime-amd` (bounded as below; never `rocm-hip-sdk`, and no `rccl`) |
 | `python-onnxruntime-provider-migraphx` (the Python add-on, [the MIGraphX line](amd.md#the-package)) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python` (bounded to the minor of the site-packages it links into, as below) |
 | `python-onnxruntime-core` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `nccl`, `python`, `python-numpy`, `python-flatbuffers`, `python-packaging`, `python-protobuf`, and for `onnxruntime.training` `python-cerberus`, `python-h5py`, `python-onnx`, `python-sympy` and `python-setuptools` |
 
@@ -111,3 +111,5 @@ Use it twice:
 The script sees only `DT_NEEDED` entries, so the recorded bounds cover libraries loaded with `dlopen()` instead (above). In builds that link cuDNN, `libcudnn.so.9` is resolved and its owner checked like any other library.
 
 While the installed `nvidia-tensorrt-sdk-local` is pkgrel 1, or no TensorRT is installed, a run on the TensorRT provider package reports `tensorrt>=11.4` and `tensorrt<11.5` as `MISSING`. It reports the two TensorRT libraries the package links (`libnvinfer` and `libnvonnxparser`) as `GAP`. Nothing installed provides `tensorrt` (pkgrel 1 provides only `nvidia-tensorrt-sdk`). The script counts provided names, so these rows clear once the pkgrel 2 package, or the AUR's `tensorrt`, is installed.
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

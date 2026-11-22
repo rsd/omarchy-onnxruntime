@@ -27,7 +27,7 @@ Build inputs are environment variables.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ORTF_EPS` | `cuda tensorrt openvino dnnl` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`, `dnnl`, `migraphx`. Use `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. `dnnl` (oneDNN, CPU) needs no vendor install. `migraphx` (AMD GPUs, **untested on AMD hardware**) is not in the default. It stands alone or joins the others (untested together), for a local build: the published package is built from its own recipe. The CPU provider is always built. A build without `cuda` needs `ORTF_NCCL=0` |
+| `ORTF_EPS` | `cuda tensorrt openvino dnnl` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`, `dnnl`, `migraphx`. Use `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. `dnnl` (oneDNN, CPU) needs no vendor install. `migraphx` (AMD GPUs; supported, **not tested on AMD hardware**) is not in the default. It stands alone or joins the others (not tested together), for a local build: the published package is built from its own recipe. The CPU provider is always built. A build without `cuda` needs `ORTF_NCCL=0` |
 | `ORTF_CUDA_ARCHS` | `rtx` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`, and `legacy` for CUDA 12) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
 | `ORTF_NVCC_THREADS` | `1` | `nvcc --threads` per CUDA compile job |
 | `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so`. Its `include/NvInferVersion.h` gives the major.minor that the TensorRT provider's `tensorrt` dependency is bounded to |
@@ -49,8 +49,8 @@ ORTF_CUDA_ARCHS=all MAKEFLAGS=-j8 makepkg -f              # every x86 GPU CUDA 1
 ORTF_EPS="cuda tensorrt" ORTF_CUDA_ARCHS="89 120" MAKEFLAGS=-j8 makepkg -f
 ORTF_EPS=openvino ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f # OpenVINO only: no CUDA, so no NCCL; the packages are named -nccloff
 ORTF_EPS=dnnl ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f     # the oneDNN provider alone
-ORTF_EPS=migraphx ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f # AMD GPUs only, a local build without NCCL (untested): see below
-ORTF_EPS='cuda tensorrt openvino dnnl migraphx' MAKEFLAGS=-j8 makepkg -s -f   # every provider (untested together)
+ORTF_EPS=migraphx ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f # AMD GPUs only, a local build without NCCL (not tested): see below
+ORTF_EPS='cuda tensorrt openvino dnnl migraphx' MAKEFLAGS=-j8 makepkg -s -f   # every provider (not tested together)
 ORTF_TENSORRT_HOME=/usr MAKEFLAGS=-j8 makepkg -f          # the AUR's tensorrt
 ORTF_SOURCE=upstream MAKEFLAGS=-j8 makepkg -f             # the source from the git tag, not the mirror's archive
 ```
@@ -69,7 +69,7 @@ NCCL (NVIDIA's collective communication library) is on in every line by default 
 
 The published MIGraphX package comes from its own recipe, `onnxruntime-split-migraphx/PKGBUILD`. `scripts/gen-migraphx.sh` generates it from the main one, and you never edit it by hand. It builds `onnxruntime-provider-migraphx` and its add-on `python-onnxruntime-provider-migraphx` (the link into the system Python's `capi/`, [amd.md](amd.md#the-package)). It builds with `-Donnxruntime_USE_MIGRAPHX=ON -Donnxruntime_MIGRAPHX_HOME=/opt/rocm` and `rccl` as the NCCL library, with no Python module and no other provider. It loads into the main line's core ([amd.md](amd.md#building-it)).
 
-`migraphx` in `ORTF_EPS` of the main recipe still builds the provider, for a local build, alone or beside the others (untested together). **It is untested on AMD hardware.** No GPU architecture is chosen at build time: MIGraphX compiles each model for the GPU it finds at run time. The prerequisites (`migraphx` and `hip-runtime-amd` installed first), the `-d` flag for an AMD-only build and the open questions are in [amd.md](amd.md#building-it).
+`migraphx` in `ORTF_EPS` of the main recipe still builds the provider, for a local build, alone or beside the others (not tested together). **It is not tested on AMD hardware.** No GPU architecture is chosen at build time: MIGraphX compiles each model for the GPU it finds at run time. The prerequisites (`migraphx` and `hip-runtime-amd` installed first), the `-d` flag for an AMD-only build and the open questions are in [amd.md](amd.md#building-it).
 
 ### CUDA architectures
 
@@ -85,7 +85,7 @@ ONNX Runtime turns a bare number into machine code ("SASS") for that GPU only: `
 | `120` | `sm_120`: RTX 50 series | `onnxruntime-provider-cuda13-sm120` | 89.4 MiB (the library, measured on an earlier build) | the baseline (one target) |
 | a list, such as `89 120` | the listed GPUs | `onnxruntime-provider-cuda13-sm89-sm120` | not measured | about one `sm_120` build per target (estimate) |
 
-Each preset has a fixed package name whatever its list, so a build of it can be told from another. Maxwell (`50`, `52`) is not in `legacy`, because ONNX Runtime 1.29's fp16 kernels need `sm_53` or later. The ARM and Jetson targets (`87`, `88`, `107`, `110`, `121`, which are Jetson, Thor and DGX Spark) are left out of `all`.
+Each preset has a fixed package name whatever its list, so a build of it can be told from another. Maxwell (`50`, `52`) is not supported and is not in `legacy`, because ONNX Runtime 1.29's fp16 kernels need `sm_53` or later. The ARM and Jetson targets (`87`, `88`, `107`, `110`, `121`, which are Jetson, Thor and DGX Spark) are left out of `all`.
 
 - **Sizes.** The installed sizes are those of the 1.29.0-6 package files (`rtx`, `all`) and the 1.29.0-1 file (`legacy`). The CUDA library is nearly all of each. The targets do not cost the same. The library is 89.4 MiB for `sm_120` alone (55.7 MiB of host code and about 33.7 MiB of GPU code). The extra targets of `rtx` (`75`, `86`, `89`) therefore average about 22 MiB each, and the extra ones of `all` over `rtx` (`80`, `90`, `100`, `103`) about 35 MiB each (derived from those measurements). Download sizes are in [packages.md](packages.md#sizes).
 - **Time.** The CUDA kernels' compile time grows about linearly with the number of targets. The total build time grows by less, since the CPU, TensorRT, OpenVINO and Python parts do not change. The `sm_120` full build took 27 minutes ([below](#parallelism-memory-and-disk)). The default four-architecture build took about 2 hours 10 minutes (CUDA 13 line, from the prepare log to the end of the build log), and the CUDA 12 line's about 1 hour 25 minutes. Both ran on the same machine with other work running. These times are those of 1.29.0-6 and 1.29.0-1. The training operators, NCCL and oneDNN of 1.29.0-7 add build time that has not been measured yet.
@@ -232,3 +232,5 @@ ORTF_EPS=cpu ORTF_NCCL=0 makepkg -d -f
 With `ORTF_EPS=cpu` the build needs only the tools. `cmake` and `ninja` can come from a Python virtual environment on `PATH` instead of from pacman. The `python` first on `PATH` then must agree with `/usr/bin/python` on the site-packages directory, because the Python split package installs into the system's. `prepare()` checks this and stops with a message naming both directories. The result is a recipe check, not a package for general use. Install the packages only on a machine meant to run them.
 
 `scripts/test.sh` does not build. It checks the PKGBUILD's syntax, metadata and build-input handling ([testing.md](testing.md)).
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

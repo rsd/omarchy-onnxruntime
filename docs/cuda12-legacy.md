@@ -2,19 +2,23 @@
 
 `onnxruntime-provider-cuda12-legacy` is the CUDA provider of ONNX Runtime 1.29.0 built with CUDA 12.9, for the NVIDIA GPUs that CUDA 13 dropped. You need it only if you have a Pascal or Volta card. It is a separate line from the packages of the main recipe, which use CUDA 13.
 
-**It is untested on Pascal and Volta hardware**, and CUDA 12.9 with cuDNN 9.10 on the 580xx driver is untested too. This is version 1.29.0-2, built with the training operators and NCCL (below). It is released together with the main line's 1.29.0-7. Terms such as compute capability, SASS and PTX are in the [glossary](glossary.md).
+It is **supported** for Pascal and Volta and **not tested** on that hardware, and CUDA 12.9 with cuDNN 9.10 on the 580xx driver is not tested either ([Test status](#test-status)). This is version 1.29.0-2, built with the training operators and NCCL (below). It is released together with the main line's 1.29.0-7. Terms such as compute capability, SASS and PTX are in the [glossary](glossary.md).
 
 ## Who needs it
 
-| GPU | Compute capability | Package |
-|---|---|---|
-| Turing (RTX 20, GTX 16) and newer | `75` and up | the CUDA 13 packages ([INSTALL.md](../INSTALL.md)); this line also covers them |
-| Pascal (GTX 10, P100) and Volta (V100, Titan V) | `60`, `61`, `70` | this line |
-| Maxwell | `50`, `52` (`sm_50`, `sm_52`) | not supported |
+| GPU | Compute capability | Package | Status |
+|---|---|---|---|
+| Turing (RTX 20, GTX 16) to Ada (RTX 40), and Blackwell (RTX 50) | `75`, `86`, `89`, `120` | the CUDA 13 packages ([INSTALL.md](../INSTALL.md)); this line also has code for them | supported; `120` tested (RTX 5080 Laptop GPU, [results.md](results.md#cuda-12-legacy-provider)), the others not tested |
+| Ampere data centre (A100) | `80` | the CUDA 13 `all` package; this line also has code for it | supported; not tested |
+| Hopper, Blackwell data centre | `90`, `100`, `103` | the CUDA 13 `all` package only. They are not in this line's list | not supported by this line |
+| Pascal (GTX 10, P100) and Volta (V100, Titan V) | `60`, `61`, `70` | this line | supported; not tested |
+| Maxwell | `50`, `52` (`sm_50`, `sm_52`) | none | not supported: see below |
+
+The architectures of this line are those of the preset `legacy` in `_ortf_cuda_preset()` of `onnxruntime-split/PKGBUILD`: `60 61 70 75 80 86 89 120`, plus the PTX of `60` ([build.md](build.md#cuda-architectures)).
 
 CUDA 13 dropped Maxwell, Pascal and Volta. cuDNN 9.11 removed them, and so did the driver series from 590 on, so Arch's current driver packages do not support them. CUDA 12 still supports Pascal and Volta.
 
-**This package does not support Maxwell**, although CUDA 12 does. ONNX Runtime 1.29's fp16 kernels need `sm_53` or later (`ptxas` refuses their f16 arithmetic for `compute_50`), so they cannot be built for it. A WebGPU provider is planned as the route for those cards.
+**Maxwell is not supported by this package**, although CUDA 12 supports it. ONNX Runtime 1.29's fp16 kernels need `sm_53` or later (`ptxas` refuses their f16 arithmetic for `compute_50`), so they cannot be built for it. A WebGPU provider is **planned** as the route for those cards.
 
 ## What the machine needs
 
@@ -158,8 +162,11 @@ With `--precision fp32` the model check reports a maximum error of 1.23e-3 for M
 
 ## Test status
 
-The package has not run on real Pascal or Volta hardware, so its `sm_60`, `sm_61` and `sm_70` code is unconfirmed on the cards it is for. CUDA 12.9 with cuDNN 9.10 on the 580xx driver is untested as well.
+- **Tested:** `sm_120`, on the RTX 5080 Laptop GPU of the test machine, with the CUDA 12 libraries ([results.md](results.md#cuda-12-legacy-provider)). It shows that the library loads and computes with the CUDA 12 runtimes.
+- **Not tested:** `sm_60`, `sm_61` and `sm_70`, the cards the package is for, and the `sm_75` to `sm_89` code on real cards of those generations. CUDA 12.9 with cuDNN 9.10 on the 580xx driver is not tested either.
 
-The only measurement is a [run on a Blackwell GPU with the CUDA 12 libraries](results.md#cuda-12-legacy-provider). It shows that the library loads and computes with the CUDA 12 runtimes. Until someone confirms the package on an older card, treat it as the MIGraphX provider is treated: built from a recipe, never run on that hardware. `scripts/check-cuda-archs.sh` checks the other half, what a built library contains.
+Until someone runs the package on an older card, those architectures are supported and not tested, as the MIGraphX provider is ([amd.md](amd.md)). `scripts/check-cuda-archs.sh` checks the other half, what a built library contains.
 
 Sources: [CUDA GPU compute capabilities](https://developer.nvidia.com/cuda-gpus), [ONNX Runtime CUDA provider requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

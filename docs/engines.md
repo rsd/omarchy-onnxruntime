@@ -9,8 +9,8 @@ flowchart TD
     B -. loaded when a session asks .-> D[onnxruntime-provider-tensorrt-cuda13<br/>libonnxruntime_providers_tensorrt.so]
     B -. loaded when a session asks .-> E[onnxruntime-provider-openvino<br/>libonnxruntime_providers_openvino.so]
     B -. loaded when a session asks .-> M[onnxruntime-provider-dnnl<br/>libonnxruntime_providers_dnnl.so, oneDNN linked in]
-    B -. loaded by name, from its own pkgbase .-> I[onnxruntime-provider-migraphx<br/>libonnxruntime_providers_migraphx.so, untested on AMD hardware]
-    B -. loaded instead of C on a CUDA 12 machine .-> K[onnxruntime-provider-cuda12-legacy<br/>libonnxruntime_providers_cuda.so, untested on Pascal and Volta]
+    B -. loaded by name, from its own pkgbase .-> I[onnxruntime-provider-migraphx<br/>libonnxruntime_providers_migraphx.so, not tested on AMD hardware]
+    B -. loaded instead of C on a CUDA 12 machine .-> K[onnxruntime-provider-cuda12-legacy<br/>libonnxruntime_providers_cuda.so, not tested on Pascal and Volta]
     C --> F[CUDA, cuBLAS, cuDNN]
     D --> G[TensorRT, CUDA]
     E --> H[OpenVINO runtime and device plugins]
@@ -32,7 +32,7 @@ Install the packages of the engines you use. Each provider is a separate library
 | OpenVINO, device `GPU` | Intel graphics | `onnxruntime-provider-openvino` | `openvino-intel-gpu-plugin`, `intel-compute-runtime`, `level-zero-loader` | Arch `extra` |
 | OpenVINO, device `NPU` | Intel NPU | `onnxruntime-provider-openvino` | `openvino-intel-npu-plugin`, `intel-npu-driver`, `level-zero-loader` | Arch `extra` |
 | oneDNN (`dnnl`) | Any x86_64 CPU | `onnxruntime-provider-dnnl` | none: oneDNN is built into the provider; `libgomp` from `gcc-libs` | built by the recipe ([below](#onednn)) |
-| MIGraphX (untested on AMD hardware) | AMD GPU in Arch's ROCm build list | `onnxruntime-provider-migraphx`, and for Python its add-on `python-onnxruntime-provider-migraphx` (AUR pkgbase `onnxruntime-split-migraphx`) | `migraphx`, `hip-runtime-amd` | Arch `extra` |
+| MIGraphX (not tested on AMD hardware) | AMD GPU in Arch's ROCm build list | `onnxruntime-provider-migraphx`, and for Python its add-on `python-onnxruntime-provider-migraphx` (AUR pkgbase `onnxruntime-split-migraphx`) | `migraphx`, `hip-runtime-amd` | Arch `extra` |
 
 `<M>` is the CUDA major version of the toolkit that built the package (`13`). `<sfx>` names the GPU architectures ([build.md](build.md#package-names)).
 
@@ -111,31 +111,31 @@ Package `onnxruntime-provider-dnnl`, the oneDNN execution provider (`DnnlExecuti
 
 ## MIGraphX
 
-The AMD GPU provider ships from its own pkgbase `onnxruntime-split-migraphx` as a source build, and it is untested on AMD hardware: [amd.md](amd.md).
+The AMD GPU provider ships from its own pkgbase `onnxruntime-split-migraphx` as a source build (a packaging note, not a status). It is supported for the GPUs in Arch's ROCm build list and not tested on AMD hardware: [amd.md](amd.md).
 
-## Hardware coverage and what is not packaged
+## Hardware coverage and what is not supported
 
-[hardware.md](hardware.md) says which hardware each engine covers, what is left out, and why. It holds the status table (packaged, planned, untested, not packaged) for NVIDIA, Intel and AMD hardware and for the Ryzen AI NPU.
+[hardware.md](hardware.md) says which hardware each engine covers, what is left out, and why. It holds the status table (supported, tested or not tested; planned; not supported) for NVIDIA, Intel and AMD hardware and for the Ryzen AI NPU.
 
 ### NVIDIA
 
 See [hardware.md](hardware.md#nvidia).
 
-### NVIDIA Pascal and Volta (CUDA 12 legacy; packaged, untested)
+### NVIDIA Pascal and Volta (CUDA 12 legacy; supported, not tested)
 
-See [cuda12-legacy.md](cuda12-legacy.md) (and [hardware.md](hardware.md#nvidia-pascal-and-volta-cuda-12-legacy-packaged-untested)).
+See [cuda12-legacy.md](cuda12-legacy.md) (and [hardware.md](hardware.md#nvidia-pascal-and-volta-cuda-12-legacy-supported-not-tested)).
 
 ### Intel (OpenVINO provider)
 
 See [hardware.md](hardware.md#intel-openvino-provider).
 
-### AMD GPUs (MIGraphX; packaged, untested)
+### AMD GPUs (MIGraphX; supported, not tested)
 
-See [amd.md](amd.md), and [hardware.md](hardware.md#amd-gpus-migraphx-packaged-untested).
+See [amd.md](amd.md), and [hardware.md](hardware.md#amd-gpus-migraphx-supported-not-tested).
 
-### AMD Ryzen AI NPU (Vitis AI provider; not packaged)
+### AMD Ryzen AI NPU (Vitis AI provider; not supported)
 
-See [hardware.md](hardware.md#amd-ryzen-ai-npu-vitis-ai-provider-not-packaged).
+See [hardware.md](hardware.md#amd-ryzen-ai-npu-vitis-ai-provider-not-supported).
 
 ## Using the library
 
@@ -176,7 +176,7 @@ The library has the same API version as Arch's `onnxruntime` package, so a progr
 python -c "import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())"
 ```
 
-With `onnxruntime-provider-migraphx` and its add-on `python-onnxruntime-provider-migraphx` installed too, the list includes `MIGraphXExecutionProvider` (untested on AMD hardware, [amd.md](amd.md#using-it)).
+With `onnxruntime-provider-migraphx` and its add-on `python-onnxruntime-provider-migraphx` installed too, the list includes `MIGraphXExecutionProvider` (not tested on AMD hardware, [amd.md](amd.md#using-it)).
 
 The module is for the system's `/usr/bin/python`. A virtual environment with its own `onnxruntime` wheel does not use these libraries.
 
@@ -187,3 +187,5 @@ python -m onnxruntime.training.ortmodule.torch_cpp_extensions.install
 ```
 
 A program that wants TensorRT's built-in plugins also loads the TensorRT environment file ([TensorRT](#tensorrt)).
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

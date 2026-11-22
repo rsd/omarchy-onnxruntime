@@ -4,6 +4,19 @@ This page reports what the recipe's checks measured for two builds, and the cond
 
 The figures are for the raw model only, without any pre- or post-processing. They are indicative: the desktop was in use during the runs. The [smoke test](../tools/ort-smoke/README.md) and the [model check](../tools/ort-model-check/README.md) produced them. Terms such as TF32 and fp16 are in the [glossary](glossary.md).
 
+## What is tested
+
+The flags **tested** and **not tested** in [hardware.md](hardware.md) come from this page. Everything that ran on the test machine (below) is tested. Everything else the packages are built for is supported and not tested.
+
+| Engine | Tested on | Not tested |
+|---|---|---|
+| CPU provider, oneDNN | Intel Core Ultra 9 275HX (the oneDNN provider needs the CPU fallback on the four models, [below](#the-onednn-provider-against-the-cpu)) | other CPUs |
+| CUDA 13 (preset `rtx`, and a `120` build) | GeForce RTX 5080 Laptop GPU (`sm_120`) | `sm_75`, `sm_80`, `sm_86`, `sm_89`, `sm_90`, `sm_100`, `sm_103` |
+| TensorRT | GeForce RTX 5080 Laptop GPU (`sm_120`) | other NVIDIA GPUs |
+| OpenVINO `CPU`, `GPU` and `NPU` devices | the CPU, integrated GPU and NPU of the Core Ultra 9 275HX | other Intel CPUs, GPUs (Arc included) and NPUs |
+| CUDA 12 legacy | `sm_120` of the RTX 5080 Laptop GPU, with the CUDA 12 libraries | `sm_60`, `sm_61`, `sm_70` and `sm_75` to `sm_89` on real cards |
+| MIGraphX | none (a load check only, on a machine with no AMD GPU) | every AMD GPU |
+
 ## Conditions
 
 | | |
@@ -322,3 +335,5 @@ The packages were then installed with `pacman` and run from `/usr`, with no envi
 - The CUDA 12 legacy provider on Pascal or Volta hardware; see [above](#not-tested).
 - The installed CUDA 12 line. The `onnxruntime-provider-cuda12-legacy` package was not installed, because three of its dependencies are AUR builds.
 - Training with PyTorch. `python-pytorch` was not installed, so `onnxruntime.training` was only imported without it ([above](#installed-packages)), and training itself was not run.
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

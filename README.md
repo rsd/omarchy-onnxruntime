@@ -7,8 +7,8 @@ ONNX (Open Neural Network Exchange) is a standard file format for trained neural
 ## What you get
 
 - **Every engine in one installation.** The CPU, oneDNN (Intel's CPU math library), CUDA (NVIDIA's GPU platform), TensorRT (NVIDIA's inference optimizer) and OpenVINO (Intel's toolkit for Intel CPUs, GPUs and NPUs) work side by side.
-- **A CUDA 12 package** for NVIDIA Pascal and Volta, which CUDA 13 dropped. It is untested on that hardware.
-- **A MIGraphX package** for AMD GPUs. It is a source build only and untested on AMD hardware.
+- **A CUDA 12 package** for NVIDIA Pascal and Volta, which CUDA 13 dropped. It is supported, and not tested on that hardware.
+- **A MIGraphX package** for AMD GPUs. It is a source build only (no prebuilt package). It is supported for the GPUs in Arch's ROCm build list, and not tested on AMD hardware.
 - **The training operators** and the Python module `onnxruntime`, with `onnxruntime.training`.
 - **The same API as Arch's package.** Version 1.29.0 is the release Arch ships, so programs built against Arch's `onnxruntime` see the same API.
 
@@ -55,9 +55,12 @@ These are pacman packages. On another Linux distribution, use ONNX Runtime from 
 ## Limits
 
 - **Arch Linux and Omarchy on x86_64 only.** The packages are pacman packages.
-- **Untested hardware:** the CUDA 12 package on NVIDIA Pascal and Volta, and the MIGraphX package on AMD GPUs ([docs/hardware.md](docs/hardware.md), [docs/amd.md](docs/amd.md)). The rest is tested on one machine, an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX ([docs/choosing.md](docs/choosing.md)).
-- **Not packaged:** NVIDIA Maxwell, the AMD Ryzen AI NPU, older Intel graphics, and AMD Polaris and Vega APUs ([docs/hardware.md](docs/hardware.md)).
+- **Supported, tested:** CUDA and TensorRT on an NVIDIA GeForce RTX 5080 Laptop GPU (`sm_120`); OpenVINO on the CPU, integrated GPU and NPU of an Intel Core Ultra 9 275HX; and the CPU and oneDNN providers on that CPU ([docs/results.md](docs/results.md), [docs/choosing.md](docs/choosing.md)).
+- **Supported, not tested:** every other hardware target the packages are built for. That means NVIDIA GPUs other than `sm_120` (including Pascal and Volta, through the CUDA 12 package), AMD GPUs in Arch's ROCm build list (through the MIGraphX package, a source build), Intel hardware other than the test machine's, and Intel Gen8, Gen9 and Gen11 integrated GPUs with the AUR's `intel-compute-runtime-legacy` driver, which you install yourself because Intel's current driver dropped them ([docs/hardware.md](docs/hardware.md), [docs/amd.md](docs/amd.md), [docs/cuda12-legacy.md](docs/cuda12-legacy.md)).
+- **Not supported:** NVIDIA Maxwell (the fp16 kernels of ONNX Runtime 1.29 need `sm_53` or later), the AMD Ryzen AI NPU (its provider is a proprietary AMD library), and AMD Polaris and Vega APUs (not in Arch's ROCm build list). The reasons are in [docs/hardware.md](docs/hardware.md).
 - **NCCL on every machine.** The prebuilt core depends on `nccl`, 364.18 MiB installed, even without an NVIDIA GPU. Only a source build with `ORTF_NCCL=0` leaves it out ([docs/choosing.md](docs/choosing.md#where-arch-is-the-better-choice)).
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.
 
 ## Documentation
 
@@ -67,8 +70,8 @@ These are pacman packages. On another Linux distribution, use ONNX Runtime from 
 | [docs/choosing.md](docs/choosing.md) | This set versus Arch's `onnxruntime-*` packages: what each offers, a comparison table, which package for which hardware |
 | [docs/packages.md](docs/packages.md) | The packages, their dependencies and sizes, and why they are split this way |
 | [docs/engines.md](docs/engines.md) | Per-engine notes (CUDA, TensorRT, OpenVINO, oneDNN), the vendor runtimes, using the library from C, Rust and Python |
-| [docs/hardware.md](docs/hardware.md) | Which GPUs, CPUs and NPUs each engine covers; what is not packaged |
-| [docs/amd.md](docs/amd.md) | AMD GPUs: the MIGraphX provider (untested), how to install it and how to report a result |
+| [docs/hardware.md](docs/hardware.md) | Which GPUs, CPUs and NPUs each engine covers; what is not supported |
+| [docs/amd.md](docs/amd.md) | AMD GPUs: the MIGraphX provider (supported, not tested), how to install it and how to report a result |
 | [docs/cuda12-legacy.md](docs/cuda12-legacy.md) | NVIDIA Pascal and Volta: the CUDA 12 provider, install and build |
 | [docs/build-from-source.md](docs/build-from-source.md) | Building and installing from the recipe, step by step |
 | [docs/build.md](docs/build.md) | Build inputs, CUDA architectures, package names, dependency mirroring, the source mirror, ccache, time, memory and disk |

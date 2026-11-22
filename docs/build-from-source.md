@@ -102,7 +102,7 @@ The names above are those of the default build (the CUDA preset `rtx`). A subset
   - An `ORTF_NCCL=0` build also gives every package of a build with CUDA a `-nccloff` name. Its packages never install beside the NCCL ones ([build.md](build.md#nccl-and-the-nccloff-packages)).
   - On a machine with no NVIDIA GPU, this is how to avoid the `nccl` dependency (364.18 MiB installed). No `-nccloff` package is prebuilt.
 - **oneDNN.** `dnnl` is in the default `ORTF_EPS`, so `onnxruntime-provider-dnnl-1.29.0-7-x86_64.pkg.tar.zst` is among the files. It is optional and not needed on most machines ([engines.md](engines.md#onednn)). Leave `dnnl` out of `ORTF_EPS` to skip it.
-- **MIGraphX.** The provider is built from its own recipe, `onnxruntime-split-migraphx` ([amd.md](amd.md#building-it)). It is **untested on AMD hardware**. With `migraphx` in `ORTF_EPS` of this recipe, there is also `onnxruntime-provider-migraphx-nccloff-1.29.0-7-x86_64.pkg.tar.zst` to name. This command is an AMD-only local build:
+- **MIGraphX.** The provider is built from its own recipe, `onnxruntime-split-migraphx` ([amd.md](amd.md#building-it)). It is supported for the GPUs in Arch's ROCm build list and **not tested on AMD hardware**. With `migraphx` in `ORTF_EPS` of this recipe, there is also `onnxruntime-provider-migraphx-nccloff-1.29.0-7-x86_64.pkg.tar.zst` to name. This command is an AMD-only local build:
 
   ```bash
   ORTF_EPS=migraphx ORTF_NCCL=0 makepkg -d -f
@@ -149,3 +149,5 @@ See [Check that it works](../INSTALL.md#check-that-it-works) in the install guid
 ## Check the recipe without the vendor runtimes
 
 A CPU-only build checks the recipe on a machine without CUDA, TensorRT or OpenVINO: [build.md](build.md#checking-the-recipe-without-the-vendor-runtimes).
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

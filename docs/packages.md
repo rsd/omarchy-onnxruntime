@@ -14,7 +14,7 @@ The recipe `onnxruntime-split/PKGBUILD` is one build of the upstream source tag 
 | `onnxruntime-provider-openvino` | The OpenVINO provider (Intel CPU, GPU and NPU devices) | `onnxruntime-core`, `openvino` |
 | `onnxruntime-provider-dnnl` | The oneDNN provider (CPU). It is optional and meant for Intel server CPUs, not for most desktops and laptops (use the CPU provider or OpenVINO there). oneDNN 3.11.3 is built from source and linked into the provider statically, so the package depends on no oneDNN package and installs no `libdnnl.so`. It carries oneDNN's licence and third-party notices (`onednn-LICENSE`, `onednn-THIRD-PARTY-PROGRAMS`). See [engines.md](engines.md#onednn) | `onnxruntime-core`, `libgomp` |
 | `python-onnxruntime-core` | The Python module, with `onnxruntime.training`. Its links to the provider libraries dangle until that provider's package is installed. Provides `python-onnxruntime` | `onnxruntime-core`, `nccl`, `python` and its packages, and for the training modules `python-cerberus`, `python-h5py`, `python-onnx`, `python-sympy` and `python-setuptools` |
-| `python-onnxruntime-provider-migraphx` | The Python add-on of the MIGraphX line. It comes from the pkgbase `onnxruntime-split-migraphx`, not from this recipe. It holds one symbolic link, `onnxruntime/capi/libonnxruntime_providers_migraphx.so` in the system Python's site-packages, to the provider's library, so that the Python module lists `MIGraphXExecutionProvider`. Source only, untested on AMD hardware ([amd.md](amd.md#the-package)) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python` (bounded to its minor) |
+| `python-onnxruntime-provider-migraphx` | The Python add-on of the MIGraphX line. It comes from the pkgbase `onnxruntime-split-migraphx`, not from this recipe. It holds one symbolic link, `onnxruntime/capi/libonnxruntime_providers_migraphx.so` in the system Python's site-packages, to the provider's library, so that the Python module lists `MIGraphXExecutionProvider`. Source only (no prebuilt package); supported, not tested on AMD hardware ([amd.md](amd.md#the-package)) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python` (bounded to its minor) |
 
 Every package also depends on the system libraries it links (`glibc`, `libgcc`, `libstdc++`). The providers and the Python module depend on `onnxruntime-core` at the same `pkgver-pkgrel`. [dependencies.md](dependencies.md) has the full dependency list with version bounds.
 
@@ -22,8 +22,8 @@ Every package also depends on the system libraries it links (`glibc`, `libgcc`, 
 
 Two more packages come from separate recipes, each with its own `pkgrel`:
 
-- **`onnxruntime-provider-cuda12-legacy`**, the CUDA provider built with CUDA 12.9 for Pascal and Volta (pkgbase `onnxruntime-split-cuda12`): [cuda12-legacy.md](cuda12-legacy.md).
-- **`onnxruntime-provider-migraphx`**, the MIGraphX provider for AMD GPUs (pkgbase `onnxruntime-split-migraphx`). It is source only and **untested on AMD hardware**. Its Python add-on `python-onnxruntime-provider-migraphx` is in the table above: [amd.md](amd.md).
+- **`onnxruntime-provider-cuda12-legacy`**, the CUDA provider built with CUDA 12.9 for Pascal and Volta (pkgbase `onnxruntime-split-cuda12`; supported, not tested on that hardware): [cuda12-legacy.md](cuda12-legacy.md).
+- **`onnxruntime-provider-migraphx`**, the MIGraphX provider for AMD GPUs (pkgbase `onnxruntime-split-migraphx`). It is source only (no prebuilt package). It is supported for the GPUs in Arch's ROCm build list and **not tested on AMD hardware**. Its Python add-on `python-onnxruntime-provider-migraphx` is in the table above: [amd.md](amd.md).
 
 Both load into the core of this recipe and depend on `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`. [The joint release rule](#the-core-and-the-other-lines-providers-release-together) explains the pair. The MIGraphX add-on depends on its provider at the same version, not on the core.
 
@@ -100,3 +100,5 @@ Here the providers are separate shared objects (`libonnxruntime_providers_<provi
 - The core package runs without any of them.
 
 A machine installs the engines it has and nothing else, for example the core and the OpenVINO package on a machine without an NVIDIA GPU. How the loading works is in [engines.md](engines.md#how-the-providers-load).
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

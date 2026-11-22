@@ -109,4 +109,6 @@ The AUR branch is `master`. Later releases are the same push with the new versio
 
 ## After a user confirms it works
 
-The packages stay labelled "untested on AMD hardware" (the provider's `pkgdesc`, which is the recipe's, and these docs) until an AMD user confirms it with a report ([amd.md](amd.md#reporting-a-result)). Removing the label is a change to `onnxruntime-split/PKGBUILD` and the docs, then a regeneration and a `line_pkgrel` bump. The maintainer decides when.
+The packages stay flagged not tested on AMD hardware (in these docs, and in the provider's `pkgdesc`, which is the recipe's and still reads "untested on AMD hardware") until an AMD user confirms it with a report ([amd.md](amd.md#reporting-a-result)). Removing the label is a change to `onnxruntime-split/PKGBUILD` and the docs, then a regeneration and a `line_pkgrel` bump. The maintainer decides when.
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

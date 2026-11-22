@@ -17,6 +17,8 @@ For each target, the program creates a session with only that execution provider
 | `dnnl` | oneDNN (default options) | host CPU |
 | `migraphx-load` | MIGraphX, device 0 (not in the default set, see below) | AMD GPU |
 
+On the test machine (an RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX) every target except `migraphx-load` reported `ok`, and `migraphx-load` reported `ok (no device)`, as designed for a machine without an AMD GPU ([results.md](../../docs/results.md)). A target for hardware that [hardware.md](../../docs/hardware.md) marks not tested has not run there.
+
 For every target except `cpu`, the program sets the session option `session.disable_cpu_ep_fallback=1`. A provider that registers but cannot take the graph therefore fails loudly. It does not run quietly on the CPU and report success.
 
 The model (`make-model.py`) is `Y = Add(Relu(Conv3x3(X, W, B)), A)` with `X` of shape `[1, 3, 16, 16]` and `Y` of shape `[1, 4, 16, 16]`. All shapes are static, which some accelerators (NPUs) require. Weights and the input are multiples of 1/8, so every intermediate value is exact in fp16 as well as fp32. A correct engine reproduces the reference exactly. The per-target tolerance only leaves room for reduced-precision paths (see the comment above the target table in `smoke.c`).
@@ -131,6 +133,8 @@ C API users should keep the environment for the life of the process and not rele
 
 ### TensorRT and its plugin library
 
-The C API cannot show whether TensorRT's default plugin library loaded, so the report cannot show it. With TensorRT installed under `/opt/nvidia/tensorrt`, ONNX Runtime loads `libnvinfer_plugin.so.11` with `dlopen` from inside `libonnxruntime.so`, whose RUNPATH is only `$ORIGIN` (`/usr/lib`). With `nvidia-tensorrt-sdk-local` pkgrel 4 or later, its loader entry makes them findable. Otherwise the built-in TensorRT plugins are found only if you source the TensorRT environment file `/usr/share/nvidia-tensorrt/nvidia-tensorrt.env` (from the `nvidia-tensorrt` package) or `LD_LIBRARY_PATH` includes the TensorRT `lib` directory. The tiny model in this test needs no plugin, so a `tensorrt` `ok` says nothing about them. This is unverified on hardware.
+The C API cannot show whether TensorRT's default plugin library loaded, so the report cannot show it. With TensorRT installed under `/opt/nvidia/tensorrt`, ONNX Runtime loads `libnvinfer_plugin.so.11` with `dlopen` from inside `libonnxruntime.so`, whose RUNPATH is only `$ORIGIN` (`/usr/lib`). With `nvidia-tensorrt-sdk-local` pkgrel 4 or later, its loader entry makes them findable. Otherwise the built-in TensorRT plugins are found only if you source the TensorRT environment file `/usr/share/nvidia-tensorrt/nvidia-tensorrt.env` (from the `nvidia-tensorrt` package) or `LD_LIBRARY_PATH` includes the TensorRT `lib` directory. The tiny model in this test needs no plugin, so a `tensorrt` `ok` says nothing about them. This has not been tested on hardware.
 
 Only the C API is used. The program builds against headers from ONNX Runtime 1.17 or newer. At run time it uses the newest API version that both the header and the library support.
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

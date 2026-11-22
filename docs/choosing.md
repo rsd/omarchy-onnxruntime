@@ -5,7 +5,7 @@ Pick one ONNX Runtime package set per machine. Arch's `extra` repository and thi
 The costs:
 
 - It comes from the AUR, not from a repository.
-- Two of its packages (MIGraphX and CUDA 12) have not run on their hardware.
+- Two of its packages (MIGraphX and CUDA 12) are not tested on their hardware.
 - Its default packages pull in NCCL on every machine ([below](#where-arch-is-the-better-choice)).
 
 Terms such as pkgrel, `-bin` and SM are in the [glossary](glossary.md).
@@ -30,7 +30,7 @@ It shows five builds of 1.29.0 (pkgrel 3 on 2026-11-17), each with a `python-` t
 
 The `python-onnxruntime-*` twins have the same dependencies plus `python-numpy`, `python-psutil`, `python-py-cpuinfo`, `python-sympy`, `python-scipy`, `python-pillow`, `python-flatbuffers`, `python-protobuf` and `python-packaging` (and no `cudnn-frontend`). Their installed sizes are 64.41 MiB (`cpu`), 657.69 MiB (`cuda`), 658.79 MiB (`opt-cuda`), 65.44 MiB (`rocm`) and 66.45 MiB (`opt-rocm`).
 
-Arch's recipe builds the CUDA variants for the architectures `75` to `121`, a list that includes the Arm-only Jetson and Thor targets. Blackwell (`sm_120`) is supported. Every variant is configured with the training operators. The ROCm variants are configured with ONNX Runtime's MIGraphX provider: ONNX Runtime 1.29 has no ROCm provider, and the HIP architecture list in that recipe has no effect ([amd.md](amd.md#what-exists-for-amd-gpus)). The recipe enables neither TensorRT nor OpenVINO.
+Arch's recipe builds the CUDA variants for the architectures `75` to `121`, a list that includes the Arm-only Jetson and Thor targets. Blackwell (`sm_120`) is in that list. Every variant is configured with the training operators. The ROCm variants are configured with ONNX Runtime's MIGraphX provider: ONNX Runtime 1.29 has no ROCm provider, and the HIP architecture list in that recipe has no effect ([amd.md](amd.md#what-exists-for-amd-gpus)). The recipe enables neither TensorRT nor OpenVINO.
 
 ## Why one set per machine
 
@@ -47,13 +47,13 @@ Programs built against Arch's `onnxruntime` keep working. `onnxruntime-core` pro
 | Version | 1.29.0 (pkgrel 3) | 1.29.0 (pkgrel 7; CUDA 12 line 2, MIGraphX line 1) |
 | Engines | CPU; CUDA, MIGraphX and oneDNN depending on the build | CPU, CUDA, TensorRT, OpenVINO, oneDNN; MIGraphX in its own package |
 | Combining engines | one build per machine: CUDA and MIGraphX never together | one package per engine, so CUDA, TensorRT, OpenVINO and oneDNN together |
-| NVIDIA Turing (RTX 20) and newer | yes (CUDA 13, `75` to `121`) | yes (CUDA 13; presets `rtx`: `75 86 89 120` and `all`: `75 80 86 89 90 100 103 120`) |
-| NVIDIA Pascal and Volta | no (CUDA 13 builds start at `sm_75`) | CUDA 12 line, `onnxruntime-provider-cuda12-legacy`; **untested on that hardware** ([cuda12-legacy.md](cuda12-legacy.md)) |
-| NVIDIA Maxwell | no | no |
+| NVIDIA Turing (RTX 20) and newer | yes (CUDA 13, `75` to `121`) | supported (CUDA 13; presets `rtx`: `75 86 89 120` and `all`: `75 80 86 89 90 100 103 120`); `sm_120` tested, the other architectures not tested ([hardware.md](hardware.md#nvidia)) |
+| NVIDIA Pascal and Volta | no (CUDA 13 builds start at `sm_75`) | CUDA 12 line, `onnxruntime-provider-cuda12-legacy`; supported, **not tested** on that hardware ([cuda12-legacy.md](cuda12-legacy.md)) |
+| NVIDIA Maxwell | no | not supported: ONNX Runtime 1.29's fp16 kernels need `sm_53` or later ([cuda12-legacy.md](cuda12-legacy.md#who-needs-it)) |
 | TensorRT | not enabled | yes |
 | Intel CPU, GPU and NPU (OpenVINO) | not enabled | yes ([hardware.md](hardware.md#intel-openvino-provider)) |
 | oneDNN (CPU) | in the CUDA and ROCm builds, using Arch's shared `onednn` package | `onnxruntime-provider-dnnl` (optional, for Intel server CPUs): oneDNN 3.11.3 built here and linked statically; no dependency on Arch's `onednn` ([engines.md](engines.md#onednn)) |
-| AMD GPUs | `onnxruntime-rocm`, `onnxruntime-opt-rocm` (MIGraphX) | `onnxruntime-provider-migraphx` and its Python add-on `python-onnxruntime-provider-migraphx`, AUR source build only; **untested on AMD hardware** ([amd.md](amd.md)) |
+| AMD GPUs | `onnxruntime-rocm`, `onnxruntime-opt-rocm` (MIGraphX) | `onnxruntime-provider-migraphx` and its Python add-on `python-onnxruntime-provider-migraphx`, AUR source build only; supported for Arch's ROCm build list, **not tested** on AMD hardware ([amd.md](amd.md)) |
 | Training operators | yes, in every build | yes; the Python module carries `onnxruntime.training` (needs `python-pytorch`, optional) |
 | NCCL | `nccl` in the CUDA builds, `rccl` in the ROCm builds | NCCL on by default, so `onnxruntime-core` depends on `nccl`; `ORTF_NCCL=0` source builds drop it ([build.md](build.md#nccl-and-the-nccloff-packages)) |
 | CPU baseline | generic x86-64, except the `opt` builds, compiled with `-march=haswell` (AVX2 CPUs only) | generic x86-64 for every package, for any x86-64 CPU |
@@ -63,7 +63,7 @@ Programs built against Arch's `onnxruntime` keep working. `onnxruntime-core` pro
 | How you install it | `pacman -S` from `extra` | prebuilt: AUR `-bin` packages, whose files are GitHub release assets; or built from the AUR source packages; MIGraphX is source only |
 | Maintenance | the Arch packagers, with the repository | one maintainer; a vendor upgrade past a bound is followed by a rebuild and a pkgrel bump |
 
-This repository's hardware has been tested on one machine only: an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX with its integrated GPU and NPU ([results.md](results.md)). The CUDA 12 and MIGraphX packages have not run on Pascal, Volta or AMD hardware. This page makes no statement about the hardware Arch's packages were tested on.
+This repository's hardware is **tested** on one machine only: an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX with its integrated GPU and NPU ([results.md](results.md)). Everything else the packages are built for is supported and **not tested**, including the CUDA 12 and MIGraphX packages on Pascal, Volta and AMD hardware ([hardware.md](hardware.md)). This page makes no statement about the hardware Arch's packages were tested on.
 
 ## Which of this repository's packages for which hardware
 
@@ -76,11 +76,12 @@ Install the core, then the packages of the engines you have ([INSTALL.md](../INS
 | Intel Xeon with AVX-512 or AMX | the core, and optionally `onnxruntime-provider-dnnl` | oneDNN is meant for int8 and bf16 models that it can take in one piece; measure against the CPU provider ([engines.md](engines.md#onednn)) |
 | AMD CPU | `onnxruntime-core` | the CPU provider; the oneDNN provider is not meant for it |
 | Intel GPU (Xe, Arc) or NPU | `onnxruntime-provider-openvino` and the device's plugin and driver | [engines.md](engines.md#openvino) |
+| Intel Gen8, Gen9 or Gen11 integrated GPU | `onnxruntime-provider-openvino`, with the AUR's `intel-compute-runtime-legacy` in place of `intel-compute-runtime` | supported with that legacy driver, which you install yourself; not tested: [hardware.md](hardware.md#intel-openvino-provider) |
 | NVIDIA Turing (RTX 20, GTX 16) to Blackwell (RTX 50) | `onnxruntime-provider-cuda13-rtx`, and `onnxruntime-provider-tensorrt-cuda13` for TensorRT | `onnxruntime-provider-cuda13-all` for A100, H100 and B200-class GPUs |
-| NVIDIA Pascal or Volta | `onnxruntime-provider-cuda12-legacy` | replaces the CUDA 13 setup on that machine; untested: [cuda12-legacy.md](cuda12-legacy.md) |
-| AMD GPU in Arch's ROCm build list (Vega, RDNA 1 to 4, Instinct) | `onnxruntime-provider-migraphx` | AUR source build, with the Python add-on; untested: [amd.md](amd.md#which-amd-gpus) |
+| NVIDIA Pascal or Volta | `onnxruntime-provider-cuda12-legacy` | replaces the CUDA 13 setup on that machine; supported, not tested: [cuda12-legacy.md](cuda12-legacy.md) |
+| AMD GPU in Arch's ROCm build list (Vega, RDNA 1 to 4, Instinct) | `onnxruntime-provider-migraphx` | AUR source build, with the Python add-on; supported, not tested: [amd.md](amd.md#which-amd-gpus) |
 | Model training in Python | `python-onnxruntime-core`, and `python-pytorch` | the training modules need PyTorch even to import |
-| NVIDIA Maxwell, AMD Polaris and Vega APUs, older Intel graphics, the Ryzen AI NPU | no package | [hardware.md](hardware.md) |
+| NVIDIA Maxwell, AMD Polaris and Vega APUs, the Ryzen AI NPU | no package: not supported | the reasons are in [hardware.md](hardware.md) |
 
 Engines can be combined. A laptop with an Intel CPU, an NVIDIA GPU and an NPU takes the core, the CUDA, TensorRT and OpenVINO packages, and, optionally, the oneDNN one. The oneDNN provider is meant for Intel server CPUs. On a laptop it was 7 to 19 times slower than the CPU provider in the [measurements](results.md#release-1290-7).
 
@@ -99,3 +100,5 @@ Engines can be combined. A laptop with an Intel CPU, an NVIDIA GPU and an NPU ta
 - **You want a build compiled for AVX2** (`onnxruntime-opt-cuda`, `onnxruntime-opt-rocm`). Those are Arch's. Here every package targets generic x86-64. ONNX Runtime's own CPU math library (MLAS) still picks its AVX2 or AVX-512 kernels at run time, as it does in Arch's generic builds.
 
 Sources: `pacman -Ss onnxruntime` and `pacman -Si` for each package (2026-11-17). Arch's [PKGBUILD](https://gitlab.archlinux.org/archlinux/packaging/packages/onnxruntime) for the engines, the architectures and the training and NCCL options.
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

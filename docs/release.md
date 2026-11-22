@@ -23,7 +23,7 @@ What is released: the six packages of the `rtx` build, and the CUDA package of a
 
 Nothing else is released:
 
-- No MIGraphX package, provider or add-on. The provider has never run on AMD hardware, and `gen-bin.sh` refuses the line.
+- No MIGraphX package, provider or add-on. The provider is not tested on AMD hardware, so no prebuilt binary is published, and `gen-bin.sh` refuses the line.
 - No `-nccloff` package. A build with `ORTF_NCCL=0` is for local use.
 
 No package contains a vendor library. The vendor runtimes are dependencies ([README](../README.md#licence-and-redistribution)).
@@ -251,3 +251,5 @@ The packages `onnxruntime-provider-migraphx` and `python-onnxruntime-provider-mi
 - **A change to the packages** needs a rebuild, a new `pkgrel` in `onnxruntime-split/PKGBUILD`, a new `.SRCINFO` and a new release (a new tag). The CUDA 12 and MIGraphX lines are rebuilt with it only when the change alters the interface between the core and the providers, which raises `_ortf_core_abi_pkgrel`: [the core pin](release-cuda12.md#the-core-pin).
 - **A vendor bump past a dependency bound** (OpenVINO 2026.5, Python 3.15, a new TensorRT minor, and so on; [the bounds](dependencies.md#the-version-bounds)) makes pacman refuse the vendor upgrade until the packages are rebuilt. Rebuild against the new version, bump `pkgrel`, and release again. `scripts/check-deps.sh` on the released files shows when one is due.
 - **A new upstream ONNX Runtime version** is not described here, except that its source mirror comes first. [The source mirror](#the-source-mirror) is made and published before the recipe's release, and the recipe's mirror checksum is the new archive's. `prepare()` checks the source's commit against `_ortf_commit` and each mirrored archive's URL and SHA-1 against `cmake/deps.txt` ([build.md](build.md#dependencies-are-mirrored-not-fetched)), so a bump that misses one fails at the start of the build.
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

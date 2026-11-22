@@ -16,19 +16,19 @@ Terms such as pkgrel, `-bin`, SM and execution provider (EP) are in the [glossar
 
 The core, `onnxruntime-core`, is always needed. It runs on any x86-64 CPU and needs no vendor runtime. Add one provider package for each engine you want.
 
-| You have | Install | Vendor runtime you need first |
-|---|---|---|
-| Any x86-64 CPU | `onnxruntime-core` | none |
-| NVIDIA Turing (RTX 20, GTX 16) to Blackwell (RTX 50) | `onnxruntime-provider-cuda13-rtx` | `nvidia-utils`, `cuda`, `cudnn` |
-| NVIDIA A100, H100 or B200-class GPU | `onnxruntime-provider-cuda13-all` instead of `-rtx` | the same |
-| NVIDIA GPU, with TensorRT | `onnxruntime-provider-tensorrt-cuda13`, beside a CUDA 13 package | the same, plus TensorRT ([step 3](#3-install-tensorrt)) |
-| Intel CPU, GPU or NPU | `onnxruntime-provider-openvino` | `openvino`, plus a plugin and driver for each Intel GPU or NPU |
-| Intel Xeon with AVX-512 or AMX (optional) | `onnxruntime-provider-dnnl` | none (oneDNN is built in) |
-| Python | `python-onnxruntime-core` | none |
-| NVIDIA Pascal or Volta | `onnxruntime-provider-cuda12-legacy` | CUDA 12 userland: [Older NVIDIA GPUs](#older-nvidia-gpus-pascal-and-volta-cuda-12) |
-| AMD GPU | `onnxruntime-provider-migraphx` | `migraphx`, `hip-runtime-amd`: [amd.md](docs/amd.md#installing) |
+| You have | Install | Vendor runtime you need first | Status |
+|---|---|---|---|
+| Any x86-64 CPU | `onnxruntime-core` | none | tested on the Core Ultra 9 275HX; other CPUs not tested |
+| NVIDIA Turing (RTX 20, GTX 16) to Blackwell (RTX 50) | `onnxruntime-provider-cuda13-rtx` | `nvidia-utils`, `cuda`, `cudnn` | tested on `sm_120` (RTX 5080 Laptop GPU); other architectures not tested |
+| NVIDIA A100, H100 or B200-class GPU | `onnxruntime-provider-cuda13-all` instead of `-rtx` | the same | not tested |
+| NVIDIA GPU, with TensorRT | `onnxruntime-provider-tensorrt-cuda13`, beside a CUDA 13 package | the same, plus TensorRT ([step 3](#3-install-tensorrt)) | tested on `sm_120`; other GPUs not tested |
+| Intel CPU, GPU or NPU | `onnxruntime-provider-openvino` | `openvino`, plus a plugin and driver for each Intel GPU or NPU | tested on the CPU, integrated GPU and NPU of the Core Ultra 9 275HX; other Intel hardware not tested |
+| Intel Xeon with AVX-512 or AMX (optional) | `onnxruntime-provider-dnnl` | none (oneDNN is built in) | tested on the Core Ultra 9 275HX only; not tested on Xeon |
+| Python | `python-onnxruntime-core` | none | tested |
+| NVIDIA Pascal or Volta | `onnxruntime-provider-cuda12-legacy` | CUDA 12 userland: [Older NVIDIA GPUs](#older-nvidia-gpus-pascal-and-volta-cuda-12) | not tested on Pascal or Volta (ran on `sm_120` only) |
+| AMD GPU | `onnxruntime-provider-migraphx` | `migraphx`, `hip-runtime-amd`: [amd.md](docs/amd.md#installing) | not tested (a load check only, on a machine with no AMD GPU) |
 
-Not sure which engine fits your hardware? See [docs/hardware.md](docs/hardware.md) for coverage and [docs/engines.md](docs/engines.md) for what each engine needs. [docs/choosing.md](docs/choosing.md) compares this set with Arch's own `onnxruntime-*` packages.
+Every hardware target in this table is supported. The Status column says tested if it ran on this project's test machine (an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX), and not tested otherwise. Not sure which engine fits your hardware? See [docs/hardware.md](docs/hardware.md) for coverage, the flags and what is not supported, and [docs/engines.md](docs/engines.md) for what each engine needs. [docs/choosing.md](docs/choosing.md) compares this set with Arch's own `onnxruntime-*` packages.
 
 Combine engines freely. A laptop with an Intel CPU, an NVIDIA GPU and an NPU takes the core and the CUDA, TensorRT and OpenVINO packages.
 
@@ -58,7 +58,7 @@ sudo pacman -S --needed nvidia-utils cuda cudnn
 # OpenVINO provider: CPU, Intel GPU and Intel NPU devices
 sudo pacman -S --needed openvino openvino-intel-gpu-plugin openvino-intel-npu-plugin intel-compute-runtime level-zero-loader intel-npu-driver
 
-# MIGraphX provider (AMD GPUs; untested on AMD hardware)
+# MIGraphX provider (AMD GPUs; supported, not tested)
 sudo pacman -S --needed migraphx hip-runtime-amd
 ```
 
@@ -189,7 +189,7 @@ The release files are named without `-bin` and carry the same dependencies, so t
 
 What the prebuilt set leaves out:
 
-- **MIGraphX.** The provider and its Python add-on are not prebuilt, because the provider has never run on AMD hardware. They are source packages on the AUR. For an AMD GPU, this command builds both from that package base, after the core is installed ([amd.md](docs/amd.md#installing)):
+- **MIGraphX.** The provider and its Python add-on are not prebuilt, because it is not tested on AMD hardware, and a prebuilt binary would be one nobody has run. They are source packages on the AUR. For an AMD GPU, this command builds both from that package base, after the core is installed ([amd.md](docs/amd.md#installing)):
 
   ```bash
   yay -S onnxruntime-split-migraphx
@@ -369,4 +369,6 @@ See [dependencies.md](docs/dependencies.md#checking-built-packages-scriptscheck-
 
 ### Older NVIDIA GPUs (Pascal and Volta): CUDA 12
 
-CUDA 13, cuDNN 9.11 and the 590 driver series dropped Pascal and Volta, so the CUDA 13 packages cannot use those cards. The CUDA 12 provider `onnxruntime-provider-cuda12-legacy` serves them. It replaces the CUDA 13 setup on that machine and swaps Arch's `nccl` for the AUR's `nccl-cuda12.9`. It is untested on Pascal and Volta hardware. The install steps, the swap from CUDA 13 and the way back are in [cuda12-legacy.md](docs/cuda12-legacy.md#installing).
+CUDA 13, cuDNN 9.11 and the 590 driver series dropped Pascal and Volta, so the CUDA 13 packages cannot use those cards. The CUDA 12 provider `onnxruntime-provider-cuda12-legacy` serves them. It replaces the CUDA 13 setup on that machine and swaps Arch's `nccl` for the AUR's `nccl-cuda12.9`. It is supported for them and not tested on Pascal and Volta hardware. The install steps, the swap from CUDA 13 and the way back are in [cuda12-legacy.md](docs/cuda12-legacy.md#installing).
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.
