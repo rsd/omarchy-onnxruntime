@@ -96,7 +96,7 @@ Notes:
 
 Do this step only for the TensorRT provider. TensorRT is not in Arch's repositories. Install one of these:
 
-- **`nvidia-tensorrt-sdk-local`** from the [omarchy-nvidia-sdks](https://github.com/rsd/omarchy-nvidia-sdks) repository (directory `nvidia-tensorrt`). It packages your own download of NVIDIA TensorRT 11.4 under `/opt/nvidia/tensorrt`. It adds an environment file, `/usr/share/nvidia-tensorrt/nvidia-tensorrt.env`. You download the archive from NVIDIA yourself, after accepting its licence. That repository's `docs/tensorrt.md` has the download, the options and the checks. The build and install commands, from that repository, where `<version>` is the version `makepkg` prints in the file name it writes:
+- **`nvidia-tensorrt-sdk-local`** from the [omarchy-nvidia-sdks](https://github.com/rsd/omarchy-nvidia-sdks) repository (directory `nvidia-tensorrt`). It packages your own download of NVIDIA TensorRT 11.4 under `/opt/nvidia/tensorrt`. From pkgrel 4 it adds a loader entry, so every program finds TensorRT without an environment file. It still ships `/usr/share/nvidia-tensorrt/nvidia-tensorrt.env`, for compatibility. You download the archive from NVIDIA yourself, after accepting its licence. That repository's `docs/tensorrt.md` has the download, the options and the checks. The build and install commands, from that repository, where `<version>` is the version `makepkg` prints in the file name it writes:
 
   ```bash
   cd nvidia-tensorrt
@@ -105,7 +105,7 @@ Do this step only for the TensorRT provider. TensorRT is not in Arch's repositor
   sudo pacman -U nvidia-tensorrt-sdk-local-<version>-x86_64.pkg.tar
   ```
 
-  Use pkgrel 2 or later. Pkgrel 2 provides `tensorrt=11.4.0.106` and `nvidia-tensorrt-sdk`. Pkgrel 1 provides only `nvidia-tensorrt-sdk`, so it does not satisfy the provider package's `tensorrt` dependency. Install pkgrel 2 over it.
+  Use pkgrel 2 or later. Pkgrel 2 provides `tensorrt=11.4.0.106` and `nvidia-tensorrt-sdk`. Pkgrel 1 provides only `nvidia-tensorrt-sdk`, so it does not satisfy the provider package's `tensorrt` dependency. Pkgrel 4 or later also needs no environment file. Install a newer pkgrel over an older one.
 
 - **The AUR's `tensorrt`**, which installs into `/usr` and provides `tensorrt`. Build and install it as you do any AUR package. Its major.minor must match the TensorRT the provider package was built against.
 

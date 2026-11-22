@@ -23,7 +23,7 @@ Against a build tree before installing, point `PYTHONPATH` at the build director
 PYTHONPATH=<build dir> tools/ort-model-check/model-check.py model.onnx
 ```
 
-With TensorRT installed under `/opt`, load the TensorRT environment first, so the provider finds the TensorRT libraries:
+With `nvidia-tensorrt-sdk-local` pkgrel 4 or later, or the AUR's `tensorrt`, you need nothing more. With an older release under `/opt`, load the TensorRT environment first, so the provider finds the TensorRT libraries:
 
 ```bash
 set -a; . /usr/share/nvidia-tensorrt/nvidia-tensorrt.env; set +a

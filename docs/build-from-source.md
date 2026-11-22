@@ -132,13 +132,12 @@ scripts/smoke-test.sh --include onnxruntime-split/src/onnxruntime-1.29.0/include
     --require cpu,cuda,tensorrt,openvino:CPU,openvino:GPU,openvino:NPU
 
 # a real model on every engine
-set -a; . /usr/share/nvidia-tensorrt/nvidia-tensorrt.env; set +a
 PYTHONPATH=onnxruntime-split/src/build tools/ort-model-check/model-check.py model.onnx
 ```
 
 - `--include` points at the source tree and `--libdir` at the build tree.
 - `model.onnx` is a model of your own. The repository ships none.
-- The environment file belongs to `nvidia-tensorrt-sdk-local` and puts TensorRT's `lib/` on `LD_LIBRARY_PATH`. Skip that line when TensorRT is under `/usr`, because the AUR's `tensorrt` does not install the file.
+- `nvidia-tensorrt-sdk-local` pkgrel 4 or later and the AUR's `tensorrt` need no environment file. With an older release, run `set -a; . /usr/share/nvidia-tensorrt/nvidia-tensorrt.env; set +a` before the model check. It puts TensorRT's `lib/` on `LD_LIBRARY_PATH`.
 - Pass only the targets your machine has to `--require`.
 
 The meaning of the options is in the [smoke test](../tools/ort-smoke/README.md#running-it) and [model check](../tools/ort-model-check/README.md#running-it) READMEs. Results of both on a full build are in [results.md](results.md).
