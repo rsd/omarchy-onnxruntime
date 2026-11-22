@@ -21,7 +21,15 @@ If you have an AMD GPU, [reporting a result](#reporting-a-result) is the most us
 
    The second command builds both packages on your machine. It installs `migraphx`, `hip-runtime-amd` and `rccl` as build dependencies.
 
-2. Without a helper, clone `https://aur.archlinux.org/onnxruntime-split-migraphx.git` and run `makepkg -s -f` in it. Then run `pacman -U` on the files it writes, in one transaction, as [INSTALL.md](../INSTALL.md#install-the-packages) asks for one build's files:
+2. Without a helper, clone the AUR package and build it:
+
+   ```bash
+   git clone https://aur.archlinux.org/onnxruntime-split-migraphx.git
+   cd onnxruntime-split-migraphx
+   makepkg -s -f
+   ```
+
+   Then run `pacman -U` on the files it writes, in one transaction, as [INSTALL.md](../INSTALL.md#4-install-the-packages) asks for one build's files:
    - `onnxruntime-provider-migraphx-1.29.0-1-x86_64.pkg.tar.zst`
    - `python-onnxruntime-provider-migraphx-1.29.0-1-x86_64.pkg.tar.zst`, if you use Python.
 
@@ -47,15 +55,31 @@ That makes `-nccloff` packages for local use, untested like the rest.
   ```
 
 - **First session.** It is slow, because MIGraphX compiles the model for the GPU. `ORT_MIGRAPHX_MODEL_CACHE_PATH` enables a compiled-model cache.
-- **Check without a GPU.** `scripts/smoke-test.sh --only cpu,migraphx-load` appends the provider by name and creates a session. On a machine without an AMD GPU the pass is `ok (no device)`: the provider library loaded and failed cleanly with a no-device message, with no crash. The target is not in the default run, because a HIP runtime without a usable device may abort the process. [tools/ort-smoke/README.md](../tools/ort-smoke/README.md#the-two-newest-targets) lists the exact outcomes.
+- **Check without a GPU.** This command appends the provider by name and creates a session:
+
+  ```bash
+  scripts/smoke-test.sh --only cpu,migraphx-load
+  ```
+
+  On a machine without an AMD GPU the pass is `ok (no device)`: the provider library loaded and failed cleanly with a no-device message, with no crash. The target is not in the default run, because a HIP runtime without a usable device may abort the process. [tools/ort-smoke/README.md](../tools/ort-smoke/README.md#the-two-newest-targets) lists the exact outcomes.
 
 ## Reporting a result
 
 Because no one has run it, a report from an AMD GPU is what moves it out of "untested". Open an issue at <https://github.com/rsd/omarchy-onnxruntime/issues> with:
 
 - the GPU model (and `gfx` code, from `rocminfo` if you have it) and the Arch kernel;
-- the ROCm version: `pacman -Q migraphx hip-runtime-amd`;
-- the output of `scripts/smoke-test.sh --only cpu,migraphx-load` (from a clone of this repository, as in [INSTALL.md](../INSTALL.md#check-that-it-works));
+- the ROCm version, from this command:
+
+  ```bash
+  pacman -Q migraphx hip-runtime-amd
+  ```
+
+- the output of this command, from a clone of this repository (the smoke test in [INSTALL.md](../INSTALL.md#check-that-it-works)):
+
+  ```bash
+  scripts/smoke-test.sh --only cpu,migraphx-load
+  ```
+
 - if `python-onnxruntime-core` is installed, the output of the Python command above, which should list `MIGraphXExecutionProvider` once the provider and its add-on `python-onnxruntime-provider-migraphx` are installed;
 - what you ran with the provider, and whether it worked, in a sentence.
 
@@ -129,7 +153,7 @@ cd onnxruntime-split-migraphx
 extra-x86_64-build        # a clean chroot: its makedepends are all in Arch's extra
 ```
 
-- **Prerequisites.** None beyond the chroot tools ([release.md](release.md#one-time-setup)). The chroot installs `migraphx`, `hip-runtime-amd` and `rccl`. A build outside a chroot needs them installed ([INSTALL.md](../INSTALL.md#install-the-vendor-runtimes)); `makepkg -s -f` installs them. `prepare()` checks the ROCm install under `/opt/rocm` and records both packages' versions.
+- **Prerequisites.** None beyond the chroot tools ([release.md](release.md#one-time-setup)). The chroot installs `migraphx`, `hip-runtime-amd` and `rccl`. A build outside a chroot needs them installed ([INSTALL.md](../INSTALL.md#2-install-the-vendor-runtimes)); `makepkg -s -f` installs them. `prepare()` checks the ROCm install under `/opt/rocm` and records both packages' versions.
 - **What the recipe refuses.** The line builds the MIGraphX provider and its add-on, and no Python module. `prepare()` stops for an `ORTF_EPS` other than `migraphx` and for `ORTF_PYTHON=1`.
 - **Flags.** The build passes `-Donnxruntime_USE_MIGRAPHX=ON -Donnxruntime_MIGRAPHX_HOME=/opt/rocm`, the training and NCCL options of every line, and `rccl` as the NCCL library (a build input; the provider links no RCCL). Whether configuration needs more ROCm packages (`rocm-llvm`, `rocm-device-libs`, `rocm-cmake`) is **unverified** until a chroot build with them settles it.
 - **Every provider in one local build** from the main recipe, `ORTF_EPS='cuda tensorrt openvino dnnl migraphx'`, is possible and untested. The published package is this line's.

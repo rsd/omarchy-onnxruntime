@@ -24,7 +24,12 @@ scripts/gen-cuda12.sh                                          # writes onnxrunt
 scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --write   # its .SRCINFO
 ```
 
-`scripts/gen-cuda12.sh --check` and `scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --check` fail when either is stale. `scripts/test.sh` runs both.
+These two commands fail when either file is stale. `scripts/test.sh` runs both:
+
+```bash
+scripts/gen-cuda12.sh --check
+scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --check
+```
 
 ## 2. Build the CUDA 12 userland, `nccl-cuda12.9` and `gcc14`
 

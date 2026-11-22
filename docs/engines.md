@@ -38,7 +38,7 @@ Install the packages of the engines you use. Each provider is a separate library
 
 Installing a provider package needs its runtime, a hard dependency. The OpenVINO device plugins and drivers are optional dependencies, installed for the devices you use.
 
-To build, you need `cuda`, `cudnn`, `nccl` and `openvino` installed. oneDNN needs nothing installed. For the TensorRT provider, install TensorRT from a package, or unpack it by hand and build with `makepkg -d` ([INSTALL.md](../INSTALL.md#install-tensorrt)). The MIGraphX provider is built from its own recipe, which needs `migraphx`, `hip-runtime-amd` and `rccl` ([amd.md](amd.md#building-it)).
+To build, you need `cuda`, `cudnn`, `nccl` and `openvino` installed. oneDNN needs nothing installed. For the TensorRT provider, install TensorRT from a package, or unpack it by hand and build with the `-d` option of `makepkg` ([INSTALL.md](../INSTALL.md#3-install-tensorrt), [TensorRT for a source build](build-from-source.md#tensorrt-for-a-source-build)). The MIGraphX provider is built from its own recipe, which needs `migraphx`, `hip-runtime-amd` and `rccl` ([amd.md](amd.md#building-it)).
 
 ## How the providers load
 
@@ -70,7 +70,7 @@ Package `onnxruntime-provider-tensorrt-cuda<M>`. It depends on:
 - `cuda`, `cudnn` and `nvidia-utils`;
 - `tensorrt`, which is TensorRT 11, bounded to the major.minor of the headers the build used.
 
-Either TensorRT source provides that name: `nvidia-tensorrt-sdk-local` from omarchy-nvidia-sdks (under `/opt/nvidia/tensorrt`, from its pkgrel 2) or the AUR's `tensorrt` (under `/usr`). See [INSTALL.md](../INSTALL.md#install-tensorrt). The recipe takes its TensorRT from those same two places ([build.md](build.md#tensorrt-location)). The package provides `onnxruntime-provider-tensorrt`, the name `onnxruntime-core`'s optional dependencies use. It has no architecture suffix: its library holds no GPU code, because TensorRT builds its kernels at run time.
+Either TensorRT source provides that name: `nvidia-tensorrt-sdk-local` from omarchy-nvidia-sdks (under `/opt/nvidia/tensorrt`, from its pkgrel 2) or the AUR's `tensorrt` (under `/usr`). See [INSTALL.md](../INSTALL.md#3-install-tensorrt). The recipe takes its TensorRT from those same two places ([build.md](build.md#tensorrt-location)). The package provides `onnxruntime-provider-tensorrt`, the name `onnxruntime-core`'s optional dependencies use. It has no architecture suffix: its library holds no GPU code, because TensorRT builds its kernels at run time.
 
 - **Library path.** `package()` sets the RUNPATH of `libonnxruntime_providers_tensorrt.so` with `patchelf` in every build that has TensorRT, so the provider finds `libnvinfer` and `libnvonnxparser` without an `ld.so.conf` entry and without `LD_LIBRARY_PATH`. The RUNPATH is `/opt/nvidia/tensorrt/lib`, preceded by the library directory of the build's TensorRT when that is neither `/usr/lib` nor `/usr/lib64`. The default search then covers `/usr/lib`, where the AUR's `tensorrt` installs. Nothing is global. The RUNPATH names `/opt` even for a build against `/usr`, because the package depends on the name `tensorrt`, which either source satisfies. When both TensorRTs are installed, the one under `/opt` is loaded, whichever the build used, unless `LD_LIBRARY_PATH` names another.
 - **Built-in plugins.** TensorRT's plugin library, `libnvinfer_plugin.so.<major>`, is not covered by that RUNPATH. ONNX Runtime opens it by name with `dlopen` from inside `libonnxruntime.so`, and `dlopen` searches the RUNPATH of the object that calls it. That is `libonnxruntime.so`'s own RUNPATH, `$ORIGIN`, the directory it is installed in (`/usr/lib`), not the provider's. So the plugin library is found under `/usr/lib`, where the AUR's `tensorrt` installs its libraries, but not under `/opt/nvidia/tensorrt/lib`. A program that needs TensorRT's built-in plugins from `/opt` therefore runs with TensorRT's `lib/` on `LD_LIBRARY_PATH`. Load the environment file of the TensorRT package for that: `EnvironmentFile=/usr/share/nvidia-tensorrt/nvidia-tensorrt.env` in a systemd unit, or `set -a; . /usr/share/nvidia-tensorrt/nvidia-tensorrt.env; set +a` in a shell. Without it the provider still works and logs that the default plugin library was not found. This follows from the loader's rules and has **not been verified on hardware**. The smoke test cannot show it either, because its model needs no plugin.
@@ -88,7 +88,7 @@ Package `onnxruntime-provider-openvino`. It depends on `openvino`, bounded to th
 | `GPU` | `openvino-intel-gpu-plugin`, `intel-compute-runtime`, `level-zero-loader` | access to the GPU's render node |
 | `NPU` | `openvino-intel-npu-plugin`, `intel-npu-driver`, `level-zero-loader` | the kernel's `intel_vpu` driver and access to `/dev/accel/accel0` |
 
-Some accelerators, NPUs among them, need static shapes. The smoke test's model has them. See [INSTALL.md](../INSTALL.md#install-the-vendor-runtimes) for the device checks.
+Some accelerators, NPUs among them, need static shapes. The smoke test's model has them. See [INSTALL.md](../INSTALL.md#2-install-the-vendor-runtimes) for the device checks.
 
 - **Precision on GPU and NPU.** The Intel GPU and NPU devices infer in fp16 by default, so their outputs differ from the CPU's by more than fp32 rounding on deep models ([results.md](results.md)). On the GPU, the OpenVINO EP's `precision=FP32` option had no effect on the output with this build and OpenVINO 2026.4.1: the results were identical to the default's. The `load_config` option `{"GPU": {"INFERENCE_PRECISION_HINT": "f32"}}` did give fp32 results. See [Precision modes](../tools/ort-model-check/README.md#precision-modes). The NPU has no fp32 inference.
 - **Releasing the environment crashes at process exit.** With ONNX Runtime 1.29.0 and OpenVINO 2026.4.1, a program that releases the ONNX Runtime environment after using the OpenVINO provider crashed at exit with `SIGSEGV`, although every inference had succeeded. This affects the C API (`ReleaseEnv`) and any binding that releases the environment. Releasing the environment unloads `libonnxruntime_providers_openvino.so` and, with it, OpenVINO's CPU plugin, while OpenVINO worker threads and thread-local destructors still run code from them. Keep the environment for the life of the process and do not release it at exit. The Python module never releases its environment and is not affected. Details: [tools/ort-smoke/README.md](../tools/ort-smoke/README.md#process-exit-with-openvino).
@@ -103,7 +103,11 @@ Package `onnxruntime-provider-dnnl`, the oneDNN execution provider (`DnnlExecuti
 - **Measured.** On a Core Ultra 9 275HX the provider was 7 to 19 times slower than the CPU provider on the four models measured (MODNet at 512x512: about 350 ms against 50 ms), and it needed CPU fallback on all four. The graph is split into many DNNL pieces with CPU nodes between them, with data-layout conversions at the boundaries, and the two thread pools compete ([results.md](results.md#release-1290-7)).
 - **oneDNN is inside the package.** The recipe builds oneDNN 3.11.3, the version Arch's `onednn` package ships, from a pinned and checksummed source archive, with ONNX Runtime's own CMake build of it. The recipe patches `cmake/external/dnnl.cmake`, which would otherwise clone oneDNN 3.0.1 from git at build time. oneDNN is linked into `libonnxruntime_providers_dnnl.so` as a static library, and the provider's version script keeps oneDNN's symbols local. The package therefore depends on no oneDNN package, installs no `libdnnl.so.3` (a file of Arch's `onednn`, so there is no file conflict with it), and needs only `libgomp` beside the system libraries. This keeps the provider independent of Arch's packaging of oneDNN ([dependencies.md](dependencies.md#onednn-is-bundled-statically)).
 - **Licence.** oneDNN is Apache-2.0. The package installs its licence and its third-party notices as `/usr/share/licenses/onnxruntime-provider-dnnl/onednn-LICENSE` and `onednn-THIRD-PARTY-PROGRAMS`, taken from the source archive at build time.
-- **Use.** In Python: `ort.InferenceSession(model, providers=["DnnlExecutionProvider", "CPUExecutionProvider"])`. The C API appends it with `SessionOptionsAppendExecutionProvider_Dnnl`, as [tools/ort-smoke/smoke.c](../tools/ort-smoke/smoke.c) does. The smoke test target is `dnnl` (`scripts/smoke-test.sh --only cpu,dnnl`). It reports `unavailable` when the provider's package is not installed.
+- **Use.** In Python: `ort.InferenceSession(model, providers=["DnnlExecutionProvider", "CPUExecutionProvider"])`. The C API appends it with `SessionOptionsAppendExecutionProvider_Dnnl`, as [tools/ort-smoke/smoke.c](../tools/ort-smoke/smoke.c) does. The smoke test target is `dnnl`. It reports `unavailable` when the provider's package is not installed. This command runs it:
+
+  ```bash
+  scripts/smoke-test.sh --only cpu,dnnl
+  ```
 
 ## MIGraphX
 
@@ -176,6 +180,10 @@ With `onnxruntime-provider-migraphx` and its add-on `python-onnxruntime-provider
 
 The module is for the system's `/usr/bin/python`. A virtual environment with its own `onnxruntime` wheel does not use these libraries.
 
-The module includes `onnxruntime.training` (the training operators are built into the core). Its modules import PyTorch, so `import onnxruntime.training` needs `python-pytorch`, an optional dependency. `import onnxruntime` does not. PyTorch is not compiled in. The C++ extensions of `onnxruntime.training.ortmodule` ship as sources, and you build them at run time with `python -m onnxruntime.training.ortmodule.torch_cpp_extensions.install`.
+The module includes `onnxruntime.training` (the training operators are built into the core). Its modules import PyTorch, so `import onnxruntime.training` needs `python-pytorch`, an optional dependency. `import onnxruntime` does not. PyTorch is not compiled in. The C++ extensions of `onnxruntime.training.ortmodule` ship as sources, and you build them at run time with this command:
+
+```bash
+python -m onnxruntime.training.ortmodule.torch_cpp_extensions.install
+```
 
 A program that wants TensorRT's built-in plugins also loads the TensorRT environment file ([TensorRT](#tensorrt)).

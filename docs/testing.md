@@ -27,7 +27,13 @@ The two source-mirror scripts ([release.md](release.md#the-source-mirror)) are t
 
 Scratch files go to a `mktemp` directory, never into the working tree. The script exits non-zero when any check fails. It does not build the packages.
 
-It needs shellcheck, from `PATH`, from `SHELLCHECK=/path/to/shellcheck`, or, when `uvx` is installed, run as `uvx --from shellcheck-py shellcheck`. `SHELLCHECK` takes one program path, so wrap a multi-word command in a script:
+It needs shellcheck, from `PATH`, from `SHELLCHECK=/path/to/shellcheck`, or, when `uvx` is installed, from this command:
+
+```bash
+uvx --from shellcheck-py shellcheck
+```
+
+`SHELLCHECK` takes one program path, so wrap a multi-word command in a script:
 
 ```bash
 printf '#!/bin/sh\nexec uvx --from shellcheck-py shellcheck "$@"\n' > /path/to/shellcheck
@@ -58,4 +64,4 @@ scripts/check-no-vendor.sh --range REV...  # every file added or modified by the
 git config core.hooksPath .githooks
 ```
 
-The hooks are `pre-commit` and `pre-merge-commit` (the staged files) and `pre-push` (every commit the push would send). `git commit --no-verify` bypasses them, so the guard is a safety net, not an access control.
+The hooks are `pre-commit` and `pre-merge-commit` (the staged files) and `pre-push` (every commit the push would send). The `--no-verify` option of `git commit` bypasses them, so the guard is a safety net, not an access control.

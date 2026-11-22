@@ -30,9 +30,24 @@ No package contains a vendor library. The vendor runtimes are dependencies ([REA
 
 Before releasing:
 
-1. Run `scripts/test.sh` ([testing.md](testing.md)).
-2. Run `scripts/check-upstream.sh` ([below](#the-source-mirror)). It says whether upstream is back, and the release needs the source mirror published.
-3. If the PKGBUILD changed, regenerate and check the `.SRCINFO`: `scripts/srcinfo.sh --write`, then `scripts/srcinfo.sh --check`.
+1. Run the repository's checks ([testing.md](testing.md)):
+
+   ```bash
+   scripts/test.sh
+   ```
+
+2. Check whether upstream is back ([below](#the-source-mirror)). The release needs the source mirror published:
+
+   ```bash
+   scripts/check-upstream.sh
+   ```
+
+3. If the PKGBUILD changed, regenerate and check the `.SRCINFO`:
+
+   ```bash
+   scripts/srcinfo.sh --write
+   scripts/srcinfo.sh --check
+   ```
 
 ## Joint release
 
@@ -77,7 +92,13 @@ Then:
 
 `--latest=false` keeps the release from becoming the repository's latest. The package releases, `v<pkgver>-<pkgrel>`, are what the prebuilt recipes and users look for. The release notes are `PROVENANCE.md`, which tells anyone how to verify the archive against upstream's commit.
 
-**Watch for upstream's return.** Run `scripts/check-upstream.sh` before each release, and from time to time while the mirror is the default. It runs `git ls-remote` for the tag `v<pkgver>` with no credentials and no prompts, and it ignores the git configuration of the user running it (no `insteadOf`, no stored credentials, no SSH). The exit status says what to do:
+**Watch for upstream's return.** Run this script before each release, and from time to time while the mirror is the default:
+
+```bash
+scripts/check-upstream.sh
+```
+
+It runs `git ls-remote` for the tag `v<pkgver>` with no credentials and no prompts, and it ignores the git configuration of the user running it (no `insteadOf`, no stored credentials, no SSH). The exit status says what to do:
 
 | Exit | Meaning | What to do |
 |---|---|---|
@@ -202,7 +223,11 @@ scripts/srcinfo.sh --aur aur/onnxruntime-split          # checks .SRCINFO is cur
 (cd aur/onnxruntime-split-bin && git add PKGBUILD .SRCINFO && git commit -m '1.29.0-7' && git push)
 ```
 
-The source package's `makepkg` downloads the mirror's archive, so the release `source-v<pkgver>` must be public before this push ([the source mirror](#the-source-mirror)). `scripts/srcinfo.sh --aur` commits nothing and fails when the committed `onnxruntime-split/.SRCINFO` is stale. Regenerate it with `scripts/srcinfo.sh --write` after a PKGBUILD change.
+The source package's `makepkg` downloads the mirror's archive, so the release `source-v<pkgver>` must be public before this push ([the source mirror](#the-source-mirror)). `scripts/srcinfo.sh --aur` commits nothing and fails when the committed `onnxruntime-split/.SRCINFO` is stale. After a PKGBUILD change, regenerate it:
+
+```bash
+scripts/srcinfo.sh --write
+```
 
 ## 6. The CUDA 12 legacy line
 

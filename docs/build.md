@@ -19,7 +19,11 @@ Build inputs are environment variables.
   - the optional dependencies of `onnxruntime-core` and `python-onnxruntime-core`, which name `onnxruntime-provider-dnnl` when it is built.
 
   With `ORTF_NCCL=0` the names gain the suffix `-nccloff`, and the dependencies on NCCL and on the core change ([below](#nccl-and-the-nccloff-packages)). Every other field of `makepkg --printsrcinfo` is the same for any inputs.
-- After a failed build, `makepkg -e -f` continues where it stopped with the inputs `prepare()` recorded.
+- After a failed build, this command continues where it stopped with the inputs `prepare()` recorded:
+
+  ```bash
+  makepkg -e -f
+  ```
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -110,7 +114,7 @@ makepkg must know every package name before `prepare()` runs, so it reads the na
   - A CUDA 12 toolkit gives `-cuda12-` names. The main recipe with CUDA 12 then needs `ORTF_CUDA_ARCHS` set to an explicit list or `legacy` (the default `rtx` needs CUDA 13). It also needs no `tensorrt` in `ORTF_EPS` (TensorRT 11 needs CUDA 13), or a TensorRT 10.
   - That is not the supported route to a CUDA 12 package. The one that is released, `onnxruntime-provider-cuda12-legacy`, comes from its own recipe, not from this one with other inputs ([below](#the-cuda-12-legacy-line)).
 - **`<sfx>`** is the preset's name (`rtx`, `all`). For a list, it is the real architectures as `smN` in ascending order without repeats, joined by `-`, then the `-virtual` one as `computeN`: `120` gives `sm120`, `"89 120"` gives `sm89-sm120`, `"89 120 120-virtual"` gives `sm89-sm120-compute120`.
-- **The TensorRT package has no architecture suffix.** Its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime. It also depends on `tensorrt`, bounded to the major.minor of the headers the build used ([INSTALL.md](../INSTALL.md#install-tensorrt)). It provides and conflicts with `onnxruntime-provider-tensorrt`.
+- **The TensorRT package has no architecture suffix.** Its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime. It also depends on `tensorrt`, bounded to the major.minor of the headers the build used ([INSTALL.md](../INSTALL.md#3-install-tensorrt)). It provides and conflicts with `onnxruntime-provider-tensorrt`.
 - **CUDA packages of different builds conflict.** Each provides and conflicts with `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>`, because all install the same `/usr/lib/libonnxruntime_providers_cuda.so`. Install one at a time.
 - **The oneDNN package has no suffix.** It depends on `onnxruntime-core` and `libgomp` only, because oneDNN is linked into it statically ([dependencies.md](dependencies.md#onednn-is-bundled-statically)).
 - **The MIGraphX provider has no architecture suffix and no ROCm version.** Its library holds no GPU code, and ROCm 7.2 and 10.1 keep the sonames it links (`libmigraphx_c.so.3`, `libamdhip64.so.7`), so one name serves both. It depends on `migraphx` and `hip-runtime-amd`, bounded to the major version of the installed packages ([dependencies.md](dependencies.md#the-version-bounds)). A ROCm major upgrade therefore needs a rebuild. The add-on `python-onnxruntime-provider-migraphx` has no suffix either. It holds a link only, and depends on the provider, `python-onnxruntime-core` and `python` ([amd.md](amd.md#the-package)).
@@ -163,7 +167,19 @@ The sources totalled about 3.2 GiB before the oneDNN and training archives were 
 `ORTF_SOURCE` chooses, in all three recipes (`onnxruntime-split`, `onnxruntime-split-cuda12` and `onnxruntime-split-migraphx`):
 
 - **`mirror`** (the default, `_ortf_default_source`) downloads `onnxruntime-1.29.0.tar.gz`, an asset of the release `source-v1.29.0` of `rsd/omarchy-onnxruntime` (<https://github.com/rsd/omarchy-onnxruntime/releases/download/source-v1.29.0/onnxruntime-1.29.0.tar.gz>, 276402461 bytes). It is the output of `git archive --format=tar --prefix=onnxruntime-1.29.0/ 2e2543fbe9fae542f921d47a72d21d5a4ef0b710 | gzip -n -9`: the tree of the tag `v1.29.0` and nothing else, the same bytes on every run. The PKGBUILD pins it by b2sum.
-- **`upstream`** clones the git tag, as the recipes did before: `ORTF_SOURCE=upstream makepkg ...`. In a clean chroot, where the environment does not reach `makepkg`, set it in a copy of the PKGBUILD with `sed -i 's/^_ortf_default_source=.*/_ortf_default_source=upstream/' PKGBUILD` (as for the other inputs, [release.md](release.md#2-build-the-all-cuda-package)). It works only while the repository answers.
+- **`upstream`** clones the git tag, as the recipes did before:
+
+  ```bash
+  ORTF_SOURCE=upstream makepkg ...
+  ```
+
+  In a clean chroot, where the environment does not reach `makepkg`, set it in a copy of the PKGBUILD (as for the other inputs, [release.md](release.md#2-build-the-all-cuda-package)):
+
+  ```bash
+  sed -i 's/^_ortf_default_source=.*/_ortf_default_source=upstream/' PKGBUILD
+  ```
+
+  It works only while the repository answers.
 
 Switching needs nothing else, not even a clean `src/`. `prepare()` checks the source's commit against `_ortf_commit` in both. For the mirror it reads the commit that `git archive` wrote into the archive (`git get-tar-commit-id`), and it unpacks the archive afresh on every run. The two sources unpack into different directories under `src/`, `onnxruntime-1.29.0` for the mirror and `onnxruntime` for the git tag, so they never meet. A patch fixes the build information, so `libonnxruntime.so` reports `git-branch=makepkg, git-commit-id=2e2543fbe9f` from either source. The packages are the same as the ones released as 1.29.0-7: the change of source location changed no `pkgrel`. Any value other than `mirror` or `upstream` is refused.
 
@@ -181,7 +197,13 @@ With `ccache` on `PATH` the recipe uses it as the C, C++ and CUDA compiler launc
 ## Parallelism, memory and disk
 
 - **Time.** CUDA kernels (CUTLASS, flash attention) dominate a build with CUDA. The time grows about linearly with the number of architectures in `ORTF_CUDA_ARCHS` ([presets](#cuda-architectures): `rtx` has four targets, `all` eight). A full build with one architecture (`ORTF_CUDA_ARCHS=120`) took under half an hour on the machine below. No build of the default `rtx` or of `all` has been timed. See the measurements at the end of this section.
-- **Memory.** A CUDA compile job takes several GiB of RAM, so the job count (`MAKEFLAGS=-jN`), not the thread count, decides whether the build fits in memory. The PKGBUILD's guidance for 24 threads and 30 GiB of RAM is `MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1`. Lower it to `-j6` if the build is killed for lack of memory. Each job's nvcc threads multiply on top of the job count, so raise `ORTF_NVCC_THREADS` only with memory to spare.
+- **Memory.** A CUDA compile job takes several GiB of RAM, so the job count (`MAKEFLAGS=-jN`), not the thread count, decides whether the build fits in memory. The PKGBUILD's guidance for 24 threads and 30 GiB of RAM is this setting:
+
+  ```bash
+  MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1 makepkg
+  ```
+
+  Lower it to `-j6` if the build is killed for lack of memory. Each job's nvcc threads multiply on top of the job count, so raise `ORTF_NVCC_THREADS` only with memory to spare.
 - **Disk.** A build needs tens of GiB under the build directory. `BUILDDIR=/path/with/space makepkg ...` moves the build tree. `SRCDEST=/path/with/space` moves the downloaded sources, including the 264 MiB source archive, or with `ORTF_SOURCE=upstream` the 1.6 GiB git clone. Set both in `makepkg.conf` to make this permanent.
 - **No LTO, no debug package.** The recipe sets `!lto` (link-time optimisation of the CUDA provider costs hours and many GiB of RAM, and upstream's releases are not LTO builds) and `!debug` (the CUDA provider's debug information alone runs to GiB).
 

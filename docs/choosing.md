@@ -12,7 +12,13 @@ Terms such as pkgrel, `-bin` and SM are in the [glossary](glossary.md).
 
 ## What Arch ships
 
-`pacman -Ss onnxruntime` lists five builds of 1.29.0 (pkgrel 3 on 2026-11-17), each with a `python-` twin: ten packages. Each build is a separate compilation of the whole library. Every one provides `onnxruntime` and conflicts with it, so you install one at a time. Sizes and dependencies below are from `pacman -Si`. The engines are from the build options in Arch's [PKGBUILD](https://gitlab.archlinux.org/archlinux/packaging/packages/onnxruntime).
+This command lists Arch's builds:
+
+```bash
+pacman -Ss onnxruntime
+```
+
+It shows five builds of 1.29.0 (pkgrel 3 on 2026-11-17), each with a `python-` twin: ten packages. Each build is a separate compilation of the whole library. Every one provides `onnxruntime` and conflicts with it, so you install one at a time. Sizes and dependencies below are from `pacman -Si`. The engines are from the build options in Arch's [PKGBUILD](https://gitlab.archlinux.org/archlinux/packaging/packages/onnxruntime).
 
 | Package | Engines | CPU code | Depends on (besides `glibc`, `libgcc`, `libstdc++`) | Download / installed |
 |---|---|---|---|---|
@@ -81,7 +87,14 @@ Engines can be combined. A laptop with an Intel CPU, an NVIDIA GPU and an NPU ta
 ## Where Arch is the better choice
 
 - **You want the official repository only**, with no AUR package. Arch's builds are in `extra`. This set is not.
-- **You want a small CPU-only install.** `onnxruntime-cpu` is 25.68 MiB installed. This repository's `onnxruntime-core` is 29.4 MiB (1.29.0-6), but by default it depends on `nccl`, which is 364.18 MiB installed (`pacman -Si nccl`), even on a machine with no NVIDIA GPU. A source build with `ORTF_NCCL=0` omits it, but no prebuilt `-nccloff` package exists ([build.md](build.md#nccl-and-the-nccloff-packages)).
+- **You want a small CPU-only install.** `onnxruntime-cpu` is 25.68 MiB installed. This repository's `onnxruntime-core` is 29.4 MiB (1.29.0-6), but by default it depends on `nccl`, which is 364.18 MiB installed, even on a machine with no NVIDIA GPU. A source build with `ORTF_NCCL=0` omits it, but no prebuilt `-nccloff` package exists ([build.md](build.md#nccl-and-the-nccloff-packages)).
+
+  This command reads the size of `nccl`:
+
+  ```bash
+  pacman -Si nccl
+  ```
+
 - **You want vendor packages without version bounds**, so that pacman never holds back a CUDA or ROCm upgrade until a rebuild ([dependencies.md](dependencies.md#the-version-bounds)).
 - **You want a build compiled for AVX2** (`onnxruntime-opt-cuda`, `onnxruntime-opt-rocm`). Those are Arch's. Here every package targets generic x86-64. ONNX Runtime's own CPU math library (MLAS) still picks its AVX2 or AVX-512 kernels at run time, as it does in Arch's generic builds.
 

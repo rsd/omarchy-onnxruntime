@@ -29,7 +29,13 @@ The packages below that are not in Arch's repositories (`nvidia-580xx-dkms`, `cu
 
 Install the driver, `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9` before the provider, never the provider first. The core depends on `nccl`, and `nccl-cuda12.9` provides it, so Arch's `nccl` is replaced. Pacman offers to remove it. Answer `y`.
 
-1. **Remove the CUDA 13 side.** Name what you have installed (`pacman -Qq | grep -E '^(nvidia|cuda|cudnn|onnxruntime-provider)'` lists it). Remove the CUDA 13 provider packages first, since they depend on `cuda` and `cudnn`, then those, then the current driver. Pacman names anything else that needs `cuda` or `cudnn`. Remove that too, or the transaction is refused.
+1. **Remove the CUDA 13 side.** Name what you have installed. This command lists it:
+
+   ```bash
+   pacman -Qq | grep -E '^(nvidia|cuda|cudnn|onnxruntime-provider)'
+   ```
+
+   Remove the CUDA 13 provider packages first, since they depend on `cuda` and `cudnn`, then those, then the current driver. Pacman names anything else that needs `cuda` or `cudnn`. Remove that too, or the transaction is refused.
 
    ```bash
    sudo pacman -R onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-rtx
@@ -48,7 +54,13 @@ Install the driver, `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9` before
 
    Reboot to load the new driver.
 
-   Without a helper, build and install the AUR packages with `makepkg -si` in their clones: `gcc14` first, then `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9`, all before the provider. Install the provider from its release. The tag is `cuda12-v1.29.0-2` (the scheme is `cuda12-v<pkgver>-<pkgrel>`, a separate release from the main line's `v<pkgver>-<pkgrel>`). Download the `.pkg.tar.zst` and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases>, check them, and install:
+   Without a helper, clone each AUR package and run this command in it. Do `gcc14` first, then `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9`, all before the provider:
+
+   ```bash
+   makepkg -si
+   ```
+
+   Install the provider from its release. The tag is `cuda12-v1.29.0-2` (the scheme is `cuda12-v<pkgver>-<pkgrel>`, a separate release from the main line's `v<pkgver>-<pkgrel>`). Download the `.pkg.tar.zst` and `SHA256SUMS` from <https://github.com/rsd/omarchy-onnxruntime/releases>, check them, and install:
 
    ```bash
    sha256sum -c --ignore-missing SHA256SUMS
@@ -78,7 +90,11 @@ sudo pacman -R onnxruntime-provider-cuda12-legacy-bin cudnn9.10-cuda12.9 cuda-12
 sudo pacman -S nvidia-open-dkms cuda cudnn nccl onnxruntime-provider-cuda13-rtx-bin   # your driver, and the CUDA 13 packages you removed; nccl replaces nccl-cuda12.9: answer y
 ```
 
-`pacman -Qdtq` then lists `gcc14` and other packages the CUDA 12 userland brought in, if nothing else needs them.
+This command then lists `gcc14` and other packages the CUDA 12 userland brought in, if nothing else needs them:
+
+```bash
+pacman -Qdtq
+```
 
 ## What it is
 
@@ -105,14 +121,28 @@ sudo pacman -S nvidia-open-dkms cuda cudnn nccl onnxruntime-provider-cuda13-rtx-
   - `pkgrel`, which is the line's own (`line_pkgrel` in the script; 2 now);
   - a header comment.
 
-  The same `pkgver`, sources, patches and build follow. `scripts/gen-cuda12.sh --check` fails, with a diff, when the committed file is stale. The script stops without writing when a source line it replaces is missing or repeated. Its `.SRCINFO` comes from `scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --write` (`--check` and `--aur DIR` take the same `--recipe`).
+  The same `pkgver`, sources, patches and build follow. This command fails, with a diff, when the committed file is stale:
+
+  ```bash
+  scripts/gen-cuda12.sh --check
+  ```
+
+  The script stops without writing when a source line it replaces is missing or repeated. Its `.SRCINFO` comes from this command (`--check` and `--aur DIR` take the same `--recipe`):
+
+  ```bash
+  scripts/srcinfo.sh --recipe onnxruntime-split-cuda12 --write
+  ```
 - **What the line refuses.** `_ortf_line=cuda12` builds the CUDA provider alone. `prepare()` stops for an `ORTF_EPS` other than `cuda`, for `ORTF_PYTHON=1`, for a cuDNN other than 9.10 (cuDNN 9.11 dropped Maxwell, Pascal and Volta; the main line is not bound by this), and for a toolkit that is not CUDA 12. The names carry `12` whatever `/opt/cuda` holds when makepkg reads the file, so the published `.SRCINFO` is the same on a CUDA 13 host. `package()` fails the build on a CUDA library with a `.so.13` soname, and on a provider that does not link `libcudart.so.12`, `libcublas.so.12` and `libcublasLt.so.12`.
 - **Dependencies.** `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1` (this line makes no core), `nccl-cuda12.9`, `cuda>=12`, `cuda<13`, `cudnn` bounded to the minor of the cuDNN installed at build time (`cudnn>=9.10`, `cudnn<9.11` with cuDNN 9.10), and `nvidia-utils`.
   - `makedepends` are the build tools and the AUR packages by name: `gcc14`, `cuda-12.9`, `cudnn9.10-cuda12.9` and `nccl-cuda12.9`. They are never bare `cuda`, `cudnn` and `nccl`, which an AUR helper would resolve to Arch's CUDA 13, cuDNN 9.11 and NCCL.
   - The `.SRCINFO` lists the bounds too, not the bare names. The bounds resolve against the provides of the AUR's `cuda-12.9` (`cuda=12.9`) and `cudnn9.10-cuda12.9` (`cudnn=9.10`).
 - **Compiler: GCC 14.** `cuda-12.9`'s `/etc/profile.d/cuda.sh` sets `NVCC_CCBIN=/usr/bin/g++-14`. The recipe uses nvcc's host compiler for its C++ as well, so that host code compiled by nvcc and by the C++ compiler agrees. Nothing is set in the recipe for it. The build needs the AUR's `gcc14` (`gcc-14` and `g++-14`).
 - **Build.** Only in a clean chroot, with the four AUR packages passed in with `-I`: [release-cuda12.md](release-cuda12.md#3-build-in-a-clean-chroot).
-- **Check the result.** `scripts/check-cuda-archs.sh [--cuobjdump PATH] FILE ARCH...` takes a package file or the library. It fails unless `cuobjdump` lists exactly those SASS and PTX architectures.
+- **Check the result.** This script takes a package file or the library. It fails unless `cuobjdump` lists exactly those SASS and PTX architectures:
+
+  ```bash
+  scripts/check-cuda-archs.sh [--cuobjdump PATH] FILE ARCH...
+  ```
 
 `scripts/test.sh` runs the generator's `--check`, the `--check` of both `.SRCINFO` files, and the names, provides and conflicts of the generated one.
 

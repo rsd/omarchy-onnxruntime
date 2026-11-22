@@ -1,6 +1,6 @@
 # Building from source
 
-This guide builds the packages from the recipe with `makepkg` and installs them. For prebuilt packages see [INSTALL.md](../INSTALL.md#prebuilt-packages). Every command here is run by you. Nothing in this repository runs `sudo` or installs anything.
+This guide builds the packages from the recipe with `makepkg` and installs them. For prebuilt packages see [INSTALL.md](../INSTALL.md#prebuilt-packages). You run every command. Nothing here runs `sudo` or installs for you.
 
 ```mermaid
 flowchart LR
@@ -11,7 +11,7 @@ flowchart LR
 
 ## Before you start
 
-- **Vendor runtimes and TensorRT.** Steps 1 and 2 are shared with the prebuilt path: [Install the vendor runtimes](../INSTALL.md#install-the-vendor-runtimes) and [Install TensorRT](../INSTALL.md#install-tensorrt). Install the runtimes of the engines you build.
+- **Vendor runtimes and TensorRT.** Steps 1 and 2 are shared with the prebuilt path: [Install the vendor runtimes](../INSTALL.md#2-install-the-vendor-runtimes) and [Install TensorRT](../INSTALL.md#3-install-tensorrt). Install the runtimes of the engines you build.
 - **Fewer engines.** Skip the runtimes of the engines you do not want, and build without them with `ORTF_EPS` ([build.md](build.md#build-inputs)). A CPU-only build needs no vendor runtime and no TensorRT. Since it has no `cuda`, it needs `ORTF_NCCL=0` ([build.md](build.md#nccl-and-the-nccloff-packages)).
 - **Disk and time.** A build needs tens of GiB of disk. Read [build.md](build.md#parallelism-memory-and-disk) before the first run to choose `-jN` for your memory.
 
@@ -31,8 +31,22 @@ sudo pacman -S --needed ccache
 
 The PKGBUILD's `makedepends` also lists `cuda`, `cudnn`, `nccl` and `openvino`, because the default build has the CUDA, TensorRT and OpenVINO providers and NCCL. The oneDNN provider needs nothing installed: the recipe builds oneDNN from a source archive it downloads. The recipe adds more `makedepends` for some engines:
 
-- `tensorrt` when it builds the TensorRT provider. The AUR's `tensorrt` and `nvidia-tensorrt-sdk-local`, pkgrel 2 or later, both provide it ([Install TensorRT](../INSTALL.md#install-tensorrt)).
+- `tensorrt` when it builds the TensorRT provider. The AUR's `tensorrt` and `nvidia-tensorrt-sdk-local`, pkgrel 2 or later, both provide it ([Install TensorRT](../INSTALL.md#3-install-tensorrt)).
 - `migraphx` and `hip-runtime-amd` when `migraphx` is in `ORTF_EPS`. The MIGraphX package has its own recipe: [amd.md](amd.md#building-it).
+
+## TensorRT for a source build
+
+The recipe finds TensorRT in `/opt/nvidia/tensorrt` when that holds `include/NvInfer.h`, and otherwise in `/usr`. `ORTF_TENSORRT_HOME` overrides this ([build.md](build.md#tensorrt-location)). The recipe reads the bound for the provider's `tensorrt` dependency from `include/NvInferVersion.h` under the TensorRT root.
+
+- **`makedepends`.** The recipe adds `tensorrt` to `makedepends` when it builds the TensorRT provider. A TensorRT installed from one of the packages in [Install TensorRT](../INSTALL.md#3-install-tensorrt) satisfies it.
+- **A TensorRT unpacked by hand**, with `ORTF_TENSORRT_HOME` pointing at it, needs `makepkg -d`, which skips the dependency check:
+
+  ```bash
+  cd onnxruntime-split
+  ORTF_TENSORRT_HOME=/path/to/tensorrt makepkg -d -f
+  ```
+
+- **Warnings.** `prepare()` warns when no installed package provides `tensorrt`, or when the installed one has another major.minor.
 
 ## 3. Build and install
 
@@ -43,7 +57,7 @@ The PKGBUILD's `makedepends` also lists `cuda`, `cudnn`, `nccl` and `openvino`, 
    MAKEFLAGS=-j8 makepkg -f
    ```
 
-2. Install TensorRT first if you build the TensorRT provider. Pacman refuses the TensorRT provider package until an installed package provides `tensorrt` within its bound ([Install TensorRT](../INSTALL.md#install-tensorrt)).
+2. Install TensorRT first if you build the TensorRT provider. Pacman refuses the TensorRT provider package until an installed package provides `tensorrt` within its bound ([Install TensorRT](../INSTALL.md#3-install-tensorrt)).
 
 3. Install the packages in one `pacman -U` that names the exact files:
 
@@ -79,11 +93,21 @@ If you installed a local build made before 1.29.0-5, its CUDA package was named 
 The names above are those of the default build (the CUDA preset `rtx`). A subset is fine: the core alone (CPU only), the core and `onnxruntime-provider-openvino`, and so on. The core is always needed, because the other packages depend on it at the same version.
 
 - **CUDA package name.** The suffix depends on `ORTF_CUDA_ARCHS` (`-cuda13-rtx` for `rtx`, `-cuda13-all` for `all`, `-cuda13-sm89-sm120` for `"89 120"`). The `13` in `-cuda13` is the CUDA toolkit's major version. [build.md](build.md#cuda-architectures) has the rules.
-- **No CUDA.** A build without `cuda` in `ORTF_EPS`, such as `ORTF_EPS=cpu`, needs `ORTF_NCCL=0` and writes `-nccloff` packages. `ORTF_EPS=cpu ORTF_NCCL=0 makepkg -d -f` gives `onnxruntime-core-nccloff-1.29.0-7-x86_64.pkg.tar.zst` and the Python package's.
+- **No CUDA.** A build without `cuda` in `ORTF_EPS`, such as `ORTF_EPS=cpu`, needs `ORTF_NCCL=0` and writes `-nccloff` packages. This command gives `onnxruntime-core-nccloff-1.29.0-7-x86_64.pkg.tar.zst` and the Python package's:
+
+  ```bash
+  ORTF_EPS=cpu ORTF_NCCL=0 makepkg -d -f
+  ```
+
   - An `ORTF_NCCL=0` build also gives every package of a build with CUDA a `-nccloff` name. Its packages never install beside the NCCL ones ([build.md](build.md#nccl-and-the-nccloff-packages)).
   - On a machine with no NVIDIA GPU, this is how to avoid the `nccl` dependency (364.18 MiB installed). No `-nccloff` package is prebuilt.
 - **oneDNN.** `dnnl` is in the default `ORTF_EPS`, so `onnxruntime-provider-dnnl-1.29.0-7-x86_64.pkg.tar.zst` is among the files. It is optional and not needed on most machines ([engines.md](engines.md#onednn)). Leave `dnnl` out of `ORTF_EPS` to skip it.
-- **MIGraphX.** The provider is built from its own recipe, `onnxruntime-split-migraphx` ([amd.md](amd.md#building-it)). It is **untested on AMD hardware**. With `migraphx` in `ORTF_EPS` of this recipe (for example `ORTF_EPS=migraphx ORTF_NCCL=0 makepkg -d -f` for an AMD-only local build), there is also `onnxruntime-provider-migraphx-nccloff-1.29.0-7-x86_64.pkg.tar.zst` to name.
+- **MIGraphX.** The provider is built from its own recipe, `onnxruntime-split-migraphx` ([amd.md](amd.md#building-it)). It is **untested on AMD hardware**. With `migraphx` in `ORTF_EPS` of this recipe, there is also `onnxruntime-provider-migraphx-nccloff-1.29.0-7-x86_64.pkg.tar.zst` to name. This command is an AMD-only local build:
+
+  ```bash
+  ORTF_EPS=migraphx ORTF_NCCL=0 makepkg -d -f
+  ```
+
 - **Other combinations.** Set the build inputs first: [build.md](build.md#build-inputs).
 - **Pascal and Volta GPUs.** The CUDA 12 provider has its own recipe: [cuda12-legacy.md](cuda12-legacy.md#building-from-source).
 

@@ -33,7 +33,14 @@ scripts/gen-migraphx.sh                                          # writes onnxru
 scripts/srcinfo.sh --recipe onnxruntime-split-migraphx --write   # its .SRCINFO
 ```
 
-`scripts/gen-migraphx.sh --check` and `scripts/srcinfo.sh --recipe onnxruntime-split-migraphx --check` fail when either is stale. `scripts/test.sh` runs both. The generator stamps `pkgbase`, `_ortf_default_eps='migraphx'`, `_ortf_default_python=0`, `_ortf_default_nccl=1`, `_ortf_line=migraphx` and the line's `pkgrel`.
+These two commands fail when either file is stale. `scripts/test.sh` runs both:
+
+```bash
+scripts/gen-migraphx.sh --check
+scripts/srcinfo.sh --recipe onnxruntime-split-migraphx --check
+```
+
+The generator stamps `pkgbase`, `_ortf_default_eps='migraphx'`, `_ortf_default_python=0`, `_ortf_default_nccl=1`, `_ortf_line=migraphx` and the line's `pkgrel`.
 
 ## 2. Build in a clean chroot
 

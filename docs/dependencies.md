@@ -71,7 +71,7 @@ The core's own dependency stays the bare `nccl`, which `nccl-cuda12.9` provides.
 
 ### TensorRT: one dependency name for two sources
 
-The TensorRT provider package depends on the name `tensorrt`, bounded to the major.minor of the TensorRT the build used (`tensorrt>=11.4` and `tensorrt<11.5` for TensorRT 11.4). Both TensorRT sources provide that name: the AUR's `tensorrt` (under `/usr`) and `nvidia-tensorrt-sdk-local` (under `/opt/nvidia/tensorrt`, pkgrel 2 or later; see [INSTALL.md](../INSTALL.md#install-tensorrt)). The dependency names the shared `tensorrt`, not the package that owns the build's library, so that a provider built against one source installs with the other.
+The TensorRT provider package depends on the name `tensorrt`, bounded to the major.minor of the TensorRT the build used (`tensorrt>=11.4` and `tensorrt<11.5` for TensorRT 11.4). Both TensorRT sources provide that name: the AUR's `tensorrt` (under `/usr`) and `nvidia-tensorrt-sdk-local` (under `/opt/nvidia/tensorrt`, pkgrel 2 or later; see [INSTALL.md](../INSTALL.md#3-install-tensorrt)). The dependency names the shared `tensorrt`, not the package that owns the build's library, so that a provider built against one source installs with the other.
 
 ## Prebuilt packages
 

@@ -81,7 +81,13 @@ These figures are measured on the files of the 1.29.0-6 build. The download size
 | `python-onnxruntime-core` | 10.0 MiB | 43.2 MiB |
 | `onnxruntime-provider-cuda12-legacy` (1.29.0-1) | 172.6 MiB | 557.5 MiB |
 
-The packages these depend on add to this. Arch's `nccl` is 292.29 MiB to download and 364.18 MiB installed (`pacman -Si nccl`, 2.32.3-1). The CUDA provider grows with the number of GPU architectures it holds: see [build.md](build.md#cuda-architectures).
+The packages these depend on add to this. Arch's `nccl` is 292.29 MiB to download and 364.18 MiB installed (2.32.3-1). This command reads its size:
+
+```bash
+pacman -Si nccl
+```
+
+The CUDA provider grows with the number of GPU architectures it holds: see [build.md](build.md#cuda-architectures).
 
 ## Why one package per engine, not one per build
 

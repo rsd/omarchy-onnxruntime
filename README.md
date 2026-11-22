@@ -1,105 +1,63 @@
 # omarchy-onnxruntime
 
-Arch Linux packages for [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.29.0 with one package per hardware engine. They are for anyone who wants CPU, NVIDIA, Intel or AMD acceleration from a single package set, with CUDA, TensorRT and OpenVINO included.
+Run ONNX models on the GPU or NPU of your machine, installed with pacman. These are pacman packages of ONNX Runtime 1.29.0 for Arch Linux and Omarchy (x86_64), split into one package per hardware engine: the CPU, NVIDIA CUDA and TensorRT, and Intel OpenVINO. They are for programs and people that need ONNX Runtime beyond the CPU.
 
-An *execution provider* (EP, also called an engine) is the part of ONNX Runtime that runs a model on one kind of hardware. Here each provider is its own package, so a machine installs only the engines it has. Terms such as `pkgrel`, `-bin` and SM are in the [glossary](docs/glossary.md).
+ONNX (Open Neural Network Exchange) is a standard file format for trained neural networks. ONNX Runtime is the library that runs such a file. An *engine* (an execution provider, or EP) is the part of ONNX Runtime that runs a model on one kind of hardware. An NPU (neural processing unit) is an AI accelerator chip, such as the one in recent Intel laptops. Here each engine is its own package, so a machine installs only the engines it has. Terms such as `pkgrel`, `-bin` and SM (an NVIDIA GPU's architecture version) are in the [glossary](docs/glossary.md).
 
 ## What you get
 
-- **Every engine in one installation.** CPU, oneDNN, CUDA, TensorRT and OpenVINO (Intel CPU, GPU and NPU) work side by side.
-- **A CUDA 12 package** for NVIDIA Pascal and Volta, which CUDA 13 dropped.
-- **A MIGraphX package** for AMD GPUs.
+- **Every engine in one installation.** The CPU, oneDNN (Intel's CPU math library), CUDA (NVIDIA's GPU platform), TensorRT (NVIDIA's inference optimizer) and OpenVINO (Intel's toolkit for Intel CPUs, GPUs and NPUs) work side by side.
+- **A CUDA 12 package** for NVIDIA Pascal and Volta, which CUDA 13 dropped. It is untested on that hardware.
+- **A MIGraphX package** for AMD GPUs. It is a source build only and untested on AMD hardware.
 - **The training operators** and the Python module `onnxruntime`, with `onnxruntime.training`.
 - **The same API as Arch's package.** Version 1.29.0 is the release Arch ships, so programs built against Arch's `onnxruntime` see the same API.
 
-The CUDA 12 and MIGraphX packages are **untested on their hardware** (Pascal and Volta, AMD GPUs).
+## Why use these packages
 
-### Packages
-
-The recipe is one build of the upstream tag `v1.29.0`, split into one package per engine. With the default build and Arch's CUDA 13:
-
-| Package | Holds |
-|---|---|
-| `onnxruntime-core` | `libonnxruntime.so` with the CPU provider and the training operators, the C and C++ headers, the pkg-config and CMake files. It works on its own, on the CPU. It depends on `nccl`. Every other package needs it |
-| `onnxruntime-provider-cuda13-rtx` | The CUDA provider, compiled for NVIDIA GPUs from Turing (RTX 20) to Blackwell (RTX 50) |
-| `onnxruntime-provider-tensorrt-cuda13` | The TensorRT provider (NVIDIA GPUs) |
-| `onnxruntime-provider-openvino` | The OpenVINO provider (Intel CPU, GPU and NPU) |
-| `onnxruntime-provider-dnnl` | The oneDNN provider (CPU), with oneDNN built in. It has no dependency on Arch's `onednn` |
-| `python-onnxruntime-core` | The Python module, with `onnxruntime.training` (which needs `python-pytorch`, optional) |
-
-Other builds name the CUDA package differently (`-cuda13-all`, `-cuda13-sm120`). Two packages come from their own recipes:
-
-- `onnxruntime-provider-cuda12-legacy` for Pascal and Volta ([docs/cuda12-legacy.md](docs/cuda12-legacy.md)).
-- `onnxruntime-provider-migraphx`, with its Python add-on `python-onnxruntime-provider-migraphx`, for AMD GPUs. It is an AUR source package only ([docs/amd.md](docs/amd.md)).
-
-A build with `ORTF_NCCL=0` names every package `-nccloff` and leaves out the `nccl` dependency. This is for local builds only ([docs/build.md](docs/build.md#nccl-and-the-nccloff-packages)). [docs/packages.md](docs/packages.md) has the full table with dependencies and sizes, and the rules for the names.
-
-`onnxruntime-core` and `python-onnxruntime-core` replace and conflict with `onnxruntime-full` and `python-onnxruntime-full`, the single packages of version 1.29.0-1 ([upgrading](INSTALL.md#upgrade-from-the-single-package-1290-1)).
-
-### Engines
-
-| Engine (execution provider) | Hardware | Package | Vendor runtime packages |
-|---|---|---|---|
-| CPU | any x86_64 CPU | `onnxruntime-core` | none |
-| CUDA | NVIDIA GPU | `onnxruntime-provider-cuda<M>-<sfx>` | `nvidia-utils`, `cuda`, `cudnn` |
-| TensorRT | NVIDIA GPU | `onnxruntime-provider-tensorrt-cuda<M>` | TensorRT 11, and the CUDA runtimes |
-| OpenVINO | Intel CPU, GPU, NPU | `onnxruntime-provider-openvino` | `openvino`, plus a plugin and driver per device |
-| oneDNN | any x86_64 CPU | `onnxruntime-provider-dnnl` | none (oneDNN is built in) |
-| MIGraphX (untested on AMD hardware) | AMD GPU in Arch's ROCm build list (Vega and newer) | `onnxruntime-provider-migraphx` (AUR source package; `python-onnxruntime-provider-migraphx` for Python) | `migraphx`, `hip-runtime-amd` |
-
-`<M>` is the major version of the CUDA toolkit that built the package (`13`). `<sfx>` names the GPU architectures it holds code for. [docs/engines.md](docs/engines.md) lists the runtime packages, where each comes from, and how to use the library from C, Rust and Python. [docs/hardware.md](docs/hardware.md) says which GPUs, CPUs and NPUs each engine covers and what is not packaged (NVIDIA Maxwell cards, the Ryzen AI NPU, older Intel graphics, AMD Vega and Polaris).
-
-## Why this set
-
+- **More engines than Arch's packages.** Arch's `extra` repository ships 1.29.0 as five builds (`onnxruntime-cpu`, `onnxruntime-cuda`, `onnxruntime-opt-cuda`, `onnxruntime-rocm`, `onnxruntime-opt-rocm`, each with a `python-` twin). This set has every engine and feature they have: the training operators, oneDNN, NCCL and the MIGraphX provider. It adds TensorRT, OpenVINO and the CUDA 12 line for Pascal and Volta.
 - **One package per engine.** The providers are shared libraries that one `libonnxruntime.so` loads when a session asks for them, so a single build serves every engine. Each package carries one provider and depends on that vendor's runtime. See [docs/packages.md](docs/packages.md#why-one-package-per-engine-not-one-per-build).
-- **More engines than Arch's packages.** Arch's `extra` repository ships 1.29.0 as five builds (`onnxruntime-cpu`, `onnxruntime-cuda`, `onnxruntime-opt-cuda`, `onnxruntime-rocm`, `onnxruntime-opt-rocm`, each with a `python-` twin). This set has every engine and feature they have (the training operators, oneDNN, NCCL and the MIGraphX provider). It adds TensorRT, OpenVINO and the CUDA 12 line for Pascal and Volta.
-- **Dependencies that cannot break silently.** Every package depends on the package of each library it links. The vendor runtimes (`cuda`, `cudnn`, `tensorrt`, `openvino`, `python`, and for AMD `migraphx` and `hip-runtime-amd`) carry version bounds. Pacman refuses a system update that would break a provider instead of leaving one that fails to load. When Arch moves a runtime past a bound, the packages are rebuilt with a `pkgrel` bump. `scripts/check-deps.sh` shows when a rebuild is due: [docs/dependencies.md](docs/dependencies.md).
+- **Dependencies that cannot break silently.** Every package depends on the package of each library it links. The vendor runtimes carry version bounds: `cuda`, `cudnn`, `tensorrt`, `openvino`, `python`, and for AMD `migraphx` and `hip-runtime-amd`. Pacman refuses a system update that would break a provider instead of leaving one that fails to load.
+- **Rebuilds when a bound moves.** When Arch moves a runtime past a bound, the packages are rebuilt with a `pkgrel` bump. `scripts/check-deps.sh` shows when a rebuild is due: [docs/dependencies.md](docs/dependencies.md).
 - **Portable binaries.** Packages target generic x86-64 and run on any x86-64 CPU. ONNX Runtime picks its AVX2 or AVX-512 kernels at run time ([docs/build.md](docs/build.md#portable-baseline)).
 - **Prebuilt, from a clean chroot.** The `-bin` packages are built from this recipe in a clean chroot and published at <https://github.com/rsd/omarchy-onnxruntime/releases> with a `SHA256SUMS` file. They hold no NVIDIA, Intel or AMD library ([licence](#licence-and-redistribution)).
 
-Arch's packages are the better choice if you want only the official repository, or the smallest CPU-only install. By default this set depends on `nccl`, even on a machine without an NVIDIA GPU. Each of Arch's packages provides `onnxruntime` and conflicts with the others. This set's `onnxruntime-core` conflicts with all of them, because they install the same `libonnxruntime.so`. Install one set per machine. The comparison table, with its sources, and the package for each kind of hardware are in [docs/choosing.md](docs/choosing.md).
+Arch's packages are the better choice in some cases:
 
-### CUDA architecture presets
+- You want only the official repository, or the smallest CPU-only install. By default this set depends on `nccl` (NVIDIA's library for communication between GPUs), even on a machine without an NVIDIA GPU.
+- Each of Arch's packages provides `onnxruntime` and conflicts with the others. This set's `onnxruntime-core` conflicts with all of them, because they install the same `libonnxruntime.so`. Install one set per machine.
 
-`ORTF_CUDA_ARCHS` chooses the GPU architectures the CUDA provider is compiled for.
-
-- The default preset `rtx` covers Turing to Blackwell (`75 86 89 120`, package `-cuda13-rtx`, 154.7 MiB installed).
-- The preset `all` adds A100, H100 and B200-class GPUs (`-cuda13-all`, 294.9 MiB).
-- A list such as `120` builds for those GPUs only.
-
-The table with sizes and build times is in [docs/build.md](docs/build.md#cuda-architectures).
-
-### AMD GPUs
-
-ONNX Runtime 1.29 has no ROCm provider. The only AMD GPU provider is MIGraphX. It ships as `onnxruntime-provider-migraphx` and its Python add-on `python-onnxruntime-provider-migraphx`, from their own AUR package base, `onnxruntime-split-migraphx`. It is a source build only, with no prebuilt package, and it is **untested on AMD hardware**: the maintainer has none. If you have an AMD GPU, a report of a result is welcome ([how to report](docs/amd.md#reporting-a-result)). See [docs/amd.md](docs/amd.md).
+The comparison table, with its sources, and the package for each kind of hardware are in [docs/choosing.md](docs/choosing.md).
 
 ## Install
 
-Install the prebuilt packages for the engines you use from the AUR (the core is always needed):
+On Arch Linux or Omarchy, install from the AUR (the Arch User Repository) with an AUR helper such as `yay`. Install the core, which runs on the CPU, together with the engines your machine has, in one call. The core replaces Arch's own `onnxruntime-*` packages if you have them. This example adds NVIDIA CUDA, Intel OpenVINO and the Python module:
 
 ```bash
-yay -S onnxruntime-core-bin onnxruntime-provider-cuda13-rtx-bin onnxruntime-provider-tensorrt-cuda13-bin onnxruntime-provider-openvino-bin onnxruntime-provider-dnnl-bin python-onnxruntime-core-bin
+yay -S onnxruntime-core-bin onnxruntime-provider-cuda13-rtx-bin onnxruntime-provider-openvino-bin python-onnxruntime-core-bin
 ```
 
-TensorRT is not in Arch's repositories, so install it first. [INSTALL.md](INSTALL.md) lists the vendor runtimes, TensorRT, installing without an AUR helper, building from the recipe, checking the installation, troubleshooting and uninstalling.
+For the CPU only, install `onnxruntime-core-bin` alone.
 
-To build the packages yourself, follow [docs/build-from-source.md](docs/build-from-source.md).
-
-Check the installation from a clone of this repository:
+Check that it works. This lists the installed packages, the engine libraries beside `libonnxruntime.so`, and the engines Python sees:
 
 ```bash
-scripts/smoke-test.sh --require cpu
+pacman -Q | grep onnxruntime
+ls /usr/lib/libonnxruntime*.so
+python -c "import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())"
 ```
 
-Add the engines your machine has to `--require`, such as `cpu,cuda`.
+[INSTALL.md](INSTALL.md) has the rest: the package for each kind of hardware, the vendor runtimes, TensorRT (it is not in Arch's repositories), installing without an AUR helper, building from the recipe, troubleshooting and uninstalling.
 
-## Requirements and limits
+These are pacman packages. On another Linux distribution, use ONNX Runtime from [onnxruntime.ai](https://onnxruntime.ai), or the source in this project's [`source-v1.29.0` release](https://github.com/rsd/omarchy-onnxruntime/releases/tag/source-v1.29.0).
 
-- **Arch Linux on x86_64.**
-- **Vendor runtimes come from their own packages.** CUDA, cuDNN, NCCL, OpenVINO, MIGraphX and the HIP runtime are in Arch's repositories. TensorRT is not ([INSTALL.md](INSTALL.md#install-tensorrt)).
-- **The CUDA 12 and MIGraphX packages are untested** on Pascal, Volta and AMD hardware.
-- **Not packaged:** NVIDIA Maxwell, the AMD Ryzen AI NPU, and older Intel graphics ([docs/hardware.md](docs/hardware.md)).
-- **The upstream source repository is unreachable.** `github.com/microsoft/onnxruntime` has returned 404 since 2026-11-17. The recipes fetch the ONNX Runtime source from this project's release `source-v1.29.0` by default. `ORTF_SOURCE=upstream` selects the git tag again ([docs/build.md](docs/build.md#the-onnx-runtime-source-mirror-or-upstream)). The prebuilt packages are not affected.
+[omarchy-broadcast](https://github.com/rsd/omarchy-broadcast) is a program that can use these packages. Its [ONNX setup guide](https://github.com/rsd/omarchy-broadcast/blob/main/docs/setup/onnx.md) shows which engines it uses and how to set them up.
+
+## Limits
+
+- **Arch Linux and Omarchy on x86_64 only.** The packages are pacman packages.
+- **Untested hardware:** the CUDA 12 package on NVIDIA Pascal and Volta, and the MIGraphX package on AMD GPUs ([docs/hardware.md](docs/hardware.md), [docs/amd.md](docs/amd.md)). The rest is tested on one machine, an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX ([docs/choosing.md](docs/choosing.md)).
+- **Not packaged:** NVIDIA Maxwell, the AMD Ryzen AI NPU, older Intel graphics, and AMD Polaris and Vega APUs ([docs/hardware.md](docs/hardware.md)).
+- **NCCL on every machine.** The prebuilt core depends on `nccl`, 364.18 MiB installed, even without an NVIDIA GPU. Only a source build with `ORTF_NCCL=0` leaves it out ([docs/choosing.md](docs/choosing.md#where-arch-is-the-better-choice)).
 
 ## Documentation
 
@@ -107,64 +65,22 @@ Add the engines your machine has to `--require`, such as `cpu,cuda`.
 |---|---|
 | [INSTALL.md](INSTALL.md) | Installing: choosing packages, prebuilt or source, runtimes, TensorRT, upgrades, checks, troubleshooting, uninstalling |
 | [docs/choosing.md](docs/choosing.md) | This set versus Arch's `onnxruntime-*` packages: what each offers, a comparison table, which package for which hardware |
-| [docs/build-from-source.md](docs/build-from-source.md) | Building and installing from the recipe, step by step |
-| [docs/build.md](docs/build.md) | Build inputs, CUDA architectures, package names, dependency mirroring, ccache, time, memory and disk |
 | [docs/packages.md](docs/packages.md) | The packages, their dependencies and sizes, and why they are split this way |
-| [docs/dependencies.md](docs/dependencies.md) | Version bounds on vendor runtimes, and `scripts/check-deps.sh` |
-| [docs/engines.md](docs/engines.md) | Per-engine notes (CUDA, TensorRT, OpenVINO, oneDNN), using the library from C, Rust and Python |
+| [docs/engines.md](docs/engines.md) | Per-engine notes (CUDA, TensorRT, OpenVINO, oneDNN), the vendor runtimes, using the library from C, Rust and Python |
 | [docs/hardware.md](docs/hardware.md) | Which GPUs, CPUs and NPUs each engine covers; what is not packaged |
 | [docs/amd.md](docs/amd.md) | AMD GPUs: the MIGraphX provider (untested), how to install it and how to report a result |
 | [docs/cuda12-legacy.md](docs/cuda12-legacy.md) | NVIDIA Pascal and Volta: the CUDA 12 provider, install and build |
-| [docs/release.md](docs/release.md) | The maintainer's release procedure |
-| [docs/release-cuda12.md](docs/release-cuda12.md) | The release procedure of the CUDA 12 line. The main and CUDA 12 lines release together |
-| [docs/release-migraphx.md](docs/release-migraphx.md) | The release procedure of the MIGraphX line (AUR source only) |
-| [docs/testing.md](docs/testing.md) | `scripts/test.sh`, the licence guard and the git hooks |
+| [docs/build-from-source.md](docs/build-from-source.md) | Building and installing from the recipe, step by step |
+| [docs/build.md](docs/build.md) | Build inputs, CUDA architectures, package names, dependency mirroring, the source mirror, ccache, time, memory and disk |
+| [docs/dependencies.md](docs/dependencies.md) | Version bounds on vendor runtimes, and `scripts/check-deps.sh` |
 | [docs/results.md](docs/results.md) | Measured results of the smoke test and model check |
 | [docs/glossary.md](docs/glossary.md) | The terms these pages use |
 | [tools/ort-smoke/README.md](tools/ort-smoke/README.md) | The smoke test: targets, options, how to read its output |
 | [tools/ort-model-check/README.md](tools/ort-model-check/README.md) | The model check: runs a real ONNX model on each engine and compares outputs and timings |
 
-Pick your path:
+## Maintainers
 
-- **Choosing between this set and Arch's packages:** [docs/choosing.md](docs/choosing.md).
-- **Installing:** [INSTALL.md](INSTALL.md), then [docs/hardware.md](docs/hardware.md) and [docs/engines.md](docs/engines.md). Pascal and Volta: [docs/cuda12-legacy.md](docs/cuda12-legacy.md). AMD: [docs/amd.md](docs/amd.md).
-- **Building:** [docs/build-from-source.md](docs/build-from-source.md), then [docs/build.md](docs/build.md) and [docs/dependencies.md](docs/dependencies.md).
-- **Maintaining a release:** [docs/release.md](docs/release.md) and [docs/testing.md](docs/testing.md).
-
-## Testing
-
-`scripts/test.sh` runs every check that needs no GPU, no network and no vendor install. Checks of the packages on real hardware use `scripts/smoke-test.sh` and `tools/ort-model-check`. See [docs/testing.md](docs/testing.md).
-
-## Repository layout
-
-```
-README.md, INSTALL.md
-LICENSE-MIT, LICENSE-APACHE
-.githooks/                          pre-commit, pre-merge-commit, pre-push: run the licence guard
-onnxruntime-split/PKGBUILD          the recipe: one build (pkgbase onnxruntime-split), split into onnxruntime-core, one package per engine, and python-onnxruntime-core
-onnxruntime-split/.SRCINFO          the recipe's metadata for the AUR, at its default inputs
-onnxruntime-split-cuda12/PKGBUILD   the CUDA 12 recipe (pkgbase onnxruntime-split-cuda12), generated by scripts/gen-cuda12.sh; do not edit
-onnxruntime-split-cuda12/.SRCINFO   its metadata for the AUR
-onnxruntime-split-migraphx/PKGBUILD the MIGraphX recipe (pkgbase onnxruntime-split-migraphx), generated by scripts/gen-migraphx.sh; do not edit
-onnxruntime-split-migraphx/.SRCINFO its metadata for the AUR
-scripts/check-no-vendor.sh          licence guard: refuses vendor and binary files
-scripts/check-deps.sh               checks built packages' library dependencies and version bounds against this system
-scripts/check-cuda-archs.sh         checks which GPU architectures a built CUDA provider holds
-scripts/make-source-archive.sh      makes the ONNX Runtime source archive that the mirror release hosts, reproducibly
-scripts/check-upstream.sh           says whether github.com/microsoft/onnxruntime is back and still has our commit
-scripts/srcinfo.sh                  writes, checks or copies to an AUR clone a recipe's .SRCINFO
-scripts/gen-bin.sh                  generates the PKGBUILD, .SRCINFO and SHA256SUMS of a prebuilt (-bin) AUR package from a release's packages
-scripts/gen-cuda12.sh               generates onnxruntime-split-cuda12/PKGBUILD from onnxruntime-split/PKGBUILD
-scripts/gen-migraphx.sh             generates onnxruntime-split-migraphx/PKGBUILD from onnxruntime-split/PKGBUILD
-scripts/gen-line-lib.sh             the generation rules shared by the two generators above
-scripts/smoke-test.sh               builds and runs tools/ort-smoke against an installed ONNX Runtime
-scripts/test.sh                     runs every check of this repository
-scripts/tests/                      tests of the scripts above and of the PKGBUILD's build inputs
-tools/ort-smoke/                    the smoke test program (C) and its model generator
-tools/ort-model-check/              runs a real ONNX model on each engine, compares outputs and timings (Python)
-docs/                               the documentation, indexed above
-aur/                                (not tracked) clones of the AUR repositories, see docs/release.md
-```
+The repository layout, the tests and the release procedures are in [docs/maintainers.md](docs/maintainers.md).
 
 ## Licence and redistribution
 
@@ -179,4 +95,10 @@ aur/                                (not tracked) clones of the AUR repositories
 - **You may redistribute builds of this recipe as they are**, as the official prebuilt packages are. Never bundle vendor libraries in or alongside them. A build you change so that it contains a vendor library is outside this description.
 - This is not legal advice.
 
-The script `scripts/check-no-vendor.sh` refuses vendor and binary files, and content with an NVIDIA or Intel marker, in this repository. Enable its git hooks in your clone with `git config core.hooksPath .githooks`. [docs/testing.md](docs/testing.md#the-licence-guard-and-the-git-hooks) has the details.
+The script `scripts/check-no-vendor.sh` refuses vendor and binary files, and content with an NVIDIA or Intel marker, in this repository. Enable its git hooks in your clone with this command:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+[docs/testing.md](docs/testing.md#the-licence-guard-and-the-git-hooks) has the details.
