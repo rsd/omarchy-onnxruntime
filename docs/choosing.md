@@ -1,6 +1,6 @@
 # Choosing between this repository's packages and Arch's
 
-Pick one ONNX Runtime package set per machine. Arch's `extra` repository and this repository both build 1.29.0, and the two sets cannot be installed together. This set has every engine and feature that Arch's has (the training operators, oneDNN, NCCL and the MIGraphX provider for AMD GPUs). It adds TensorRT, OpenVINO (Intel CPU, GPU and NPU) and a CUDA 12 line for NVIDIA Pascal and Volta.
+Pick one ONNX Runtime package set per machine. Arch's `extra` repository and this repository both build 1.29.0, and the two sets cannot be installed together. This set has every engine and feature that Arch's has (the training operators, oneDNN, NCCL and the MIGraphX provider for AMD GPUs). It adds TensorRT, OpenVINO (Intel CPU, GPU and NPU), WebGPU (any GPU with a Vulkan driver) and a CUDA 12 line for NVIDIA Pascal and Volta.
 
 The costs:
 
@@ -40,30 +40,31 @@ Programs built against Arch's `onnxruntime` keep working. `onnxruntime-core` pro
 
 ## Comparison
 
-"Arch" is the five builds above. "This repository" is the default prebuilt set (the AUR's `onnxruntime-split-bin`, 1.29.0-7) plus the two separate lines, CUDA 12 and MIGraphX.
+"Arch" is the five builds above. "This repository" is the default prebuilt set (the AUR's `onnxruntime-split-bin`, which includes the WebGPU package starting with 1.29.0-8) plus the two separate lines, CUDA 12 and MIGraphX.
 
 | | Arch `extra` | This repository |
 |---|---|---|
-| Version | 1.29.0 (pkgrel 3) | 1.29.0 (pkgrel 7; CUDA 12 line 2, MIGraphX line 1) |
-| Engines | CPU; CUDA, MIGraphX and oneDNN depending on the build | CPU, CUDA, TensorRT, OpenVINO, oneDNN; MIGraphX in its own package |
-| Combining engines | one build per machine: CUDA and MIGraphX never together | one package per engine, so CUDA, TensorRT, OpenVINO and oneDNN together |
+| Version | 1.29.0 (pkgrel 3) | 1.29.0 (pkgrel 8; CUDA 12 line 2, MIGraphX line 1) |
+| Engines | CPU; CUDA, MIGraphX and oneDNN depending on the build | CPU, CUDA, TensorRT, OpenVINO, oneDNN, WebGPU; MIGraphX in its own package |
+| Combining engines | one build per machine: CUDA and MIGraphX never together | one package per engine, so CUDA, TensorRT, OpenVINO, oneDNN and WebGPU together |
 | NVIDIA Turing (RTX 20) and newer | yes (CUDA 13, `75` to `121`) | supported (CUDA 13; presets `rtx`: `75 86 89 120` and `all`: `75 80 86 89 90 100 103 120`); `sm_120` tested, the other architectures not tested ([hardware.md](hardware.md#nvidia)) |
 | NVIDIA Pascal and Volta | no (CUDA 13 builds start at `sm_75`) | CUDA 12 line, `onnxruntime-provider-cuda12-legacy`; supported, **not tested** on that hardware ([cuda12-legacy.md](cuda12-legacy.md)) |
-| NVIDIA Maxwell | no | not supported: ONNX Runtime 1.29's fp16 kernels need `sm_53` or later ([cuda12-legacy.md](cuda12-legacy.md#who-needs-it)) |
+| NVIDIA Maxwell | no | CUDA: not supported, ONNX Runtime 1.29's fp16 kernels need `sm_53` or later ([cuda12-legacy.md](cuda12-legacy.md#who-needs-it)). WebGPU: supported, **not tested** ([below](#webgpu-or-a-vendor-provider)) |
 | TensorRT | not enabled | yes |
 | Intel CPU, GPU and NPU (OpenVINO) | not enabled | yes ([hardware.md](hardware.md#intel-openvino-provider)) |
+| WebGPU (GPUs with a Vulkan driver) | not among its engines | `onnxruntime-provider-webgpu`: supported; **tested** on the RTX 5080 Laptop GPU and the Arrow Lake integrated GPU, **not tested** elsewhere. A plugin provider: the application loads it with the plugin API, `providers=["WebGpuExecutionProvider"]` does not reach it ([engines.md](engines.md#webgpu)) |
 | oneDNN (CPU) | in the CUDA and ROCm builds, using Arch's shared `onednn` package | `onnxruntime-provider-dnnl` (optional, for Intel server CPUs): oneDNN 3.11.3 built here and linked statically; no dependency on Arch's `onednn` ([engines.md](engines.md#onednn)) |
 | AMD GPUs | `onnxruntime-rocm`, `onnxruntime-opt-rocm` (MIGraphX) | `onnxruntime-provider-migraphx` and its Python add-on `python-onnxruntime-provider-migraphx`, AUR source build only; supported for Arch's ROCm build list, **not tested** on AMD hardware ([amd.md](amd.md)) |
 | Training operators | yes, in every build | yes; the Python module carries `onnxruntime.training` (needs `python-pytorch`, optional) |
 | NCCL | `nccl` in the CUDA builds, `rccl` in the ROCm builds | NCCL on by default, so `onnxruntime-core` depends on `nccl`; `ORTF_NCCL=0` source builds drop it ([build.md](build.md#nccl-and-the-nccloff-packages)) |
 | CPU baseline | generic x86-64, except the `opt` builds, compiled with `-march=haswell` (AVX2 CPUs only) | generic x86-64 for every package, for any x86-64 CPU |
 | Python | one `python-` twin per build | one `python-onnxruntime-core` for every engine |
-| Installed size | table above | see [packages.md](packages.md#sizes) (1.29.0-6 measured; 1.29.0-7 not yet) |
+| Installed size | table above | see [packages.md](packages.md#sizes) (1.29.0-6 measured; 1.29.0-7 and 1.29.0-8 not yet, except the WebGPU package) |
 | Vendor dependency versions | bare names (`cuda`, `cudnn`, `migraphx`) | bounded: major for `cuda`, `cudnn`, `migraphx` and `hip-runtime-amd`, major.minor for TensorRT and OpenVINO ([dependencies.md](dependencies.md#the-version-bounds)) |
 | How you install it | `pacman -S` from `extra` | prebuilt: AUR `-bin` packages, whose files are GitHub release assets; or built from the AUR source packages; MIGraphX is source only |
 | Maintenance | the Arch packagers, with the repository | one maintainer; a vendor upgrade past a bound is followed by a rebuild and a pkgrel bump |
 
-This repository's hardware is **tested** on one machine only: an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX with its integrated GPU and NPU ([results.md](results.md)). Everything else the packages are built for is supported and **not tested**, including the CUDA 12 and MIGraphX packages on Pascal, Volta and AMD hardware ([hardware.md](hardware.md)). This page makes no statement about the hardware Arch's packages were tested on.
+This repository's hardware is **tested** on one machine only: an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX with its integrated GPU and NPU ([results.md](results.md)). WebGPU ran on that machine's two GPUs. Everything else the packages are built for is supported and **not tested**, including the CUDA 12 and MIGraphX packages on Pascal, Volta and AMD hardware ([hardware.md](hardware.md)). This page makes no statement about the hardware Arch's packages were tested on.
 
 ## Which of this repository's packages for which hardware
 
@@ -76,14 +77,27 @@ Install the core, then the packages of the engines you have ([INSTALL.md](../INS
 | Intel Xeon with AVX-512 or AMX | the core, and optionally `onnxruntime-provider-dnnl` | oneDNN is meant for int8 and bf16 models that it can take in one piece; measure against the CPU provider ([engines.md](engines.md#onednn)) |
 | AMD CPU | `onnxruntime-core` | the CPU provider; the oneDNN provider is not meant for it |
 | Intel GPU (Xe, Arc) or NPU | `onnxruntime-provider-openvino` and the device's plugin and driver | [engines.md](engines.md#openvino) |
-| Intel Gen8, Gen9 or Gen11 integrated GPU | `onnxruntime-provider-openvino`, with the AUR's `intel-compute-runtime-legacy` in place of `intel-compute-runtime` | supported with that legacy driver, which you install yourself; not tested: [hardware.md](hardware.md#intel-openvino-provider) |
+| Intel Gen8, Gen9 or Gen11 integrated GPU | `onnxruntime-provider-openvino`, with the AUR's `intel-compute-runtime-legacy` in place of `intel-compute-runtime` | supported with that legacy driver, which you install yourself; not tested: [hardware.md](hardware.md#intel-openvino-provider). A second route is `onnxruntime-provider-webgpu` with `vulkan-intel` ([below](#webgpu-or-a-vendor-provider)) |
 | NVIDIA Turing (RTX 20, GTX 16) to Blackwell (RTX 50) | `onnxruntime-provider-cuda13-rtx`, and `onnxruntime-provider-tensorrt-cuda13` for TensorRT | `onnxruntime-provider-cuda13-all` for A100, H100 and B200-class GPUs |
 | NVIDIA Pascal or Volta | `onnxruntime-provider-cuda12-legacy` | replaces the CUDA 13 setup on that machine; supported, not tested: [cuda12-legacy.md](cuda12-legacy.md) |
 | AMD GPU in Arch's ROCm build list (Vega, RDNA 1 to 4, Instinct) | `onnxruntime-provider-migraphx` | AUR source build, with the Python add-on; supported, not tested: [amd.md](amd.md#which-amd-gpus) |
 | Model training in Python | `python-onnxruntime-core`, and `python-pytorch` | the training modules need PyTorch even to import |
-| NVIDIA Maxwell, AMD Polaris and Vega APUs, the Ryzen AI NPU | no package: not supported | the reasons are in [hardware.md](hardware.md) |
+| NVIDIA Maxwell, AMD Polaris, AMD Vega APUs | `onnxruntime-provider-webgpu` and the Vulkan driver of the GPU (`nvidia-utils`, `vulkan-radeon`); not a vendor provider | supported, not tested; applications must load it with the plugin API: [below](#webgpu-or-a-vendor-provider) |
+| The Ryzen AI NPU | no package: not supported | the reasons are in [hardware.md](hardware.md) |
 
 Engines can be combined. A laptop with an Intel CPU, an NVIDIA GPU and an NPU takes the core, the CUDA, TensorRT and OpenVINO packages, and, optionally, the oneDNN one. The oneDNN provider is meant for Intel server CPUs. On a laptop it was 7 to 19 times slower than the CPU provider in the [measurements](results.md#release-1290-7).
+
+## WebGPU or a vendor provider
+
+Pick `onnxruntime-provider-webgpu` only when no vendor provider covers your GPU. Where CUDA, TensorRT, OpenVINO or MIGraphX applies, use that one: it is the provider its vendor supports, and applications select it in the usual way.
+
+The GPUs WebGPU is for:
+
+- NVIDIA Maxwell, which the CUDA provider cannot be built for.
+- Intel graphics from Gen8 on, through Mesa's `vulkan-intel`, as a second route beside OpenVINO's `GPU` device (Gen8, Gen9 and Gen11 need a legacy driver you install yourself there).
+- AMD Polaris and Vega APUs, which are not in Arch's ROCm build list, and AMD discrete cards through `vulkan-radeon`.
+
+It needs `vulkan-icd-loader` and one Vulkan driver for the GPU. It is not shown to be faster than the CPU. On the test machine's CPU and three small models the Intel GPU's median was 2.1 to 5.8 times the CPU's, and the RTX was faster on two of the three ([results.md](results.md#webgpu-provider-1290-8)). A speed-up on older machines is not tested. An application that selects providers by name with `providers=[...]` cannot use it without a code change, and the MODNet model does not run on it ([engines.md](engines.md#webgpu)).
 
 ## Where Arch is the better choice
 

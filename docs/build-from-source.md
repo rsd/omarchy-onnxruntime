@@ -29,7 +29,7 @@ sudo pacman -S --needed base-devel git cmake ninja patchelf python python-numpy 
 sudo pacman -S --needed ccache
 ```
 
-The PKGBUILD's `makedepends` also lists `cuda`, `cudnn`, `nccl` and `openvino`, because the default build has the CUDA, TensorRT and OpenVINO providers and NCCL. The oneDNN provider needs nothing installed: the recipe builds oneDNN from a source archive it downloads. The recipe adds more `makedepends` for some engines:
+The PKGBUILD's `makedepends` also lists `cuda`, `cudnn`, `nccl` and `openvino`, because the default build has the CUDA, TensorRT and OpenVINO providers and NCCL. The oneDNN provider needs nothing installed: the recipe builds oneDNN from a source archive it downloads. The WebGPU provider needs `python-jinja`, `python-markupsafe`, `spirv-headers`, `spirv-tools`, `vulkan-headers` and `vulkan-utility-libraries` for the build, all in Arch's repositories ([dependencies.md](dependencies.md#webgpu-dawn-and-vulkan)). The recipe adds more `makedepends` for some engines:
 
 - `tensorrt` when it builds the TensorRT provider. The AUR's `tensorrt` and `nvidia-tensorrt-sdk-local`, pkgrel 2 or later, both provide it ([Install TensorRT](../INSTALL.md#3-install-tensorrt)).
 - `migraphx` and `hip-runtime-amd` when `migraphx` is in `ORTF_EPS`. The MIGraphX package has its own recipe: [amd.md](amd.md#building-it).
@@ -62,15 +62,16 @@ The recipe finds TensorRT in `/opt/nvidia/tensorrt` when that holds `include/NvI
 3. Install the packages in one `pacman -U` that names the exact files:
 
    ```bash
-   sudo pacman -U onnxruntime-core-1.29.0-7-x86_64.pkg.tar.zst \
-     onnxruntime-provider-cuda13-rtx-1.29.0-7-x86_64.pkg.tar.zst \
-     onnxruntime-provider-tensorrt-cuda13-1.29.0-7-x86_64.pkg.tar.zst \
-     onnxruntime-provider-openvino-1.29.0-7-x86_64.pkg.tar.zst \
-     onnxruntime-provider-dnnl-1.29.0-7-x86_64.pkg.tar.zst \
-     python-onnxruntime-core-1.29.0-7-x86_64.pkg.tar.zst
+   sudo pacman -U onnxruntime-core-1.29.0-8-x86_64.pkg.tar.zst \
+     onnxruntime-provider-cuda13-rtx-1.29.0-8-x86_64.pkg.tar.zst \
+     onnxruntime-provider-tensorrt-cuda13-1.29.0-8-x86_64.pkg.tar.zst \
+     onnxruntime-provider-openvino-1.29.0-8-x86_64.pkg.tar.zst \
+     onnxruntime-provider-dnnl-1.29.0-8-x86_64.pkg.tar.zst \
+     onnxruntime-provider-webgpu-1.29.0-8-x86_64.pkg.tar.zst \
+     python-onnxruntime-core-1.29.0-8-x86_64.pkg.tar.zst
    ```
 
-`1.29.0-7` is the version in the recipe now (`pkgver` 1.29.0, `pkgrel` 7). Use the version in the PKGBUILD you build. The core and the Python package depend on `nccl`, which pacman installs from `extra` with them.
+`1.29.0-8` is the version in the recipe now (`pkgver` 1.29.0, `pkgrel` 8). Use the version in the PKGBUILD you build. The core and the Python package depend on `nccl`, which pacman installs from `extra` with them.
 
 What `makepkg` does:
 
@@ -82,9 +83,9 @@ A full build with one CUDA architecture took 27 minutes on a 24-thread machine (
 
 ### Naming the files
 
-Install the packages of one build in a single `pacman -U` that names the exact files. Do not use a glob such as `*onnxruntime-*-1.29.0-7-*`. It also matches packages that an earlier build with other inputs left in the directory, for example `onnxruntime-provider-cuda13-sm120` beside `-cuda13-rtx`. Two CUDA packages conflict, so the transaction fails.
+Install the packages of one build in a single `pacman -U` that names the exact files. Do not use a glob such as `*onnxruntime-*-1.29.0-8-*`. It also matches packages that an earlier build with other inputs left in the directory, for example `onnxruntime-provider-cuda13-sm120` beside `-cuda13-rtx`. Two CUDA packages conflict, so the transaction fails.
 
-`makepkg` names a package `<name>-1.29.0-7-x86_64<PKGEXT>`, with `PKGEXT` from `/etc/makepkg.conf` (`.pkg.tar.zst` on Arch). `PKGDEST=/an/empty/directory makepkg ...` keeps the packages of one build apart.
+`makepkg` names a package `<name>-1.29.0-8-x86_64<PKGEXT>`, with `PKGEXT` from `/etc/makepkg.conf` (`.pkg.tar.zst` on Arch). `PKGDEST=/an/empty/directory makepkg ...` keeps the packages of one build apart.
 
 If you installed a local build made before 1.29.0-5, its CUDA package was named `onnxruntime-provider-cuda13-sm120`. The default then was one architecture, `120`. `-cuda13-rtx` conflicts with it, so pacman offers to remove it. Answer `y`.
 
@@ -93,7 +94,7 @@ If you installed a local build made before 1.29.0-5, its CUDA package was named 
 The names above are those of the default build (the CUDA preset `rtx`). A subset is fine: the core alone (CPU only), the core and `onnxruntime-provider-openvino`, and so on. The core is always needed, because the other packages depend on it at the same version.
 
 - **CUDA package name.** The suffix depends on `ORTF_CUDA_ARCHS` (`-cuda13-rtx` for `rtx`, `-cuda13-all` for `all`, `-cuda13-sm89-sm120` for `"89 120"`). The `13` in `-cuda13` is the CUDA toolkit's major version. [build.md](build.md#cuda-architectures) has the rules.
-- **No CUDA.** A build without `cuda` in `ORTF_EPS`, such as `ORTF_EPS=cpu`, needs `ORTF_NCCL=0` and writes `-nccloff` packages. This command gives `onnxruntime-core-nccloff-1.29.0-7-x86_64.pkg.tar.zst` and the Python package's:
+- **No CUDA.** A build without `cuda` in `ORTF_EPS`, such as `ORTF_EPS=cpu`, needs `ORTF_NCCL=0` and writes `-nccloff` packages. This command gives `onnxruntime-core-nccloff-1.29.0-8-x86_64.pkg.tar.zst` and the Python package's:
 
   ```bash
   ORTF_EPS=cpu ORTF_NCCL=0 makepkg -d -f
@@ -101,8 +102,15 @@ The names above are those of the default build (the CUDA preset `rtx`). A subset
 
   - An `ORTF_NCCL=0` build also gives every package of a build with CUDA a `-nccloff` name. Its packages never install beside the NCCL ones ([build.md](build.md#nccl-and-the-nccloff-packages)).
   - On a machine with no NVIDIA GPU, this is how to avoid the `nccl` dependency (364.18 MiB installed). No `-nccloff` package is prebuilt.
-- **oneDNN.** `dnnl` is in the default `ORTF_EPS`, so `onnxruntime-provider-dnnl-1.29.0-7-x86_64.pkg.tar.zst` is among the files. It is optional and not needed on most machines ([engines.md](engines.md#onednn)). Leave `dnnl` out of `ORTF_EPS` to skip it.
-- **MIGraphX.** The provider is built from its own recipe, `onnxruntime-split-migraphx` ([amd.md](amd.md#building-it)). It is supported for the GPUs in Arch's ROCm build list and **not tested on AMD hardware**. With `migraphx` in `ORTF_EPS` of this recipe, there is also `onnxruntime-provider-migraphx-nccloff-1.29.0-7-x86_64.pkg.tar.zst` to name. This command is an AMD-only local build:
+- **oneDNN.** `dnnl` is in the default `ORTF_EPS`, so `onnxruntime-provider-dnnl-1.29.0-8-x86_64.pkg.tar.zst` is among the files. It is optional and not needed on most machines ([engines.md](engines.md#onednn)). Leave `dnnl` out of `ORTF_EPS` to skip it.
+- **WebGPU.** `webgpu` is in the default `ORTF_EPS`, so `onnxruntime-provider-webgpu-1.29.0-8-x86_64.pkg.tar.zst` is among the files. It needs `vulkan-icd-loader` at run time and the Vulkan driver of your GPU ([engines.md](engines.md#webgpu)). This command builds it alone, which took 12 minutes to configure and build at `-j16` on the test machine ([build.md](build.md#parallelism-memory-and-disk)); with `ORTF_PYTHON=1` it also packages the Python module:
+
+  ```bash
+  ORTF_EPS=webgpu ORTF_NCCL=0 ORTF_PYTHON=0 makepkg -d -f
+  ```
+
+  It writes `onnxruntime-core-nccloff` and `onnxruntime-provider-webgpu-nccloff`. Leave `webgpu` out of `ORTF_EPS` to skip it.
+- **MIGraphX.** The provider is built from its own recipe, `onnxruntime-split-migraphx` ([amd.md](amd.md#building-it)). It is supported for the GPUs in Arch's ROCm build list and **not tested on AMD hardware**. With `migraphx` in `ORTF_EPS` of this recipe, there is also `onnxruntime-provider-migraphx-nccloff-1.29.0-8-x86_64.pkg.tar.zst` to name. This command is an AMD-only local build:
 
   ```bash
   ORTF_EPS=migraphx ORTF_NCCL=0 makepkg -d -f

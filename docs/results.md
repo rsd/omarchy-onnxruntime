@@ -1,6 +1,6 @@
 # Measured results
 
-This page reports what the recipe's checks measured for two builds, and the conditions of each run. The first build is the single-package 1.29.0-1 (with the CUDA 12 legacy provider 1.29.0-1). The second is the [1.29.0-7 packages](#release-1290-7), which add ONNX Runtime's training support, the oneDNN provider and the MIGraphX packages.
+This page reports what the recipe's checks measured for three builds, and the conditions of each run. The first build is the single-package 1.29.0-1 (with the CUDA 12 legacy provider 1.29.0-1). The second is the [1.29.0-7 packages](#release-1290-7), which add ONNX Runtime's training support, the oneDNN provider and the MIGraphX packages. The third is the [WebGPU provider of 1.29.0-8](#webgpu-provider-1290-8), run on the RTX 5080 Laptop GPU and on the Intel integrated GPU.
 
 The figures are for the raw model only, without any pre- or post-processing. They are indicative: the desktop was in use during the runs. The [smoke test](../tools/ort-smoke/README.md) and the [model check](../tools/ort-model-check/README.md) produced them. Terms such as TF32 and fp16 are in the [glossary](glossary.md).
 
@@ -15,6 +15,7 @@ The flags **tested** and **not tested** in [hardware.md](hardware.md) come from 
 | TensorRT | GeForce RTX 5080 Laptop GPU (`sm_120`) | other NVIDIA GPUs |
 | OpenVINO `CPU`, `GPU` and `NPU` devices | the CPU, integrated GPU and NPU of the Core Ultra 9 275HX | other Intel CPUs, GPUs (Arc included) and NPUs |
 | CUDA 12 legacy | `sm_120` of the RTX 5080 Laptop GPU, with the CUDA 12 libraries | `sm_60`, `sm_61`, `sm_70` and `sm_75` to `sm_89` on real cards |
+| WebGPU (`onnxruntime-provider-webgpu`) | the GeForce RTX 5080 Laptop GPU (NVIDIA's Vulkan driver) and the Arrow Lake integrated GPU of the Core Ultra 9 275HX (Mesa's `vulkan-intel`), [below](#webgpu-provider-1290-8) | NVIDIA Maxwell and other NVIDIA GPUs, other Intel graphics, every AMD GPU (Polaris and Vega APUs included) |
 | MIGraphX | none (a load check only, on a machine with no AMD GPU) | every AMD GPU |
 
 ## Conditions
@@ -335,5 +336,82 @@ The packages were then installed with `pacman` and run from `/usr`, with no envi
 - The CUDA 12 legacy provider on Pascal or Volta hardware; see [above](#not-tested).
 - The installed CUDA 12 line. The `onnxruntime-provider-cuda12-legacy` package was not installed, because three of its dependencies are AUR builds.
 - Training with PyTorch. `python-pytorch` was not installed, so `onnxruntime.training` was only imported without it ([above](#installed-packages)), and training itself was not run.
+
+## WebGPU provider 1.29.0-8
+
+`onnxruntime-provider-webgpu` ([engines.md](engines.md#webgpu)) was run on two GPUs: the NVIDIA GPU and the Intel integrated GPU of the test machine. The measurements are of this one package. The WebGPU provider is **not shown to be faster than the CPU** here: see [the reading](#webgpu-reading-the-figures).
+
+### Conditions
+
+| | |
+|---|---|
+| Package | The WebGPU provider of 1.29.0-8, built alone and offline (`ORTF_EPS=webgpu ORTF_NCCL=0 ORTF_PYTHON=0`, so `-nccloff` names), with Dawn `v20260714.215939` built in. 5.9 MiB to download, 16.2 MiB installed; the library is 16,606,312 bytes stripped and needs only `libstdc++`, `libm`, `libgcc_s` and `libc` ([build.md](build.md#parallelism-memory-and-disk)). The packages were extracted, not installed |
+| NVIDIA GPU | GeForce RTX 5080 Laptop GPU (`10de:2c19`, PCI `0000:01:00.0`), driver 615.78.08 (`nvidia-utils`) |
+| Intel GPU | the Arrow Lake integrated graphics of the Core Ultra 9 275HX (`8086:7d67`, PCI `0000:00:02.0`), Mesa's `vulkan-intel` 1:26.2.5-1 |
+| CPU and kernel | Intel Core Ultra 9 275HX, 24 threads; Linux 7.2.15-1-omarchy |
+| Where it ran | The smoke test against the extracted core and provider of 1.29.0-8, with `--prefix`. The model check used the machine's installed Python module (1.29.0-7), with `--webgpu-lib` naming the extracted provider library of 1.29.0-8; the plugin loaded into that core |
+| Smoke test | `scripts/smoke-test.sh --require webgpu:intel --only cpu,webgpu:intel`, and `--require webgpu:nvidia --only webgpu:nvidia`, each target alone, 5 warm runs, CPU EP fallback disabled |
+| Model check | `tools/ort-model-check/model-check.py --targets cpu,webgpu:intel,webgpu:nvidia --webgpu-lib <library>`, 50 timed runs after 3 warm-up runs, CPU EP fallback disabled, the defaults of [the conditions above](#conditions). The desktop was in use. The Intel GPU did not appear in Dawn's device list on the first runs of that day and did after a reboot; the cause was not investigated, and the figures below are from after it |
+
+### Smoke test
+
+Each WebGPU target ran alone, so that its result does not depend on a Dawn device left over from an earlier target. Milliseconds; max error 0 on every target.
+
+| Target | status | create ms | first ms | warm ms | max err |
+|---|---|---:|---:|---:|---:|
+| cpu | ok | 12.4 | 0.42 | 0.01 | 0 |
+| webgpu:intel | ok | 89.1 | 55.38 | 1.11 | 0 |
+| webgpu:nvidia, with the Intel GPU active | ok | 149.9 | 9.88 | 0.32 | 0 |
+
+The `device:` lines of the smoke test say which GPU did the work. For the Intel GPU: `Intel GPU 8086:7d67 at 0000:00:02.0, power preference low-power: the kernel counted the work on this GPU`. For the NVIDIA GPU: `NVIDIA GPU 10de:2c19 at 0000:01:00.0, power preference high-performance: Dawn's adapter is inferred from the power preference (no kernel usage counters for this GPU)`. The kernel keeps usage counters for the Intel GPU, so that verdict is measured. The NVIDIA driver keeps none, so that one is inferred from the power preference, not measured. The NVIDIA target also passed when the Intel GPU was the active one.
+
+Before the reboot, the NVIDIA target had also passed on the extracted package (create 161.3 ms, first 8.90 ms, warm 0.33 ms, max error 0).
+
+### Model check
+
+The same models as above. Medians are in milliseconds, and the errors are against the CPU outputs.
+
+#### selfie_segmentation_landscape, input 1x144x256x3
+
+| Target | create ms | first ms | mean ms | median ms | p95 ms | max err | mean err |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| cpu | 15.4 | 9.53 | 1.89 | 1.85 | 2.35 | 0 | 0 |
+| webgpu:nvidia | 179.1 | 31.64 | 1.07 | 1.05 | 1.15 | 6.06e-8 | 9.80e-12 |
+| webgpu:intel | 23.1 | 145.07 | 5.13 | 4.57 | 9.09 | 6.06e-8 | 9.80e-12 |
+
+#### pp_humansegv2_mobile_192x192, input 1x3x192x192
+
+| Target | create ms | first ms | mean ms | median ms | p95 ms | max err | mean err |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| cpu | 43.7 | 6.64 | 2.94 | 2.92 | 3.11 | 0 | 0 |
+| webgpu:nvidia | 201.0 | 44.85 | 4.10 | 3.86 | 5.71 | 1.79e-7 | 5.88e-9 |
+| webgpu:intel | 79.4 | 364.80 | 16.97 | 16.99 | 17.09 | 1.79e-7 | 5.82e-9 |
+
+#### pp_humansegv2_lite_192x192, input 1x3x192x192
+
+| Target | create ms | first ms | mean ms | median ms | p95 ms | max err | mean err |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| cpu | 24.8 | 11.87 | 4.57 | 3.69 | 7.54 | 0 | 0 |
+| webgpu:nvidia | 198.2 | 38.72 | 1.91 | 1.70 | 2.54 | 5.96e-7 | 9.26e-8 |
+| webgpu:intel | 77.3 | 190.08 | 7.87 | 7.60 | 9.62 | 5.96e-7 | 8.42e-8 |
+
+An earlier run on the RTX alone gave medians of 1.38, 3.72 and 1.70 ms for the three models, with the same maximum and mean errors, so the timings move a little from run to run.
+
+#### modnet_photographic, input 1x3x512x512: does not run
+
+`--size 512x512`, the model of the earlier tables. With CPU fallback disabled, session creation fails on the Intel GPU (this run) and on the RTX (an earlier run, same tool and library) with `This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled`. The CPU target ran (median 48.35 ms here, 51.55 ms in the earlier run). The cause is one int64 `Gather`, fed by a `Shape` node, which has no WebGPU kernel in ONNX Runtime 1.29.0.
+
+With CPU fallback allowed, MODNet runs on the RTX but the output is wrong: maximum error 1.00 and mean error 0.14 against the CPU's output. The first wrong node is a convolution (`Conv_304`). A sweep of single 3x3 convolutions found them wrong exactly when the input channel count is a multiple of 3, is not a multiple of 4, and is above 3 (6, 9, 15, 18 and so on). This was seen on the NVIDIA GPU through Vulkan; whether the Intel GPU does the same was not checked, because it stops earlier at the `Gather`. Both look like limitations of ONNX Runtime's own WebGPU provider, which this recipe does not change. It is a **known limitation**, and not fixed here.
+
+### Python
+
+On the machine's installed 1.29.0-7 Python module, `InferenceSession(model, providers=["WebGpuExecutionProvider"])` does not reach the plugin provider, whether or not `register_execution_provider_library` was called first: ONNX Runtime warns, drops the name and runs on the CPU. With `SessionOptions.add_provider_for_devices` and a device from `get_ep_devices()`, the session lists `WebGpuExecutionProvider` and `CPUExecutionProvider` and runs the model on the GPU (the model check works this way). The 1.29.0-8 Python module, which carries a patch for the plugin provider, was not run.
+
+### WebGPU: reading the figures
+
+- **No speed-up is shown.** Medians over 50 runs, CPU against the GPU: the RTX was faster on selfie segmentation (1.05 against 1.85 ms) and PP-HumanSeg lite (1.70 against 3.69 ms) and slower on PP-HumanSeg mobile (3.86 against 2.92 ms). The Intel GPU was slower on all three: 4.57 against 1.85 ms, 16.99 against 2.92 ms and 7.60 against 3.69 ms, which is 2.1 to 5.8 times the CPU's median. The CPU here is a fast desktop-class laptop CPU, and the models are small, so each run takes a few milliseconds. A speed-up on older machines (NVIDIA Maxwell, Intel Gen8 and later graphics through Mesa, AMD Polaris and Vega APUs) is **not tested**. The value of the provider is a working GPU path where no vendor provider exists.
+- **Accuracy.** The outputs agree with the CPU's to a maximum error of at most 6e-7, in fp32, on both GPUs.
+- **Start-up.** Session creation on a GPU took 23 to 201 ms and the first run 9.9 to 365 ms, against 0.4 to 12 ms for the CPU's first run. In the model check the Intel GPU's first run was the slowest, 145 to 365 ms.
+- **What was not run.** The WebGPU package of the default (NCCL) build, installed with `pacman` and run from `/usr`; the Python module of 1.29.0-8; any GPU other than the two above.
 
 Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

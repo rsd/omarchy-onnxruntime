@@ -123,7 +123,7 @@ The product names beside each gfx code are for orientation. The codes are author
 - RDNA 1's gfx1011 (Radeon Pro 5600M).
 - The RDNA 2 and 3 chips gfx1032 (RX 6600 and 6650 XT), gfx1033 and gfx1034 (RX 6500 and 6400).
 
-Arch built no code for them, so MIGraphX has nothing to compile for. Running Polaris would need an old ONNX Runtime (1.22 or earlier, the last with the ROCm provider) against an old ROCm (5.x or 6.x) that Arch no longer ships. This recipe does not provide that, so these GPUs are **not supported**.
+Arch built no code for them, so MIGraphX has nothing to compile for. Running Polaris would need an old ONNX Runtime (1.22 or earlier, the last with the ROCm provider) against an old ROCm (5.x or 6.x) that Arch no longer ships. This recipe does not provide that, so these GPUs are **not supported** by the MIGraphX provider. For Polaris and the Vega APUs, the WebGPU provider is a separate route: it is **supported** and **not tested** on them ([hardware.md](hardware.md#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus)).
 
 ## What exists for AMD GPUs
 

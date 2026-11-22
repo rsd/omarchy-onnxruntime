@@ -40,6 +40,7 @@ Options:
 | `--require LIST` | exit 1 unless these targets are `ok` |
 | `--json FILE` | also write the results as JSON |
 | `--trt-cache DIR` | enable the TensorRT engine cache, stored in `DIR` |
+| `--webgpu-lib PATH` | the WebGPU plugin provider library to register. Default: `libonnxruntime_providers_webgpu.so` in the Python module's `capi` directory, else beside the `libonnxruntime.so` it links (`/usr/lib` for the system package) |
 | `--allow-cpu-fallback` | do not disable the CPU EP fallback for the non-cpu targets; their `ok` rows read `ok*` |
 | `--precision MODE` | `default` (each provider's own arithmetic) or `fp32`; see [Precision modes](#precision-modes) |
 | `--tol TARGET=MAX[:MEAN]` | override the bounds on the max and mean abs error for a target; repeatable |
@@ -94,7 +95,7 @@ Statuses:
 
   Any other error is a `FAIL`.
 
-The script loads `capi/libonnxruntime_providers_<cuda|tensorrt|openvino|dnnl>.so` itself before creating the session. ONNX Runtime only logs a failure to load the provider and then fails the session with nodes assigned to the CPU EP, which hides the cause. When session creation fails, `InferenceSession` prints an "EP Error ... Falling back" banner (the script captures it) and retries on the CPU, whose error is raised from the original one. The script therefore classifies the whole exception chain.
+The script loads `capi/libonnxruntime_providers_<cuda|tensorrt|openvino|dnnl>.so` itself before creating the session. The WebGPU library is registered instead, as above. ONNX Runtime only logs a failure to load the provider and then fails the session with nodes assigned to the CPU EP, which hides the cause. When session creation fails, `InferenceSession` prints an "EP Error ... Falling back" banner (the script captures it) and retries on the CPU, whose error is raised from the original one. The script therefore classifies the whole exception chain.
 
 The JSON file (`--json`) records the mode as `precision` at the top level. It records each target's `precision`, `max_tolerance` and `mean_tolerance` (`null` when there is no mean bound) next to its status, timings and errors.
 
@@ -120,8 +121,18 @@ The names are those of ort-smoke.
 | `openvino:GPU` | OpenVINO, Intel GPU plugin | fp16: max 1.0, mean 1e-2 | fp32 (`INFERENCE_PRECISION_HINT=f32`): max 1e-3 |
 | `openvino:NPU` | OpenVINO, Intel NPU plugin | fp16: max 1.0, mean 1e-2 | fp16 (no fp32 inference): max 1.0, mean 1e-2 |
 | `dnnl` | oneDNN, on the CPU (default options; never measured) | fp32: max 1e-3 | fp32: max 1e-3 |
+| `webgpu:nvidia` | WebGPU, a plugin provider, NVIDIA GPU (power preference `high-performance`) | fp32: max 1e-3 | fp32: max 1e-3 |
+| `webgpu:intel` | WebGPU, a plugin provider, Intel GPU (power preference `low-power`) | fp32: max 1e-3 | fp32: max 1e-3 |
 
-Each cell gives the arithmetic the target runs in and the bounds on the maximum and mean absolute error against the CPU outputs. A target passes when every bound holds. `openvino` selects the three OpenVINO devices. The bounds are for outputs of magnitude around 1. Use `--tol` for a model whose outputs are on another scale.
+Each cell gives the arithmetic the target runs in and the bounds on the maximum and mean absolute error against the CPU outputs. A target passes when every bound holds. `openvino` selects the three OpenVINO devices, and `webgpu` both WebGPU GPUs. The bounds are for outputs of magnitude around 1. Use `--tol` for a model whose outputs are on another scale.
+
+## The WebGPU targets
+
+`webgpu:nvidia` and `webgpu:intel` use the WebGPU plugin provider ([engines.md](../../docs/engines.md#webgpu)). The Python module neither lists it in `get_available_providers()` nor reaches it through `providers=[...]`, so the script registers the library with `onnxruntime.register_execution_provider_library`, takes the first real GPU of the vendor from `onnxruntime.get_ep_devices()` (a virtual device and a device that is not a GPU are skipped) and gives the session that device with `SessionOptions.add_provider_for_devices`, with the option `powerPreference`: `high-performance` for NVIDIA, `low-power` for Intel. The session is created without `providers=`, which would take precedence over the options. It needs `onnxruntime` 1.22 or later. When the library or a GPU of the vendor is missing the target is `unavailable`.
+
+As in [ort-smoke](../ort-smoke/README.md#the-webgpu-targets), the device ONNX Runtime is given does not choose the GPU: Dawn takes its first adapter for the power preference. The script therefore reads the kernel's per-process GPU usage counters before the session and after the timed runs, and prints a `note:` line for the target. For the Intel GPU the verdict is measured (`the kernel counted the work on this GPU`). For the NVIDIA GPU it is inferred from the power preference, because the NVIDIA driver keeps no counters. Work counted only on another GPU, an Intel GPU the process never opened, or a GPU whose counters did not grow is a `FAIL`.
+
+The errors are judged against the fp32 bound, 1e-3 on the maximum, in both precision modes. A model with an operator that has no WebGPU kernel fails with the CPU fallback disabled, as it does for MODNet at 512x512 ([results.md](../../docs/results.md#webgpu-provider-1290-8), [engines.md](../../docs/engines.md#webgpu-limitations)). `--allow-cpu-fallback` lets such a model run, with its `ok*` caveat, and for MODNet the output on the RTX is then wrong, with a maximum error of 1.0 ([results.md](../../docs/results.md#webgpu-provider-1290-8)).
 
 ## Precision modes
 
@@ -138,3 +149,5 @@ Each cell gives the arithmetic the target runs in and the bounds on the maximum 
 The mean is therefore the meaningful test for those targets. Its bounds (5e-3 for TF32, 1e-2 for fp16) sit about 3.5 and 1.9 times above the worst measured value. A wrong result lies above them: MODNet's output for a different noise input differs from the reference by a mean of 7.1e-2 at 512x512 and 1.9e-2 at 256x256, and an all-zero output by 2.7e-1. The maximum keeps a loose bound, about twice the worst measured value, against isolated gross outliers. For a strict comparison of the engines' results, use `--precision fp32`, whose bounds are tight (1e-3 on the maximum; the worst measured on the reference models was 2.8e-4).
 
 For every target except `cpu`, the script sets the session option `session.disable_cpu_ep_fallback=1`, so a graph the provider cannot take fails instead of quietly running on the CPU. See `--allow-cpu-fallback` above for when that is too strict. The session's provider list must also start with the requested provider. The CPU target always runs first as the reference, even when it is not in `--targets`. The script reports it only when you request it.
+
+Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

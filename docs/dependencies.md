@@ -22,11 +22,12 @@ NCCL is the one exception to "depends on what it links". NCCL is a library of th
 | `onnxruntime-provider-tensorrt-cuda<M>` | everything the CUDA package depends on except `nccl`, plus `onnxruntime-provider-cuda<M>=<pkgver>` and `tensorrt` (bounded as below) |
 | `onnxruntime-provider-openvino` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `openvino` |
 | `onnxruntime-provider-dnnl` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `libgomp` (oneDNN's OpenMP runtime). No `onednn`: oneDNN is inside the provider ([below](#onednn-is-bundled-statically)) |
+| `onnxruntime-provider-webgpu` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `vulkan-icd-loader`. Optional: `vulkan-intel`, `vulkan-radeon`, `nvidia-utils`, the Vulkan driver of each vendor. Dawn is inside the provider ([below](#webgpu-dawn-and-vulkan)) |
 | `onnxruntime-provider-migraphx` ([the MIGraphX line](amd.md); supported, not tested on AMD hardware) | `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`, `glibc`, `libgcc`, `libstdc++`, `migraphx`, `hip-runtime-amd` (bounded as below; never `rocm-hip-sdk`, and no `rccl`) |
 | `python-onnxruntime-provider-migraphx` (the Python add-on, [the MIGraphX line](amd.md#the-package)) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python` (bounded to the minor of the site-packages it links into, as below) |
 | `python-onnxruntime-core` | `onnxruntime-core=<pkgver>-<pkgrel>`, `glibc`, `libgcc`, `libstdc++`, `nccl`, `python`, `python-numpy`, `python-flatbuffers`, `python-packaging`, `python-protobuf`, and for `onnxruntime.training` `python-cerberus`, `python-h5py`, `python-onnx`, `python-sympy` and `python-setuptools` |
 
-The OpenVINO device plugins and drivers are optional dependencies of `onnxruntime-provider-openvino`, because each device needs only its own ([engines.md](engines.md#openvino)). `python-pytorch` is an optional dependency of `python-onnxruntime-core`. The training modules import it, and `import onnxruntime.training` fails without it. `import onnxruntime` does not need it.
+The OpenVINO device plugins and drivers are optional dependencies of `onnxruntime-provider-openvino`, because each device needs only its own ([engines.md](engines.md#openvino)). The Vulkan drivers are optional dependencies of `onnxruntime-provider-webgpu` for the same reason. `python-pytorch` is an optional dependency of `python-onnxruntime-core`. The training modules import it, and `import onnxruntime.training` fails without it. `import onnxruntime` does not need it.
 
 A build with `ORTF_NCCL=0` names every package with the suffix `-nccloff`, drops `nccl` and depends on `onnxruntime-core-nccloff` instead of `onnxruntime-core` ([packages.md](packages.md#packages-without-nccl)).
 
@@ -69,6 +70,17 @@ The core's own dependency stays the bare `nccl`, which `nccl-cuda12.9` provides.
 
 `package()` fails the build if the provider has a `libdnnl` among its `DT_NEEDED` entries, and so does `scripts/check-deps.sh` (status `DNNL`, below). Version 3.11.3 is the one Arch's `onednn` ships today. The provider does not follow Arch's updates. Moving to Arch's package later would trade a smaller package and Arch's security updates for a tie to Arch's oneDNN releases.
 
+### WebGPU: Dawn and Vulkan
+
+`onnxruntime-provider-webgpu` carries Dawn (Google's WebGPU implementation) and Tint (its shader compiler) as static libraries, built from the pinned Dawn release ([build.md](build.md#dependencies-are-mirrored-not-fetched)). The provider needs only the system libraries (`libstdc++`, `libm`, `libgcc_s`, `libc`), and installs no `libdawn` or `libwebgpu_dawn`. `package()` fails the build if the provider has one among its `DT_NEEDED` entries, and so does `scripts/check-deps.sh` (status `DAWN`, below).
+
+At run time the provider needs the Vulkan loader and a Vulkan driver for the GPU:
+
+- `vulkan-icd-loader` is a hard dependency. Dawn opens `libvulkan.so.1` with `dlopen()`, so the library is not in `DT_NEEDED` and the dependency is declared by hand. `namcap` therefore says it "may not be needed", as it does for the core dependency of every provider that the core loads.
+- One Vulkan driver per vendor is an optional dependency: `vulkan-intel` (Mesa's ANV, for Intel graphics), `vulkan-radeon` (Mesa's RADV, for AMD graphics) and `nvidia-utils` (NVIDIA's driver). Install the one for your GPU. For a Maxwell card, the 580xx driver's `nvidia-580xx-utils` provides `nvidia-utils` ([cuda12-legacy.md](cuda12-legacy.md#what-the-machine-needs)).
+
+To build it, the main recipe's `makedepends` list `python-jinja`, `python-markupsafe`, `spirv-headers`, `spirv-tools`, `vulkan-headers` and `vulkan-utility-libraries`, for every build, as it lists `openvino`. They are inputs of the build only: no package depends on them at run time. Dawn's configure would otherwise clone these projects from git. The Python modules are for Dawn's code generators, and the others supply headers and CMake targets. Abseil is ONNX Runtime's own and is not a dependency. `prepare()` checks them and names the package to install when one is missing ([build.md](build.md#dependencies-are-mirrored-not-fetched)). The two header packages' licences (MIT) are installed in the provider's licence directory.
+
 ### TensorRT: one dependency name for two sources
 
 The TensorRT provider package depends on the name `tensorrt`, bounded to the major.minor of the TensorRT the build used (`tensorrt>=11.4` and `tensorrt<11.5` for TensorRT 11.4). Both TensorRT sources provide that name: the AUR's `tensorrt` (under `/usr`) and `nvidia-tensorrt-sdk-local` (under `/opt/nvidia/tensorrt`, pkgrel 2 or later; see [INSTALL.md](../INSTALL.md#3-install-tensorrt)). The dependency names the shared `tensorrt`, not the package that owns the build's library, so that a provider built against one source installs with the other.
@@ -82,7 +94,7 @@ The chain therefore holds whether a package was built from source or prebuilt, a
 ## Checking built packages: `scripts/check-deps.sh`
 
 ```bash
-scripts/check-deps.sh onnxruntime-split/*-1.29.0-7-x86_64.pkg.tar.zst
+scripts/check-deps.sh onnxruntime-split/*-1.29.0-8-x86_64.pkg.tar.zst
 ```
 
 The script takes package files and is read-only. It queries `pacman` and `ldconfig` and writes only under a temporary directory. It needs `bsdtar`, `readelf`, `pacman` and `vercmp`. For each package it unpacks, and for each ELF shared library in it, it prints:
@@ -100,6 +112,7 @@ It then prints every dependency of the package, the installed package (or packag
 | `BOUND` | an installed version outside a dependency's bounds: the vendor package (`cuda`, `cudnn`, TensorRT, `openvino`, `python`, `migraphx`, `hip-runtime-amd`) was upgraded past what the package was built for, and a rebuild is due |
 | `MISSING` | a dependency that no installed package and no package file given meets |
 | `DNNL` | a needed `libdnnl`, whoever owns it: the oneDNN provider links oneDNN statically, and no package of this recipe may need Arch's `onednn` |
+| `DAWN` | a needed `libwebgpu_dawn` or `libdawn*`, whoever owns it: the WebGPU provider links Dawn statically, and no package of this recipe installs a Dawn library |
 
 The exit status is 0 when nothing is flagged, 1 when anything is (the last line then counts each flag), and 2 on a usage error or an unreadable package file. `scripts/check-deps.sh --help` prints the script's header.
 

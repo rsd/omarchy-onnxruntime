@@ -12,9 +12,9 @@ Every claim on this page uses the same words:
 
 "Source only" is a packaging note, not a status: it means there is no prebuilt (`-bin`) package, only an AUR source package. It does not say whether the hardware is supported.
 
-The test machine is a GeForce RTX 5080 Laptop GPU (`sm_120`) and an Intel Core Ultra 9 275HX with its CPU, integrated GPU and NPU. Tested is per engine and per device: an engine that ran on one device of a kind is not tested on the others.
+The test machine is a GeForce RTX 5080 Laptop GPU (`sm_120`) and an Intel Core Ultra 9 275HX with its CPU, integrated GPU (Arrow Lake) and NPU. Tested is per engine and per device: an engine that ran on one device of a kind is not tested on the others.
 
-A claim covers what the build compiles for, not what a vendor's support matrix lists. The sources are the CUDA architecture presets ([build.md](build.md#cuda-architectures)), Arch's ROCm build list ([amd.md](amd.md#which-amd-gpus)) and the engine list of the recipe (`_ortf_default_eps` in `onnxruntime-split/PKGBUILD`). Hardware lists reflect the vendors' documentation in November 2026 and change with each release. Check the linked sources for your card or CPU.
+A claim covers what the build compiles for, not what a vendor's support matrix lists. The sources are the CUDA architecture presets ([build.md](build.md#cuda-architectures)), Arch's ROCm build list ([amd.md](amd.md#which-amd-gpus)), the engine list of the recipe (`_ortf_default_eps` in `onnxruntime-split/PKGBUILD`) and, for WebGPU, the Vulkan backend of Dawn that the package carries. Hardware lists reflect the vendors' documentation in November 2026 and change with each release. Check the linked sources for your card or CPU.
 
 | Hardware | Status | Source of the claim |
 |---|---|---|
@@ -23,11 +23,16 @@ A claim covers what the build compiles for, not what a vendor's support matrix l
 | NVIDIA Turing (RTX 20, GTX 16, `sm_75`), Ampere GeForce (`sm_86`) and Ada (`sm_89`), with CUDA 13 | supported; not tested | the same presets |
 | NVIDIA Ampere data centre (A100, `sm_80`), Hopper (`sm_90`) and Blackwell data centre (`sm_100`, `sm_103`), with CUDA 13 | supported in `onnxruntime-provider-cuda13-all` only, not in the default `rtx` package; not tested | preset `all` (`75 80 86 89 90 100 103 120`) |
 | NVIDIA Pascal (`sm_60`, `sm_61`) and Volta (`sm_70`) | supported (CUDA 12 legacy package, `onnxruntime-provider-cuda12-legacy`); not tested | preset `legacy` (`60 61 70 75 80 86 89 120`, PTX of `60`) |
-| NVIDIA Maxwell | not supported: ONNX Runtime 1.29's fp16 kernels need `sm_53` or later, so they cannot be built for it. A WebGPU provider is **planned** for these cards | [cuda12-legacy.md](cuda12-legacy.md#who-needs-it) |
+| NVIDIA Maxwell, CUDA provider | not supported: ONNX Runtime 1.29's fp16 kernels need `sm_53` or later, so they cannot be built for it | [cuda12-legacy.md](cuda12-legacy.md#who-needs-it) |
+| NVIDIA Maxwell, WebGPU provider (`onnxruntime-provider-webgpu`) | supported, as a second route for these cards, with the NVIDIA Vulkan driver the card still has (the 580xx series); not tested | [WebGPU](#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus) |
+| NVIDIA GeForce RTX 5080 Laptop GPU (Blackwell) and Intel Arrow Lake integrated GPU, WebGPU provider | supported; **tested** on both, with NVIDIA's driver 615.78.08 and Mesa's `vulkan-intel` 26.2.5 | [WebGPU](#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus), [results.md](results.md#webgpu-provider-1290-8) |
 | Intel CPUs, Xe and Arc GPUs, NPUs (OpenVINO provider) | supported; tested on the Core Ultra 9 275HX CPU, integrated GPU and NPU, not tested on other Intel hardware ([the devices](#intel-openvino-provider)) | OpenVINO has no per-device build |
 | Intel Gen8, Gen9 and Gen11 integrated GPUs | supported with a legacy driver you install yourself (the AUR's `intel-compute-runtime-legacy`, in place of `intel-compute-runtime`), because Intel's current compute runtime dropped them; not tested | [below](#intel-openvino-provider) |
+| Intel Gen8 and later integrated GPUs and Arc, WebGPU provider, through Mesa's `vulkan-intel` | supported, as a second route (it needs no compute runtime); tested on the Arrow Lake integrated GPU of the 275HX, not tested on other Intel graphics | [WebGPU](#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus) |
 | AMD GPUs in Arch's ROCm build list: Vega 10 and 20 (gfx900, gfx906), RDNA 1 to 4 (gfx1010, gfx1012, gfx1030, gfx1031, gfx1035, gfx1036, gfx1100 to gfx1103, gfx1150 to gfx1153, gfx1200, gfx1201) and Instinct MI100 to MI355X | supported; not tested on any AMD GPU. Source only: `onnxruntime-provider-migraphx` and its Python add-on, AUR pkgbase `onnxruntime-split-migraphx`. AMD itself does not list Vega and RDNA 1 | Arch's build list ([the list](amd.md#which-amd-gpus)) |
-| AMD Polaris (gfx803), Vega APUs (gfx90c), RX 6600 and 6500 series (gfx1032, gfx1034) | not supported: not in Arch's ROCm build list | [the list](amd.md#which-amd-gpus) |
+| AMD Polaris (gfx803), Vega APUs (gfx90c), RX 6600 and 6500 series (gfx1032, gfx1034), MIGraphX provider | not supported: not in Arch's ROCm build list | [the list](amd.md#which-amd-gpus) |
+| AMD Polaris and Vega APUs, and AMD discrete cards, WebGPU provider, through Mesa's `vulkan-radeon` | supported, as a second route for the Polaris and Vega APUs the MIGraphX provider leaves out; not tested | [WebGPU](#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus) |
+| Any other GPU with a Vulkan driver that Dawn accepts (WebGPU provider) | supported; not tested | [WebGPU](#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus) |
 | AMD Ryzen AI NPU (Vitis AI provider) | not supported: the working provider is a proprietary AMD library that cannot be redistributed | [below](#amd-ryzen-ai-npu-vitis-ai-provider-not-supported) |
 
 ## NVIDIA
@@ -48,7 +53,7 @@ The CUDA 12 legacy package serves cards older than Turing, described next.
 
 The package is supported for `sm_60`, `sm_61` and `sm_70`, and it is **not tested** on Pascal or Volta hardware. Its `legacy` preset also holds code for `sm_75`, `sm_80`, `sm_86`, `sm_89` and `sm_120` (not for `sm_90`, `sm_100` or `sm_103`). Of those only `sm_120` is **tested**, on the RTX 5080 Laptop GPU with the CUDA 12 libraries ([results.md](results.md#cuda-12-legacy-provider)).
 
-Maxwell is **not supported**. Its kernels do not build with ONNX Runtime 1.29, and a WebGPU provider is **planned** for those cards.
+The CUDA provider for Maxwell is **not supported**: its kernels do not build with ONNX Runtime 1.29. The WebGPU provider is a second route for those cards, **supported** and **not tested** ([WebGPU](#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus)).
 
 Everything about this package is in [cuda12-legacy.md](cuda12-legacy.md). Sources: [CUDA GPU compute capabilities](https://developer.nvidia.com/cuda-gpus), [ONNX Runtime CUDA provider requirements](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
 
@@ -65,6 +70,25 @@ The OpenVINO provider has no per-device build. One package serves every Intel de
 The OpenVINO provider has no per-device build, so what it supports is what OpenVINO and the driver of each device support. The middle column is OpenVINO's list. The NPU generations are those of Intel's [Linux NPU driver](https://github.com/intel/linux-npu-driver/blob/main/docs/overview.md). The GPU generations are those of Intel's [compute runtime](https://github.com/intel/compute-runtime). OpenVINO lists Ubuntu and RHEL as tested systems, not Arch. The Arch packages are what this recipe was checked with ([results](results.md)).
 
 **Older integrated GPUs (Gen8, Gen9, Gen11).** Intel's current compute runtime, which is Arch's `intel-compute-runtime`, no longer supports Broadwell, Skylake to Coffee Lake, Ice Lake and the Apollo, Gemini and Elkhart Lake parts. Intel moved them to a separate legacy branch, which Arch does not package. The AUR has `intel-compute-runtime-legacy` for it. Install it yourself in place of `intel-compute-runtime`. With that legacy driver those GPUs are supported, and **not tested**: this recipe has not run them, so whether OpenVINO 2026 still runs on them is not known. The CPU device is supported on those machines whatever the GPU.
+
+## WebGPU (Dawn over Vulkan; supported, tested on two GPUs)
+
+`onnxruntime-provider-webgpu` runs a model on a GPU through Dawn, a WebGPU implementation, using Dawn's Vulkan backend. It covers a GPU by its Vulkan driver, not by an architecture list: the claim is any GPU with a Vulkan driver that Dawn accepts. It is built for no particular GPU, so unlike the CUDA presets it has no per-architecture build list to check a card against. The driver packages are optional dependencies, one per vendor. They are not installed by the provider, so install the one for your GPU ([engines.md](engines.md#webgpu)):
+
+| GPU | Vulkan driver package | Status |
+|---|---|---|
+| NVIDIA GeForce RTX 5080 Laptop GPU (`10de:2c19`) | `nvidia-utils` (driver 615.78.08) | supported, **tested** |
+| Intel Arrow Lake integrated GPU (`8086:7d67`, Core Ultra 9 275HX) | `vulkan-intel` (Mesa's ANV, 26.2.5) | supported, **tested** |
+| Other NVIDIA GPUs, Maxwell and later | `nvidia-utils`; for Maxwell the 580xx series, which is the last that supports it ([cuda12-legacy.md](cuda12-legacy.md#what-the-machine-needs)) | supported, **not tested** |
+| Other Intel graphics, Gen8 and later | `vulkan-intel` | supported, **not tested** |
+| AMD graphics, Polaris and Vega APUs and discrete cards included | `vulkan-radeon` (Mesa's RADV) | supported, **not tested** |
+
+The use of the provider:
+
+- **It is a second route, not a replacement.** Where a vendor provider covers the GPU, that provider is the one to use. WebGPU is the route for NVIDIA Maxwell (no CUDA provider), for Intel graphics through Mesa without Intel's compute runtime, and for the AMD Polaris and Vega APUs that Arch's ROCm build list leaves out.
+- **It is not shown to be faster than the CPU.** On the test machine, with a fast CPU and small models, the Intel GPU was slower than the CPU, and the RTX was faster on two of three models ([results.md](results.md#webgpu-provider-1290-8)). A speed-up on older machines (NVIDIA Maxwell, Intel Gen8 and later graphics through Mesa, AMD Polaris and Vega APUs) is **not tested**. The value is a working GPU path where no vendor provider exists.
+- **One known limitation.** The MODNet model does not run on it, because of two limits of ONNX Runtime 1.29.0's WebGPU provider ([engines.md](engines.md#webgpu-limitations)).
+- **A different way to load it.** An application has to register the provider and pick a device, and `providers=["WebGpuExecutionProvider"]` does not reach it ([engines.md](engines.md#using-it-a-plugin-provider)).
 
 ## oneDNN (CPU; supported, tested)
 

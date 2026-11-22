@@ -13,6 +13,7 @@ The recipe `onnxruntime-split/PKGBUILD` is one build of the upstream source tag 
 | `onnxruntime-provider-tensorrt-cuda<M>` | The TensorRT provider. It has no architecture suffix because it holds no GPU code: TensorRT builds its kernels at run time. Provides `onnxruntime-provider-tensorrt` | `onnxruntime-core`, `onnxruntime-provider-cuda<M>`, `cuda`, `cudnn`, `nvidia-utils`, `tensorrt` (bounded to the major.minor of the TensorRT headers the build used) |
 | `onnxruntime-provider-openvino` | The OpenVINO provider (Intel CPU, GPU and NPU devices) | `onnxruntime-core`, `openvino` |
 | `onnxruntime-provider-dnnl` | The oneDNN provider (CPU). It is optional and meant for Intel server CPUs, not for most desktops and laptops (use the CPU provider or OpenVINO there). oneDNN 3.11.3 is built from source and linked into the provider statically, so the package depends on no oneDNN package and installs no `libdnnl.so`. It carries oneDNN's licence and third-party notices (`onednn-LICENSE`, `onednn-THIRD-PARTY-PROGRAMS`). See [engines.md](engines.md#onednn) | `onnxruntime-core`, `libgomp` |
+| `onnxruntime-provider-webgpu` | The WebGPU provider, `libonnxruntime_providers_webgpu.so`, for GPUs with a Vulkan driver (supported; tested on the RTX 5080 Laptop GPU and the Arrow Lake integrated GPU, not tested elsewhere). A plugin provider: an application registers it and picks a device, and `providers=["WebGpuExecutionProvider"]` does not reach it ([engines.md](engines.md#webgpu)). Dawn and Tint are built into the library statically, so it needs no Dawn package and installs no `libdawn`. It carries Dawn's licence and the licences of the SPIR-V and Vulkan headers compiled in (`dawn-LICENSE`, `spirv-headers-LICENSE`, `vulkan-headers-MIT.txt`). 5.9 MiB to download, 16.2 MiB installed. | `onnxruntime-core`, `vulkan-icd-loader`. Optional: `vulkan-intel`, `vulkan-radeon`, `nvidia-utils` |
 | `python-onnxruntime-core` | The Python module, with `onnxruntime.training`. Its links to the provider libraries dangle until that provider's package is installed. Provides `python-onnxruntime` | `onnxruntime-core`, `nccl`, `python` and its packages, and for the training modules `python-cerberus`, `python-h5py`, `python-onnx`, `python-sympy` and `python-setuptools` |
 | `python-onnxruntime-provider-migraphx` | The Python add-on of the MIGraphX line. It comes from the pkgbase `onnxruntime-split-migraphx`, not from this recipe. It holds one symbolic link, `onnxruntime/capi/libonnxruntime_providers_migraphx.so` in the system Python's site-packages, to the provider's library, so that the Python module lists `MIGraphXExecutionProvider`. Source only (no prebuilt package); supported, not tested on AMD hardware ([amd.md](amd.md#the-package)) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python` (bounded to its minor) |
 
@@ -33,8 +34,8 @@ Both load into the core of this recipe and depend on `onnxruntime-core>=1.29.0-7
 
 The names depend on the build inputs `ORTF_EPS`, `ORTF_PYTHON`, `ORTF_CUDA_ARCHS` and `ORTF_NCCL`, and on the CUDA toolkit installed when `makepkg` reads the PKGBUILD:
 
-- **The default build with Arch's CUDA 13** makes `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl` and `python-onnxruntime-core`.
-- **A build without `cuda` in `ORTF_EPS`** needs `ORTF_NCCL=0` and makes `-nccloff` packages ([below](#packages-without-nccl)). `ORTF_EPS=cpu ORTF_NCCL=0` makes `onnxruntime-core-nccloff` (and the Python package) only. `dnnl` in `ORTF_EPS` adds `onnxruntime-provider-dnnl`. `migraphx` adds `onnxruntime-provider-migraphx`, for a local build. The published MIGraphX packages come from their own pkgbase.
+- **The default build with Arch's CUDA 13** makes `onnxruntime-core`, `onnxruntime-provider-cuda13-rtx`, `onnxruntime-provider-tensorrt-cuda13`, `onnxruntime-provider-openvino`, `onnxruntime-provider-dnnl`, `onnxruntime-provider-webgpu` and `python-onnxruntime-core`.
+- **A build without `cuda` in `ORTF_EPS`** needs `ORTF_NCCL=0` and makes `-nccloff` packages ([below](#packages-without-nccl)). `ORTF_EPS=cpu ORTF_NCCL=0` makes `onnxruntime-core-nccloff` (and the Python package) only. `dnnl` in `ORTF_EPS` adds `onnxruntime-provider-dnnl`, `webgpu` adds `onnxruntime-provider-webgpu`. `migraphx` adds `onnxruntime-provider-migraphx`, for a local build. The published MIGraphX packages come from their own pkgbase.
 - **The CUDA package's suffix** is the preset name (`rtx`, `all`) or, for a list, the architectures (`sm120`, `sm89-sm120`).
 - **Without `cuda.h`.** When the CUDA toolkit's `cuda.h` is not installed yet when `makepkg` reads the PKGBUILD (an AUR helper reads it before it installs the build dependencies), the names use CUDA major 13. A CUDA 12 toolkit gives `-cuda12` names. The CUDA 12 package that is released comes from its own recipe, not from this one with other inputs.
 
@@ -50,7 +51,7 @@ Training and NCCL change the plug between `onnxruntime-core` and a provider libr
 
 Hence the rule:
 
-- The main line (1.29.0-7) and the CUDA 12 line (1.29.0-2) are built and released together.
+- The main line (1.29.0-7 and later) and the CUDA 12 line (1.29.0-2) work together. 1.29.0-7 is the first main-line pkgrel with the new plug. 1.29.0-8 adds the WebGPU package and keeps that interface, so the CUDA 12 and MIGraphX lines need no rebuild for it.
 - The MIGraphX line (1.29.0-1) is built against the same core.
 - The CUDA 12 and MIGraphX providers depend on `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`. The lower bound is the first pkgrel with the new plug (the fixed "ABI pkgrel", reset to 1 with a new `pkgver`). Any later packaging-only pkgrel of 1.29.0 still satisfies the pair.
 - `onnxruntime-core` in turn conflicts with the CUDA 12 provider below 1.29.0-2.
@@ -69,7 +70,7 @@ How to build them: [build.md](build.md#nccl-and-the-nccloff-packages).
 
 ## Sizes
 
-These figures are measured on the files of the 1.29.0-6 build. The download size is the `.pkg.tar.zst` file. The installed size is the `size` field of the package's `.PKGINFO`. **The 1.29.0-7 packages, which add the training operators, NCCL and oneDNN, have not been measured for this table.** The figures below are those of the build before them. [results.md](results.md#package-sizes) has measured sizes of 1.29.0-7.
+These figures are measured on the files of the 1.29.0-6 build, except the WebGPU provider's, which is from the 1.29.0-8 build of that package alone (a `-nccloff` build, `ORTF_EPS=webgpu`; the provider links no NCCL code). The download size is the `.pkg.tar.zst` file. The installed size is the `size` field of the package's `.PKGINFO`. **The 1.29.0-7 packages, which add the training operators, NCCL and oneDNN, have not been measured for this table.** The figures below are those of the build before them. [results.md](results.md#package-sizes) has measured sizes of 1.29.0-7.
 
 | Package | Download | Installed |
 |---|---|---|
@@ -78,6 +79,7 @@ These figures are measured on the files of the 1.29.0-6 build. The download size
 | `onnxruntime-provider-cuda13-all` | 226.9 MiB | 294.9 MiB |
 | `onnxruntime-provider-tensorrt-cuda13` | 0.3 MiB | 1.2 MiB |
 | `onnxruntime-provider-openvino` | 0.5 MiB | 1.7 MiB |
+| `onnxruntime-provider-webgpu` (1.29.0-8) | 5.9 MiB | 16.2 MiB |
 | `python-onnxruntime-core` | 10.0 MiB | 43.2 MiB |
 | `onnxruntime-provider-cuda12-legacy` (1.29.0-1) | 172.6 MiB | 557.5 MiB |
 

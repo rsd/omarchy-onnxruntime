@@ -43,9 +43,9 @@ SHELLCHECK=/path/to/shellcheck scripts/test.sh
 
 ## Checks of the packages on real hardware
 
-- **Smoke test.** `scripts/smoke-test.sh` builds a small C program and runs a tiny model on every engine and device it finds, oneDNN (`dnnl`) included. The opt-in target `migraphx-load` checks that the MIGraphX provider loads and fails cleanly where there is no AMD GPU. Options and output: [tools/ort-smoke/README.md](../tools/ort-smoke/README.md). Run it after installing ([INSTALL.md](../INSTALL.md#check-that-it-works)) or against a build tree ([build-from-source.md](build-from-source.md#before-installing-the-build-tree)).
+- **Smoke test.** `scripts/smoke-test.sh` builds a small C program and runs a tiny model on every engine and device it finds, oneDNN (`dnnl`) and the WebGPU provider on each vendor's GPU (`webgpu:nvidia`, `webgpu:intel`) included. The opt-in target `migraphx-load` checks that the MIGraphX provider loads and fails cleanly where there is no AMD GPU. Options and output: [tools/ort-smoke/README.md](../tools/ort-smoke/README.md). Run it after installing ([INSTALL.md](../INSTALL.md#check-that-it-works)) or against a build tree ([build-from-source.md](build-from-source.md#before-installing-the-build-tree)).
 - **Model check.** `tools/ort-model-check/model-check.py` runs a real ONNX model on each engine and compares the outputs and timings with the CPU's: [tools/ort-model-check/README.md](../tools/ort-model-check/README.md).
-- **Package checks.** `scripts/check-deps.sh` checks libraries, owners and version bounds ([dependencies.md](dependencies.md#checking-built-packages-scriptscheck-depssh)). `scripts/check-cuda-archs.sh` checks the GPU architectures a built CUDA provider holds.
+- **Package checks.** `scripts/check-deps.sh` checks libraries, owners and version bounds (and that no package needs a shared oneDNN or Dawn library) ([dependencies.md](dependencies.md#checking-built-packages-scriptscheck-depssh)). `scripts/check-cuda-archs.sh` checks the GPU architectures a built CUDA provider holds.
 - **Results** of the smoke test and model check on a full build: [results.md](results.md). They set which hardware is flagged tested in [hardware.md](hardware.md).
 
 ## The licence guard and the git hooks

@@ -9,12 +9,14 @@ flowchart TD
     B -. loaded when a session asks .-> D[onnxruntime-provider-tensorrt-cuda13<br/>libonnxruntime_providers_tensorrt.so]
     B -. loaded when a session asks .-> E[onnxruntime-provider-openvino<br/>libonnxruntime_providers_openvino.so]
     B -. loaded when a session asks .-> M[onnxruntime-provider-dnnl<br/>libonnxruntime_providers_dnnl.so, oneDNN linked in]
+    B -. registered by the application, a plugin .-> W[onnxruntime-provider-webgpu<br/>libonnxruntime_providers_webgpu.so, Dawn linked in]
     B -. loaded by name, from its own pkgbase .-> I[onnxruntime-provider-migraphx<br/>libonnxruntime_providers_migraphx.so, not tested on AMD hardware]
     B -. loaded instead of C on a CUDA 12 machine .-> K[onnxruntime-provider-cuda12-legacy<br/>libonnxruntime_providers_cuda.so, not tested on Pascal and Volta]
     C --> F[CUDA, cuBLAS, cuDNN]
     D --> G[TensorRT, CUDA]
     E --> H[OpenVINO runtime and device plugins]
     M --> N[libgomp only]
+    W --> V[Vulkan loader and the GPU's Vulkan driver]
     I --> J[MIGraphX, HIP runtime]
     K --> L[CUDA 12.9, cuBLAS, cuDNN 9.10]
 ```
@@ -32,13 +34,14 @@ Install the packages of the engines you use. Each provider is a separate library
 | OpenVINO, device `GPU` | Intel graphics | `onnxruntime-provider-openvino` | `openvino-intel-gpu-plugin`, `intel-compute-runtime`, `level-zero-loader` | Arch `extra` |
 | OpenVINO, device `NPU` | Intel NPU | `onnxruntime-provider-openvino` | `openvino-intel-npu-plugin`, `intel-npu-driver`, `level-zero-loader` | Arch `extra` |
 | oneDNN (`dnnl`) | Any x86_64 CPU | `onnxruntime-provider-dnnl` | none: oneDNN is built into the provider; `libgomp` from `gcc-libs` | built by the recipe ([below](#onednn)) |
+| WebGPU (a plugin provider, [below](#webgpu)) | Any GPU with a Vulkan driver: NVIDIA, Intel, AMD | `onnxruntime-provider-webgpu` | `vulkan-icd-loader` and the Vulkan driver of the GPU: `nvidia-utils`, `vulkan-intel` or `vulkan-radeon` | Arch `extra` |
 | MIGraphX (not tested on AMD hardware) | AMD GPU in Arch's ROCm build list | `onnxruntime-provider-migraphx`, and for Python its add-on `python-onnxruntime-provider-migraphx` (AUR pkgbase `onnxruntime-split-migraphx`) | `migraphx`, `hip-runtime-amd` | Arch `extra` |
 
 `<M>` is the CUDA major version of the toolkit that built the package (`13`). `<sfx>` names the GPU architectures ([build.md](build.md#package-names)).
 
-Installing a provider package needs its runtime, a hard dependency. The OpenVINO device plugins and drivers are optional dependencies, installed for the devices you use.
+Installing a provider package needs its runtime, a hard dependency. The OpenVINO device plugins and drivers are optional dependencies, installed for the devices you use. For WebGPU the loader is the hard dependency and the three Vulkan drivers are optional ones: install the one for your GPU.
 
-To build, you need `cuda`, `cudnn`, `nccl` and `openvino` installed. oneDNN needs nothing installed. For the TensorRT provider, install TensorRT from a package, or unpack it by hand and build with the `-d` option of `makepkg` ([INSTALL.md](../INSTALL.md#3-install-tensorrt), [TensorRT for a source build](build-from-source.md#tensorrt-for-a-source-build)). The MIGraphX provider is built from its own recipe, which needs `migraphx`, `hip-runtime-amd` and `rccl` ([amd.md](amd.md#building-it)).
+To build, you need `cuda`, `cudnn`, `nccl` and `openvino` installed. oneDNN needs nothing installed. The WebGPU provider needs `python-jinja`, `python-markupsafe`, `spirv-headers`, `spirv-tools`, `vulkan-headers` and `vulkan-utility-libraries`, for the build only ([dependencies.md](dependencies.md#webgpu-dawn-and-vulkan)). For the TensorRT provider, install TensorRT from a package, or unpack it by hand and build with the `-d` option of `makepkg` ([INSTALL.md](../INSTALL.md#3-install-tensorrt), [TensorRT for a source build](build-from-source.md#tensorrt-for-a-source-build)). The MIGraphX provider is built from its own recipe, which needs `migraphx`, `hip-runtime-amd` and `rccl` ([amd.md](amd.md#building-it)).
 
 ## How the providers load
 
@@ -47,6 +50,7 @@ To build, you need `cuda`, `cudnn`, `nccl` and `openvino` installed. oneDNN need
 - **Dependencies.** A provider package depends on the vendor runtimes its library links, so you cannot install it without them. It also depends on `onnxruntime-core=<pkgver>-<pkgrel>`. The CUDA 12 legacy and MIGraphX packages depend on `onnxruntime-core>=1.29.0-7` and `onnxruntime-core<1.29.1`, because they come from their own recipes ([dependencies.md](dependencies.md#the-core-pin-of-the-cuda-12-and-migraphx-providers)). The vendor dependencies carry version bounds. Pacman refuses a vendor upgrade past what the provider was built for until the recipe is rebuilt, instead of leaving a provider that silently fails to load. The policy and the bounds are in [dependencies.md](dependencies.md).
 - **Available providers.** `GetAvailableProviders` is fixed when the library is built, from the providers selected by `ORTF_EPS`. It does not show which provider packages are installed. A session that asks for a provider whose package is missing fails when ONNX Runtime loads the provider library, with a "cannot open shared object file" error. The smoke test reports that as `unavailable`. This has not been checked against the split packages on hardware. The Python package's links to the provider libraries dangle until that provider's package is installed.
   - **MIGraphX is the exception.** The main core is built with ONNX Runtime's MIGraphX provider interface, so the provider loads by name (`SessionOptionsAppendExecutionProvider` with `"MIGraphX"`, or the legacy `SessionOptionsAppendExecutionProvider_MIGraphX`). `GetAvailableProviders` never lists `MIGraphX` on this core. An application must try the provider, not look for it in that list.
+  - **WebGPU is not in the list either, for another reason.** It is a plugin provider: an application registers its library and picks one of its devices ([WebGPU](#webgpu)). `GetAvailableProviders` and Python's `get_available_providers()` never list `WebGpuExecutionProvider`, installed or not.
   - **Python differs.** `onnxruntime.get_available_providers()` lists `MIGraphXExecutionProvider` once `onnxruntime-provider-migraphx` and its add-on `python-onnxruntime-provider-migraphx` are installed beside `python-onnxruntime-core` ([amd.md](amd.md#using-it)).
 - **CPU fallback.** A session with a single non-CPU provider falls back to the CPU provider for operators it cannot take, unless you set the session option `session.disable_cpu_ep_fallback=1`. The smoke test sets it so that a provider that cannot take the graph fails loudly.
 
@@ -109,6 +113,68 @@ Package `onnxruntime-provider-dnnl`, the oneDNN execution provider (`DnnlExecuti
   scripts/smoke-test.sh --only cpu,dnnl
   ```
 
+## WebGPU
+
+Package `onnxruntime-provider-webgpu`, the WebGPU execution provider (`WebGpuExecutionProvider`). It runs a model on a GPU through Dawn, Google's implementation of WebGPU, over Vulkan. Any GPU with a Vulkan driver that Dawn accepts is a target, whatever the vendor: NVIDIA through `nvidia-utils`, Intel graphics through Mesa's `vulkan-intel` (ANV), AMD graphics through `vulkan-radeon` (RADV). It is in the default build, and in the prebuilt set starting with 1.29.0-8.
+
+**Status.** The provider is supported on those GPUs. It is **tested** on two: the GeForce RTX 5080 Laptop GPU (NVIDIA's driver 615.78.08) and the integrated GPU of the Core Ultra 9 275HX (Arrow Lake, Mesa's `vulkan-intel` 26.2.5). It is **not tested** on anything else: other NVIDIA GPUs (Maxwell included), other Intel graphics from Gen8 on through Mesa, and AMD graphics, Polaris and Vega APUs and discrete cards included. The figures are in [results.md](results.md#webgpu-provider-1290-8). Which hardware it covers is in [hardware.md](hardware.md).
+
+- **When to choose it.** Only when no vendor provider covers your GPU ([choosing.md](choosing.md#webgpu-or-a-vendor-provider)). The CUDA, TensorRT and OpenVINO providers are the better path where they apply. The case for WebGPU is NVIDIA Maxwell (CUDA is not supported there), Intel graphics from Gen8 through Mesa, and AMD Polaris and Vega APUs (not in Arch's ROCm build list).
+- **It is not shown to be faster than the CPU.** On the test machine's fast CPU and three small models, the Intel GPU's median was 2.1 to 5.8 times the CPU's, and the RTX was faster on two of the three. A speed-up on older machines, where the CPU is slower, is **not tested**. The value is a working GPU path where no vendor provider exists.
+- **A model has to fit it.** MODNet (`modnet_photographic`, 512x512) does not run on WebGPU with ONNX Runtime 1.29.0. See [the limitation](#webgpu-limitations).
+- **Dawn is inside the package.** The recipe builds Dawn, with Tint (its shader compiler), into `libonnxruntime_providers_webgpu.so` as static libraries. The library needs only `libstdc++`, `libm`, `libgcc_s` and `libc`, and Dawn opens the Vulkan loader (`libvulkan.so.1`, from `vulkan-icd-loader`) at run time. There is no `libdawn` or `libwebgpu_dawn` file ([dependencies.md](dependencies.md#webgpu-dawn-and-vulkan)). The package installs Dawn's licence as `/usr/share/licenses/onnxruntime-provider-webgpu/dawn-LICENSE`.
+- **Which GPU runs.** In ONNX Runtime 1.29 the device an application appends does not choose Dawn's adapter. The provider option `powerPreference` does: `high-performance` puts discrete GPUs first, `low-power` puts integrated ones first. On a laptop with an NVIDIA and an Intel GPU, ask for `high-performance` to run on the NVIDIA GPU and `low-power` for the Intel one. The smoke test reads the kernel's per-process GPU counters to show which GPU did the work (`device:` line, [tools/ort-smoke/README.md](../tools/ort-smoke/README.md#the-webgpu-targets)). NVIDIA's driver keeps no such counters, so for it the GPU is inferred from the power preference.
+
+### Using it: a plugin provider
+
+A plugin provider is not named in a session's provider list the way the others are. The application registers its library, asks ONNX Runtime for the devices it offers, and appends one. This needs the C API of version 22 or later (the core here is 1.29.0, API 29). In C, with the status checks left out:
+
+```c
+const OrtApi *api = OrtGetApiBase()->GetApi(22);
+/* env, opts: an OrtEnv and OrtSessionOptions, created as usual */
+api->RegisterExecutionProviderLibrary(env, "WebGpuExecutionProvider",
+                                      "/usr/lib/libonnxruntime_providers_webgpu.so");
+
+const OrtEpDevice *const *devices = NULL;
+size_t n = 0;
+api->GetEpDevices(env, &devices, &n);
+const OrtEpDevice *gpu = NULL;
+for (size_t i = 0; i < n && !gpu; i++)
+    if (strcmp(api->EpDevice_EpName(devices[i]), "WebGpuExecutionProvider") == 0 &&
+        api->HardwareDevice_Type(api->EpDevice_Device(devices[i])) == OrtHardwareDeviceType_GPU)
+        gpu = devices[i];
+
+const char *keys[] = {"powerPreference"};
+const char *values[] = {"high-performance"};   /* or "low-power" */
+api->SessionOptionsAppendExecutionProvider_V2(opts, env, &gpu, 1, keys, values, 1);
+```
+
+In Python, with the same provider name and path:
+
+```python
+import onnxruntime as ort
+
+ort.register_execution_provider_library(
+    "WebGpuExecutionProvider", "/usr/lib/libonnxruntime_providers_webgpu.so")
+gpus = [d for d in ort.get_ep_devices()
+        if d.ep_name == "WebGpuExecutionProvider"
+        and d.device.type == ort.OrtHardwareDeviceType.GPU]
+
+so = ort.SessionOptions()
+so.add_provider_for_devices([gpus[0]], {"powerPreference": "high-performance"})
+sess = ort.InferenceSession("model.onnx", sess_options=so)
+```
+
+[tools/ort-smoke/smoke.c](../tools/ort-smoke/smoke.c) and [tools/ort-model-check/model-check.py](../tools/ort-model-check/model-check.py) are complete examples. They also skip a virtual device (metadata `is_virtual` equal to `1`), which stands in for compile-only sessions and has no GPU behind it.
+
+**An application that names the provider does not reach it.** `InferenceSession(model, providers=["WebGpuExecutionProvider"])` does not use this package's provider. It was run on the machine's installed Python module (1.29.0-7), before and after `register_execution_provider_library`: ONNX Runtime warned, dropped the name and ran on the CPU. The 1.29.0-8 Python module, which has a patch for the plugin provider, was not built into a package and run, so for it this follows from the source only. A program that selects providers with `providers=[...]`, as the other providers are selected, needs the code change above to use WebGPU. Leave `providers` unset when `add_provider_for_devices` is used: a list given there takes precedence over the options' provider.
+
+### WebGPU limitations
+
+- **MODNet does not run.** On the model `modnet_photographic` at 512x512, with CPU fallback disabled, session creation fails on both GPUs: one int64 `Gather` (fed by a `Shape` node) has no WebGPU kernel, so a node is left for the CPU provider, which the session forbids. With fallback allowed, the output on the RTX is wrong (largest error 1.0 against the CPU's output, mean 0.14). The first wrong node is a convolution: a 3x3 `Conv` gives wrong results when its input channel count is a multiple of 3 and not of 4, and is above 3 (6, 9, 15, 18 and so on). Both look like limitations of ONNX Runtime's own WebGPU provider, which this recipe does not patch. They are known and not fixed here. The three other models of [results.md](results.md#webgpu-provider-1290-8) run correctly. The wrong output was seen on the NVIDIA GPU; whether the Intel GPU gives the same wrong output was not checked, because it stops earlier on the `Gather`.
+- **Not a drop-in for `providers=[...]`**, as above.
+- **The first run is slower than later ones.** On the test machine the first run on a GPU took 9.9 to 365 ms on the smoke test's model and the three real models, against 0.4 to 12 ms on the CPU, and the session creation took 23 to 201 ms ([results.md](results.md#webgpu-provider-1290-8)).
+
 ## MIGraphX
 
 The AMD GPU provider ships from its own pkgbase `onnxruntime-split-migraphx` as a source build (a packaging note, not a status). It is supported for the GPUs in Arch's ROCm build list and not tested on AMD hardware: [amd.md](amd.md).
@@ -129,6 +195,10 @@ See [cuda12-legacy.md](cuda12-legacy.md) (and [hardware.md](hardware.md#nvidia-p
 
 See [hardware.md](hardware.md#intel-openvino-provider).
 
+### WebGPU (Dawn over Vulkan; supported, tested on two GPUs)
+
+See [hardware.md](hardware.md#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus) and [WebGPU](#webgpu) above.
+
 ### AMD GPUs (MIGraphX; supported, not tested)
 
 See [amd.md](amd.md), and [hardware.md](hardware.md#amd-gpus-migraphx-supported-not-tested).
@@ -148,7 +218,7 @@ The packages install:
 | `/usr/lib/libonnxruntime_providers_<provider>.so` | the provider's package | One library per provider built |
 | `/usr/include/onnxruntime/` | `onnxruntime-core` | The C and C++ API headers |
 | `/usr/lib/pkgconfig/libonnxruntime.pc` and the CMake files | `onnxruntime-core` | pkg-config and CMake files |
-| `/usr/share/licenses/<package>/` | every package | ONNX Runtime's licence and third-party notices, and cpuinfo's and protobuf's licences (the CUDA package also cudnn-frontend's, the oneDNN package oneDNN's licence and third-party notices) |
+| `/usr/share/licenses/<package>/` | every package | ONNX Runtime's licence and third-party notices, and cpuinfo's and protobuf's licences (the CUDA package also cudnn-frontend's, the oneDNN package oneDNN's licence and third-party notices, the WebGPU package Dawn's and the SPIR-V and Vulkan headers') |
 
 ### From C and C++
 
@@ -156,7 +226,7 @@ The packages install:
 cc app.c $(pkg-config --cflags --libs libonnxruntime) -o app
 ```
 
-The headers are in `/usr/include/onnxruntime`, so a program includes `<onnxruntime_c_api.h>` or `<onnxruntime_cxx_api.h>` with the flags above. [tools/ort-smoke/smoke.c](../tools/ort-smoke/smoke.c) is a complete small C example. It uses the C API only. It shows how to append the CUDA, TensorRT, OpenVINO and oneDNN providers (MIGraphX only as a load test, the `migraphx-load` target).
+The headers are in `/usr/include/onnxruntime`, so a program includes `<onnxruntime_c_api.h>` or `<onnxruntime_cxx_api.h>` with the flags above. [tools/ort-smoke/smoke.c](../tools/ort-smoke/smoke.c) is a complete small C example. It uses the C API only. It shows how to append the CUDA, TensorRT, OpenVINO and oneDNN providers, how to register and pick the WebGPU plugin provider (MIGraphX only as a load test, the `migraphx-load` target).
 
 ### From Rust
 
@@ -186,6 +256,6 @@ The module includes `onnxruntime.training` (the training operators are built int
 python -m onnxruntime.training.ortmodule.torch_cpp_extensions.install
 ```
 
-A program that wants TensorRT's built-in plugins also loads the TensorRT environment file ([TensorRT](#tensorrt)).
+The WebGPU provider is not in that list; the Python module reaches it only through `register_execution_provider_library`, `get_ep_devices` and `add_provider_for_devices` ([WebGPU](#using-it-a-plugin-provider)). A program that wants TensorRT's built-in plugins also loads the TensorRT environment file ([TensorRT](#tensorrt)).
 
 Ran it on hardware marked not tested? Report the result, working or not, in an [issue](https://github.com/rsd/omarchy-onnxruntime/issues). A report moves the flag.

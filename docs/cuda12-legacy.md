@@ -12,13 +12,13 @@ It is **supported** for Pascal and Volta and **not tested** on that hardware, an
 | Ampere data centre (A100) | `80` | the CUDA 13 `all` package; this line also has code for it | supported; not tested |
 | Hopper, Blackwell data centre | `90`, `100`, `103` | the CUDA 13 `all` package only. They are not in this line's list | not supported by this line |
 | Pascal (GTX 10, P100) and Volta (V100, Titan V) | `60`, `61`, `70` | this line | supported; not tested |
-| Maxwell | `50`, `52` (`sm_50`, `sm_52`) | none | not supported: see below |
+| Maxwell | `50`, `52` (`sm_50`, `sm_52`) | none for CUDA; WebGPU instead | CUDA: not supported, see below. WebGPU: supported, not tested |
 
 The architectures of this line are those of the preset `legacy` in `_ortf_cuda_preset()` of `onnxruntime-split/PKGBUILD`: `60 61 70 75 80 86 89 120`, plus the PTX of `60` ([build.md](build.md#cuda-architectures)).
 
 CUDA 13 dropped Maxwell, Pascal and Volta. cuDNN 9.11 removed them, and so did the driver series from 590 on, so Arch's current driver packages do not support them. CUDA 12 still supports Pascal and Volta.
 
-**Maxwell is not supported by this package**, although CUDA 12 supports it. ONNX Runtime 1.29's fp16 kernels need `sm_53` or later (`ptxas` refuses their f16 arithmetic for `compute_50`), so they cannot be built for it. A WebGPU provider is **planned** as the route for those cards.
+**Maxwell is not supported by this package**, although CUDA 12 supports it. ONNX Runtime 1.29's fp16 kernels need `sm_53` or later (`ptxas` refuses their f16 arithmetic for `compute_50`), so they cannot be built for it. The WebGPU provider, `onnxruntime-provider-webgpu`, is the route for those cards: it is **supported** for them and **not tested** on Maxwell hardware ([hardware.md](hardware.md#webgpu-dawn-over-vulkan-supported-tested-on-two-gpus)). Maxwell needs the 580xx driver as well, because the 590 series dropped it ([below](#what-the-machine-needs)).
 
 ## What the machine needs
 

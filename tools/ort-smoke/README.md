@@ -15,9 +15,11 @@ For each target, the program creates a session with only that execution provider
 | `openvino:GPU` | OpenVINO | Intel GPU plugin |
 | `openvino:NPU` | OpenVINO | Intel NPU plugin |
 | `dnnl` | oneDNN (default options) | host CPU |
+| `webgpu:nvidia` | WebGPU, a plugin provider, with power preference `high-performance` | NVIDIA GPU (discrete GPUs first) |
+| `webgpu:intel` | WebGPU, a plugin provider, with power preference `low-power` | Intel GPU (integrated GPUs first) |
 | `migraphx-load` | MIGraphX, device 0 (not in the default set, see below) | AMD GPU |
 
-On the test machine (an RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX) every target except `migraphx-load` reported `ok`, and `migraphx-load` reported `ok (no device)`, as designed for a machine without an AMD GPU ([results.md](../../docs/results.md)). A target for hardware that [hardware.md](../../docs/hardware.md) marks not tested has not run there.
+On the test machine (an RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX) every target except `migraphx-load` reported `ok`, and `migraphx-load` reported `ok (no device)`, as designed for a machine without an AMD GPU ([results.md](../../docs/results.md)). The two WebGPU targets reported `ok` there too, each on its own GPU ([results.md](../../docs/results.md#webgpu-provider-1290-8)). `webgpu` selects both, as `openvino` selects its three devices. A target for hardware that [hardware.md](../../docs/hardware.md) marks not tested has not run there.
 
 For every target except `cpu`, the program sets the session option `session.disable_cpu_ep_fallback=1`. A provider that registers but cannot take the graph therefore fails loudly. It does not run quietly on the CPU and report success.
 
@@ -35,6 +37,8 @@ scripts/smoke-test.sh --require cpu,cuda    # exit 1 unless these are ok
 scripts/smoke-test.sh --only openvino       # the three OpenVINO devices
 scripts/smoke-test.sh --only cpu,dnnl       # the oneDNN provider
 scripts/smoke-test.sh --only migraphx-load  # the MIGraphX provider loads
+scripts/smoke-test.sh --only webgpu         # the WebGPU provider, on each vendor's GPU
+scripts/smoke-test.sh --require webgpu:intel --only webgpu:intel   # one GPU, as an acceptance check
 scripts/smoke-test.sh --prefix /opt/ort     # a different install prefix
 ```
 
@@ -104,6 +108,24 @@ Exit status of the program:
 - `3` when the ONNX Runtime API cannot be initialised.
 
 The wrapper adds `3` for a missing ONNX Runtime installation, compiler or Python. The wrapper also exits `1`, with a message naming the signal, when the program is killed by a signal (a crash) instead of exiting on its own.
+
+### The WebGPU targets
+
+`webgpu:nvidia` and `webgpu:intel` run the model on the WebGPU provider ([engines.md](../../docs/engines.md#webgpu)), which is a plugin: the program registers `libonnxruntime_providers_webgpu.so`, found next to `libonnxruntime.so`, calls `RegisterExecutionProviderLibrary` and `GetEpDevices`, takes the first GPU of the vendor and appends it with `SessionOptionsAppendExecutionProvider_V2`. This needs API version 22 or later. The tolerance is 1e-2. The default run includes both targets.
+
+The device ONNX Runtime is given does not choose the GPU in 1.29: Dawn takes its first adapter for the `powerPreference` option. So `webgpu:nvidia` asks for `high-performance` and `webgpu:intel` for `low-power`. Because the API does not say which GPU did the work, the program reads the kernel's per-process GPU usage counters (`/proc/self/fdinfo`) before the session and after the runs, and prints a `device:` line under the target:
+
+```
+webgpu:intel   ok                    89.1      55.38       1.11  0.00e+00
+    device: Intel GPU 8086:7d67 at 0000:00:02.0, power preference low-power: the kernel counted the work on this GPU
+```
+
+- **The kernel counted the work on this GPU**: the verdict is measured. This is what the Intel driver allows.
+- **Dawn's adapter is inferred from the power preference**: the NVIDIA driver keeps no such counters, so the GPU is inferred, not measured.
+- **FAIL** with a `device:` line: the work was counted only on another GPU; or an Intel GPU that this process never opened (its Vulkan driver, `vulkan-intel`, is missing, so the work went elsewhere); or a GPU whose counters did not grow during the runs ("work not seen").
+- **unavailable**: `libonnxruntime_providers_webgpu.so` is not installed next to `libonnxruntime.so`, the ONNX Runtime API is older than 22, or the provider offers no GPU of that vendor. That is why `--require webgpu:intel` fails on a machine without that GPU. A virtual device (a stand-in for compile-only sessions) is skipped.
+
+Run each WebGPU target alone for an acceptance check (`--only webgpu:intel --require webgpu:intel`). In one process, a result can depend on a Dawn device left over from the target before it.
 
 ### The two newest targets
 

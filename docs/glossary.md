@@ -7,11 +7,15 @@ The terms the other pages use, each in one or two sentences.
 | Term | Meaning |
 |---|---|
 | **ONNX Runtime** | Microsoft's open-source engine that runs models in the ONNX format. |
-| **Execution provider (EP, "engine")** | The part of ONNX Runtime that runs a model on one kind of hardware: CPU, CUDA, TensorRT, OpenVINO, oneDNN or MIGraphX. A session asks for the providers it wants. |
+| **Execution provider (EP, "engine")** | The part of ONNX Runtime that runs a model on one kind of hardware: CPU, CUDA, TensorRT, OpenVINO, oneDNN, WebGPU or MIGraphX. A session asks for the providers it wants. |
 | **Core library** | `libonnxruntime.so`. It holds the CPU provider and loads the other providers when a session asks for them. |
 | **Provider library** | A shared library `libonnxruntime_providers_<provider>.so` that holds one non-CPU provider. Here each one is in its own package. |
 | **Vendor runtime** | The libraries a provider needs from the hardware vendor: CUDA, cuDNN and TensorRT from NVIDIA, OpenVINO from Intel, MIGraphX and the HIP runtime from AMD. You install them from their own packages. They are never part of the packages of this repository. |
 | **oneDNN (`dnnl`)** | Intel's open-source deep-learning library for CPUs. ONNX Runtime has an execution provider for it, `DnnlExecutionProvider`, which `onnxruntime-provider-dnnl` carries with oneDNN linked in statically. |
+| **WebGPU** | A graphics and compute API that runs on the GPU through the system's own driver. ONNX Runtime has an execution provider for it, `WebGpuExecutionProvider`, carried by `onnxruntime-provider-webgpu`. Here it runs over Vulkan, so it works on any GPU with a Vulkan driver. |
+| **Dawn, Tint** | Dawn is Google's implementation of WebGPU, and Tint is its shader compiler. Both are linked statically into `libonnxruntime_providers_webgpu.so`, so there is no Dawn package or library to install. |
+| **Vulkan, Vulkan driver (ICD)** | A graphics and compute API of the GPU vendors. The loader, `vulkan-icd-loader`, finds the installed drivers: `nvidia-utils` for NVIDIA, `vulkan-intel` (Mesa's ANV) for Intel and `vulkan-radeon` (Mesa's RADV) for AMD. The WebGPU provider opens the loader at run time. |
+| **Plugin execution provider** | A provider that an application registers from its library with `RegisterExecutionProviderLibrary` (Python: `register_execution_provider_library`) and then selects from the devices `GetEpDevices` (`get_ep_devices`) lists, instead of naming it in the session's provider list. The WebGPU provider is one. It is not in `GetAvailableProviders`, and `providers=["WebGpuExecutionProvider"]` does not reach it. |
 | **Training operators** | The operators and the Python modules (`onnxruntime.training`) that ONNX Runtime builds with `onnxruntime_ENABLE_TRAINING`. They are in the core of every line and change the core's interface to the provider libraries (see *provider interface*). The training Python modules need PyTorch. |
 | **NCCL, RCCL** | NVIDIA's and AMD's libraries for communication between several GPUs, used by the training operators. `onnxruntime-core` depends on Arch's `nccl` by default. A build with `ORTF_NCCL=0` omits it and has `-nccloff` package names. |
 | **Provider interface (the plug)** | The set of functions through which the core library and a provider library call each other. Training and NCCL add members to it. Nothing checks at run time that both sides have the same members, so a mismatch crashes. It is why the core and the CUDA 12 and MIGraphX providers are released together. |
@@ -37,7 +41,7 @@ The terms the other pages use, each in one or two sentences.
 |---|---|
 | **PKGBUILD, recipe** | The file `makepkg` reads to build packages. "The recipe" here is `onnxruntime-split/PKGBUILD`. |
 | **pkgbase, pkgname** | A PKGBUILD can build several packages. The pkgbase names the PKGBUILD (`onnxruntime-split`). The pkgnames are its packages (`onnxruntime-core`, ...). |
-| **pkgver, pkgrel** | The upstream version (`1.29.0`) and the packaging release number (`7`). The package version is `pkgver-pkgrel`, for example `1.29.0-7`. A `pkgrel` bump rebuilds the same upstream version with a packaging change. |
+| **pkgver, pkgrel** | The upstream version (`1.29.0`) and the packaging release number (`8`). The package version is `pkgver-pkgrel`, for example `1.29.0-8`. A `pkgrel` bump rebuilds the same upstream version with a packaging change. |
 | **`-nccloff` package** | A package of a build with `ORTF_NCCL=0`. Every name has the suffix, it provides and conflicts with its base name, and it never installs beside the NCCL packages. Local builds only. None is prebuilt. |
 | **ABI pkgrel** | The first `pkgrel` of a `pkgver` whose core has the provider interface that the CUDA 12 and MIGraphX providers are built for (7 for 1.29.0). Those providers depend on `onnxruntime-core>=<pkgver>-<that>` and `onnxruntime-core<` the next patch release. It resets to 1 with a new `pkgver`. |
 | **`-bin` package** | A prebuilt package on the AUR. Its PKGBUILD downloads the already-built package files of a GitHub release instead of compiling. Here `<name>-bin` provides and conflicts with `<name>`. |

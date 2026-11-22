@@ -27,7 +27,7 @@ Build inputs are environment variables.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ORTF_EPS` | `cuda tensorrt openvino dnnl` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`, `dnnl`, `migraphx`. Use `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. `dnnl` (oneDNN, CPU) needs no vendor install. `migraphx` (AMD GPUs; supported, **not tested on AMD hardware**) is not in the default. It stands alone or joins the others (not tested together), for a local build: the published package is built from its own recipe. The CPU provider is always built. A build without `cuda` needs `ORTF_NCCL=0` |
+| `ORTF_EPS` | `cuda tensorrt openvino dnnl webgpu` | The execution providers to build, space- or comma-separated, from `cuda`, `tensorrt`, `openvino`, `dnnl`, `webgpu`, `migraphx`. Use `cpu` alone for a CPU-only build. `tensorrt` needs `cuda`. `dnnl` (oneDNN, CPU) needs no vendor install, and neither does `webgpu` (WebGPU over Vulkan: it needs Arch's Vulkan and SPIR-V packages to build, [dependencies.md](dependencies.md#webgpu-dawn-and-vulkan)). `migraphx` (AMD GPUs; supported, **not tested on AMD hardware**) is not in the default. It stands alone or joins the others (not tested together), for a local build: the published package is built from its own recipe. The CPU provider is always built. A build without `cuda` needs `ORTF_NCCL=0` |
 | `ORTF_CUDA_ARCHS` | `rtx` | CUDA architectures (`CMAKE_CUDA_ARCHITECTURES`): a preset (`rtx`, `all`, and `legacy` for CUDA 12) or a list such as `120`, `sm_120` or `"89 120"`. Used only with `cuda`. It also sets the CUDA package's name |
 | `ORTF_NVCC_THREADS` | `1` | `nvcc --threads` per CUDA compile job |
 | `ORTF_TENSORRT_HOME` | see below | The TensorRT root: `include/NvInfer.h` and `lib/libnvinfer.so`. Its `include/NvInferVersion.h` gives the major.minor that the TensorRT provider's `tensorrt` dependency is bounded to |
@@ -38,7 +38,7 @@ Build inputs are environment variables.
 | `MAKEFLAGS` | none | `-jN` sets the number of parallel compile jobs. Without it ninja runs `nproc+2` jobs |
 | `CFLAGS`, `CXXFLAGS` | `makepkg.conf`'s | Arch's `-march=x86-64 -mtune=generic` is the portable baseline; see [Portable baseline](#portable-baseline) |
 
-The defaults of `ORTF_EPS`, `ORTF_CUDA_ARCHS`, `ORTF_PYTHON`, `ORTF_NCCL` and `ORTF_SOURCE` are the `_ortf_default_eps`, `_ortf_default_cuda_archs`, `_ortf_default_python`, `_ortf_default_nccl` and `_ortf_default_source` lines of the PKGBUILD (`cuda tensorrt openvino dnnl`, `rtx`, `1`, `1`, `mirror`). A set, non-empty `ORTF_*` environment variable wins. The lines let a copy of the PKGBUILD build other inputs where the environment does not reach makepkg, as in a clean chroot (`extra-x86_64-build`). [release.md](release.md) builds the `all` preset that way, with `sed -i 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' PKGBUILD` on a copy.
+The defaults of `ORTF_EPS`, `ORTF_CUDA_ARCHS`, `ORTF_PYTHON`, `ORTF_NCCL` and `ORTF_SOURCE` are the `_ortf_default_eps`, `_ortf_default_cuda_archs`, `_ortf_default_python`, `_ortf_default_nccl` and `_ortf_default_source` lines of the PKGBUILD (`cuda tensorrt openvino dnnl webgpu`, `rtx`, `1`, `1`, `mirror`). A set, non-empty `ORTF_*` environment variable wins. The lines let a copy of the PKGBUILD build other inputs where the environment does not reach makepkg, as in a clean chroot (`extra-x86_64-build`). [release.md](release.md) builds the `all` preset that way, with `sed -i 's/^_ortf_default_cuda_archs=.*/_ortf_default_cuda_archs=all/' PKGBUILD` on a copy.
 
 Examples:
 
@@ -49,8 +49,9 @@ ORTF_CUDA_ARCHS=all MAKEFLAGS=-j8 makepkg -f              # every x86 GPU CUDA 1
 ORTF_EPS="cuda tensorrt" ORTF_CUDA_ARCHS="89 120" MAKEFLAGS=-j8 makepkg -f
 ORTF_EPS=openvino ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f # OpenVINO only: no CUDA, so no NCCL; the packages are named -nccloff
 ORTF_EPS=dnnl ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f     # the oneDNN provider alone
+ORTF_EPS=webgpu ORTF_NCCL=0 MAKEFLAGS=-j10 makepkg -d -f  # the WebGPU provider alone (with ORTF_PYTHON=0 to skip the Python module too)
 ORTF_EPS=migraphx ORTF_NCCL=0 MAKEFLAGS=-j8 makepkg -d -f # AMD GPUs only, a local build without NCCL (not tested): see below
-ORTF_EPS='cuda tensorrt openvino dnnl migraphx' MAKEFLAGS=-j8 makepkg -s -f   # every provider (not tested together)
+ORTF_EPS='cuda tensorrt openvino dnnl webgpu migraphx' MAKEFLAGS=-j8 makepkg -s -f   # every provider (not tested together)
 ORTF_TENSORRT_HOME=/usr MAKEFLAGS=-j8 makepkg -f          # the AUR's tensorrt
 ORTF_SOURCE=upstream MAKEFLAGS=-j8 makepkg -f             # the source from the git tag, not the mirror's archive
 ```
@@ -62,7 +63,7 @@ NCCL (NVIDIA's collective communication library) is on in every line by default 
 - **What it costs.** `onnxruntime-core` and `python-onnxruntime-core` depend on Arch's `nccl`, and the CUDA package on it too (the CUDA 12 line on the AUR's `nccl-cuda12.9`). `nccl` is 364.18 MiB installed on a machine that may never train on several GPUs.
 - **`ORTF_NCCL=0`** builds without it, with any `ORTF_EPS`. Every package of that build gets the suffix `-nccloff`: `onnxruntime-core-nccloff`, `onnxruntime-provider-cuda13-rtx-nccloff`, `python-onnxruntime-core-nccloff`, and so on. Each provides and conflicts with its base name, and the providers depend on `onnxruntime-core-nccloff`. The NCCL packages conflict with `onnxruntime-core-nccloff`, so a machine has NCCL packages or `-nccloff` ones, never a mixture.
 - **No prebuilt `-nccloff`.** `scripts/gen-bin.sh` refuses them. They are for local builds. A prebuilt-only user cannot avoid `nccl`.
-- **A build without `cuda` requires it.** In the main recipe, `ORTF_EPS=cpu`, `openvino`, `dnnl`, `migraphx` or any mixture without `cuda` is refused unless `ORTF_NCCL=0`. A core built with NCCL and without the CUDA provider's NCCL interface would not fit the NCCL CUDA providers that its pins accept. `prepare()` says so and what to pass.
+- **A build without `cuda` requires it.** In the main recipe, `ORTF_EPS=cpu`, `openvino`, `dnnl`, `webgpu`, `migraphx` or any mixture without `cuda` is refused unless `ORTF_NCCL=0`. A core built with NCCL and without the CUDA provider's NCCL interface would not fit the NCCL CUDA providers that its pins accept. `prepare()` says so and what to pass.
 - **Which NCCL.** Arch's `nccl` (a CUDA 13 build, kernels for `sm_75` and newer) in the main line. The AUR's `nccl-cuda12.9` in the CUDA 12 line, whose GPUs (Pascal, Volta) Arch's does not run on. AMD's `rccl` in the MIGraphX line, as a build input only (the MIGraphX provider links none).
 
 ### MIGraphX (AMD GPUs)
@@ -107,6 +108,7 @@ makepkg must know every package name before `prepare()` runs, so it reads the na
 | TensorRT | `ORTF_EPS` has `tensorrt` | `onnxruntime-provider-tensorrt-cuda<M>` |
 | OpenVINO | `ORTF_EPS` has `openvino` | `onnxruntime-provider-openvino` |
 | oneDNN | `ORTF_EPS` has `dnnl` | `onnxruntime-provider-dnnl` |
+| WebGPU | `ORTF_EPS` has `webgpu` | `onnxruntime-provider-webgpu` |
 | MIGraphX | `ORTF_EPS` has `migraphx` (the MIGraphX line's recipe also makes the Python add-on `python-onnxruntime-provider-migraphx`) | `onnxruntime-provider-migraphx` |
 | Python | `ORTF_PYTHON` is not `0` | `python-onnxruntime-core` |
 
@@ -117,6 +119,7 @@ makepkg must know every package name before `prepare()` runs, so it reads the na
 - **The TensorRT package has no architecture suffix.** Its library holds no GPU code, because TensorRT builds its kernels at run time. It depends on `onnxruntime-provider-cuda<M>=<pkgver>`, a name every CUDA package provides, because it links that CUDA's runtime. It also depends on `tensorrt`, bounded to the major.minor of the headers the build used ([INSTALL.md](../INSTALL.md#3-install-tensorrt)). It provides and conflicts with `onnxruntime-provider-tensorrt`.
 - **CUDA packages of different builds conflict.** Each provides and conflicts with `onnxruntime-provider-cuda` and `onnxruntime-provider-cuda<M>`, because all install the same `/usr/lib/libonnxruntime_providers_cuda.so`. Install one at a time.
 - **The oneDNN package has no suffix.** It depends on `onnxruntime-core` and `libgomp` only, because oneDNN is linked into it statically ([dependencies.md](dependencies.md#onednn-is-bundled-statically)).
+- **The WebGPU package has no suffix.** It depends on `onnxruntime-core`, `glibc`, `libgcc`, `libstdc++` and `vulkan-icd-loader`, because Dawn is linked into it statically and opens the Vulkan loader at run time. The Vulkan drivers are optional dependencies ([dependencies.md](dependencies.md#webgpu-dawn-and-vulkan)). `ORTF_EPS` with `webgpu` also names it in the optional dependencies of `onnxruntime-core` and `python-onnxruntime-core`.
 - **The MIGraphX provider has no architecture suffix and no ROCm version.** Its library holds no GPU code, and ROCm 7.2 and 10.1 keep the sonames it links (`libmigraphx_c.so.3`, `libamdhip64.so.7`), so one name serves both. It depends on `migraphx` and `hip-runtime-amd`, bounded to the major version of the installed packages ([dependencies.md](dependencies.md#the-version-bounds)). A ROCm major upgrade therefore needs a rebuild. The add-on `python-onnxruntime-provider-migraphx` has no suffix either. It holds a link only, and depends on the provider, `python-onnxruntime-core` and `python` ([amd.md](amd.md#the-package)).
 - **`ORTF_NCCL=0`** adds the suffix `-nccloff` to every name in the table: `onnxruntime-core-nccloff`, `onnxruntime-provider-cuda13-rtx-nccloff` and so on ([above](#nccl-and-the-nccloff-packages)).
 - **`ORTF_EPS=cpu`** gives `onnxruntime-core` (and the Python package) only. A build without `cuda` needs `ORTF_NCCL=0`, so the packages are `onnxruntime-core-nccloff` and `python-onnxruntime-core-nccloff`.
@@ -155,10 +158,16 @@ ONNX Runtime fetches its C++ dependencies with CMake FetchContent at the version
 - `build()` needs no network, and ONNX Runtime still applies its own patches to the dependencies.
 - The system's protobuf and abseil are not used (`FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER`). Arch's versions differ from the pinned ones, and mixing them is what makes Arch's own recipe carry several patches. The pinned versions are the combination upstream tests. They are linked statically and hidden by the libraries' version scripts.
 - `prepare()` checks each mirrored archive's URL and SHA-1 against `cmake/deps.txt`, and the source's commit against `_ortf_commit` (the commit embedded in the mirror's archive, or the git tag's). A version bump that misses one fails there, not in the middle of the build.
-- Not mirrored, because this build does not use them: the unit-test, benchmark, XNNPACK, CoreML, WebGPU, DirectML, telemetry and Arm dependencies, and `onnx_tensorrt` (the TensorRT provider uses TensorRT's own ONNX parser). The training operators add two that are mirrored, `cxxopts` and `tensorboard`.
+- Not mirrored, because this build does not use them: the unit-test, benchmark, XNNPACK, CoreML, DirectML, telemetry and Arm dependencies, and `onnx_tensorrt` (the TensorRT provider uses TensorRT's own ONNX parser). The training operators add two that are mirrored, `cxxopts` and `tensorboard`.
+- **Dawn, for the WebGPU provider, is mirrored; what Dawn would fetch is not.** The recipe downloads the pinned Dawn release as `ortf-dep-dawn.zip` (tag `v20260714.215939`, commit `a192e301`, 95,638,210 bytes, 91.2 MiB), checks its URL and SHA-1 against `cmake/deps.txt` like the other archives, and adds it to the sources of the main recipe only: the CUDA 12 and MIGraphX recipes build no WebGPU provider and do not download it. Dawn's own `fetch_dawn_dependencies.py` would `git clone` its dependencies at configure time, whether or not it uses them. The recipe patches `cmake/external/onnxruntime_external_deps.cmake` to turn Dawn's fetching off, and `build()` runs with no network. What Dawn uses comes from elsewhere:
+  - SPIRV-Headers, SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-Libraries come from Arch's packages (`spirv-headers`, `spirv-tools`, `vulkan-headers`, `vulkan-utility-libraries`, all 1.4.363 for this build, found through their CMake configs under `/usr`). Dawn pins slightly older headers (Vulkan header version 356) and compiles against the newer ones. `prepare()` stops with the package to install when one is missing, and the licences of the two header packages go into the WebGPU package. SPIRV-Tools is needed as a CMake target only: nothing links it.
+  - Dawn's code generators need Python's `jinja2` and `markupsafe`, from Arch's `python-jinja` and `python-markupsafe`. The patch empties Dawn's directory variables so Dawn uses the system's, and `build()` points Dawn at `/usr/bin/python`, as another Python on `PATH` would not have them.
+  - Abseil is ONNX Runtime's own, already in the build. glslang, Vulkan-Loader, webgpu-headers, DXC, GLFW and the rest of Dawn's list are unused with ONNX Runtime's options (the Vulkan loader is a run-time dependency of the package).
+  - The build sets `GIT_CEILING_DIRECTORIES` to the source directory. Without it, Dawn's version generator runs `git rev-parse HEAD` inside the unpacked Dawn directory, which under `makepkg` finds this repository's own git directory and would embed its commit as Dawn's version. Dawn's version header is therefore all zeros.
+  - Two more patches belong to the provider: ONNX Runtime installs the plugin library only for builds without a shared `libonnxruntime`, so the recipe adds the install rule that puts `libonnxruntime_providers_webgpu.so` next to `libonnxruntime.so`. The Python module is built with the WebGPU switches too, and a patch to its source drops the built-in WebGPU factory, which the plugin library defines and the module could not import ([engines.md](engines.md#webgpu)).
 - oneDNN is not in `cmake/deps.txt`: upstream clones oneDNN 3.0.1 from git at build time, which would need the network. The recipe downloads a pinned, checksummed archive of oneDNN 3.11.3 (`ortf-dep-onednn.zip`, a `makepkg` source like the others) and patches `cmake/external/dnnl.cmake` to build from it, as a static library ([engines.md](engines.md#onednn)).
 
-The sources totalled about 3.2 GiB before the oneDNN and training archives were added (not re-measured). The upstream git clone is 1.6 GiB of that. With the default mirror the clone is replaced by a 264 MiB archive, so the total is smaller by about that difference (not re-measured).
+The sources totalled about 3.2 GiB before the oneDNN, training and Dawn archives were added (not re-measured; Dawn's is 91.2 MiB). The upstream git clone is 1.6 GiB of that. With the default mirror the clone is replaced by a 264 MiB archive, so the total is smaller by about that difference (not re-measured).
 
 ## The ONNX Runtime source: mirror or upstream
 
@@ -215,6 +224,16 @@ Measured so far, on a 24-thread Intel Core Ultra 9 275HX with 30 GiB of RAM:
 | Full (`ORTF_EPS` default, `ORTF_CUDA_ARCHS=120`) | 27 minutes, including the download of the 3.2 GiB of sources (with the git clone: measured before the mirror existed) | `MAKEFLAGS=-j8 ORTF_NVCC_THREADS=1`, under `nice -n 19` and `ionice -c 3`, cold ccache, with other builds running on the machine |
 
 The full build succeeded without any change to the recipe against CUDA 13.4.3 (nvcc 13.4, host gcc 16.2.1), cuDNN 9.27.0.42, TensorRT 11.4.0.106 (`nvidia-tensorrt-sdk-local`, under `/opt/nvidia/tensorrt`) and OpenVINO 2026.4.1 with its GPU and NPU plugins (`intel-compute-runtime`, `level-zero-loader`, `intel-npu-driver` 1.38.0). That build made the single `onnxruntime-full` 1.29.0-1, which held every provider: 52 MiB (`.pkg.tar.zst`; 121 MiB installed), and `python-onnxruntime-full` at 13 MiB. Since 1.29.0-2 the same files are split into the packages of [Package names](#package-names). Their sizes are in [packages.md](packages.md#sizes). The CUDA provider holds `sm_120a` machine code, plus a few `sm_90a` kernels that upstream compiles unconditionally.
+
+The WebGPU provider, measured on the same machine:
+
+| Build | Time | Conditions |
+|---|---|---|
+| The WebGPU provider target alone, from a fresh tree | 445 s (2048 steps: 1821 C and C++ objects, of which 566 are Dawn and Tint and 124 the WebGPU provider, the rest ONNX Runtime's static libraries shared with the core) | `-j10`, no ccache, offline (no network) |
+| `ORTF_EPS=webgpu ORTF_NCCL=0 ORTF_PYTHON=0 makepkg -d -f`, configure and build | 720 s | `-j16`, offline, in `bwrap --unshare-net`; ccache state not recorded |
+| The same build again after a recipe change | 82 s | `-j16`, offline, warm ccache |
+
+Configure takes about 14 s with Dawn's fetching off. The provider's library is 16,606,312 bytes stripped (15.8 MiB; 20,046,392 bytes before stripping) and needs only `libstdc++`, `libm`, `libgcc_s` and `libc`. The package is 5.9 MiB to download and 16.2 MiB installed ([packages.md](packages.md#sizes)). The full default build, with CUDA and the rest, was not timed with the WebGPU provider in it.
 
 More architectures, fewer jobs or a slower machine lengthen a build. The results of the build's checks are in [results.md](results.md).
 

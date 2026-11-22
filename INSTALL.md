@@ -24,13 +24,14 @@ The core, `onnxruntime-core`, is always needed. It runs on any x86-64 CPU and ne
 | NVIDIA GPU, with TensorRT | `onnxruntime-provider-tensorrt-cuda13`, beside a CUDA 13 package | the same, plus TensorRT ([step 3](#3-install-tensorrt)) | tested on `sm_120`; other GPUs not tested |
 | Intel CPU, GPU or NPU | `onnxruntime-provider-openvino` | `openvino`, plus a plugin and driver for each Intel GPU or NPU | tested on the CPU, integrated GPU and NPU of the Core Ultra 9 275HX; other Intel hardware not tested |
 | Intel Xeon with AVX-512 or AMX (optional) | `onnxruntime-provider-dnnl` | none (oneDNN is built in) | tested on the Core Ultra 9 275HX only; not tested on Xeon |
+| Any GPU with a Vulkan driver, where no vendor provider covers it: NVIDIA Maxwell, Intel graphics through Mesa, AMD Polaris and Vega APUs | `onnxruntime-provider-webgpu` | `vulkan-icd-loader` and the Vulkan driver of the GPU: `nvidia-utils`, `vulkan-intel` or `vulkan-radeon` | tested on the RTX 5080 Laptop GPU and the Arrow Lake integrated GPU of the Core Ultra 9 275HX; everything else not tested. An application must load it with the plugin API ([engines.md](docs/engines.md#webgpu)) |
 | Python | `python-onnxruntime-core` | none | tested |
 | NVIDIA Pascal or Volta | `onnxruntime-provider-cuda12-legacy` | CUDA 12 userland: [Older NVIDIA GPUs](#older-nvidia-gpus-pascal-and-volta-cuda-12) | not tested on Pascal or Volta (ran on `sm_120` only) |
 | AMD GPU | `onnxruntime-provider-migraphx` | `migraphx`, `hip-runtime-amd`: [amd.md](docs/amd.md#installing) | not tested (a load check only, on a machine with no AMD GPU) |
 
 Every hardware target in this table is supported. The Status column says tested if it ran on this project's test machine (an NVIDIA GeForce RTX 5080 Laptop GPU and an Intel Core Ultra 9 275HX), and not tested otherwise. Not sure which engine fits your hardware? See [docs/hardware.md](docs/hardware.md) for coverage, the flags and what is not supported, and [docs/engines.md](docs/engines.md) for what each engine needs. [docs/choosing.md](docs/choosing.md) compares this set with Arch's own `onnxruntime-*` packages.
 
-Combine engines freely. A laptop with an Intel CPU, an NVIDIA GPU and an NPU takes the core and the CUDA, TensorRT and OpenVINO packages.
+Combine engines freely. A laptop with an Intel CPU, an NVIDIA GPU and an NPU takes the core and the CUDA, TensorRT and OpenVINO packages. Choose WebGPU only where no vendor provider covers your GPU ([docs/choosing.md](docs/choosing.md#webgpu-or-a-vendor-provider)).
 
 ### Prebuilt or built from source
 
@@ -58,6 +59,11 @@ sudo pacman -S --needed nvidia-utils cuda cudnn
 # OpenVINO provider: CPU, Intel GPU and Intel NPU devices
 sudo pacman -S --needed openvino openvino-intel-gpu-plugin openvino-intel-npu-plugin intel-compute-runtime level-zero-loader intel-npu-driver
 
+# WebGPU provider: the Vulkan loader and the driver of your GPU (one of the three)
+sudo pacman -S --needed vulkan-icd-loader vulkan-intel   # Intel graphics
+sudo pacman -S --needed vulkan-icd-loader vulkan-radeon  # AMD graphics
+sudo pacman -S --needed vulkan-icd-loader nvidia-utils   # NVIDIA graphics (Maxwell, Pascal, Volta: keep the AUR's `nvidia-580xx-utils`)
+
 # MIGraphX provider (AMD GPUs; supported, not tested)
 sudo pacman -S --needed migraphx hip-runtime-amd
 ```
@@ -72,6 +78,7 @@ Each provider package depends on its runtimes, so pacman refuses to install it w
 | `onnxruntime-provider-tensorrt-cuda<M>` | the same, plus `tensorrt` |
 | `onnxruntime-provider-openvino` | `openvino` |
 | `onnxruntime-provider-dnnl` (optional) | nothing beyond `libgomp` (`gcc-libs`) |
+| `onnxruntime-provider-webgpu` | `vulkan-icd-loader`; the Vulkan drivers are optional dependencies |
 | `onnxruntime-provider-migraphx` | `migraphx`, `hip-runtime-amd` |
 | `python-onnxruntime-provider-migraphx` (the Python add-on) | `onnxruntime-provider-migraphx` at the same version, `python-onnxruntime-core`, `python`; no vendor runtime of its own |
 
@@ -87,6 +94,7 @@ Notes:
   ```
 
 - **Intel GPU.** Check the render node, `/dev/dri/renderD*`, the same way.
+- **WebGPU.** The package depends on `vulkan-icd-loader` and lists `vulkan-intel`, `vulkan-radeon` and `nvidia-utils` as optional dependencies. Install the driver for your GPU, as in the commands above. A Maxwell card needs the 580xx NVIDIA driver, whose `nvidia-580xx-utils` provides `nvidia-utils` ([cuda12-legacy.md](docs/cuda12-legacy.md#what-the-machine-needs)). The provider is a plugin: `get_available_providers()` does not list it, and an application has to register it and pick a device, so `providers=["WebGpuExecutionProvider"]` does not reach it ([engines.md](docs/engines.md#using-it-a-plugin-provider)). It is not shown to be faster than the CPU ([results.md](docs/results.md#webgpu-provider-1290-8)).
 - **oneDNN.** The oneDNN provider is optional and needs no installed runtime. It is meant for Intel server CPUs (Xeon with AVX-512 or AMX) and int8 or bf16 models. On desktops and laptops use the CPU provider, or OpenVINO on Intel. On AMD CPUs use the CPU provider ([engines.md](docs/engines.md#onednn)).
 - **NCCL.** `onnxruntime-core` and the CUDA package depend on `nccl`. Pacman installs it from `extra` with them. It is 364.18 MiB installed, on every machine, NVIDIA or not. A source build with `ORTF_NCCL=0` avoids it ([build.md](docs/build.md#nccl-and-the-nccloff-packages)).
 - **Version bounds.** The vendor dependencies carry version bounds. Pacman holds back a vendor upgrade that would break a provider until the packages are rebuilt ([dependencies.md](docs/dependencies.md)).
@@ -129,6 +137,7 @@ The AUR package base `onnxruntime-split-bin` provides the prebuilt packages. Eac
 | `onnxruntime-provider-tensorrt-cuda13-bin` | `onnxruntime-provider-tensorrt-cuda13` |
 | `onnxruntime-provider-openvino-bin` | `onnxruntime-provider-openvino` |
 | `onnxruntime-provider-dnnl-bin` (optional) | `onnxruntime-provider-dnnl` |
+| `onnxruntime-provider-webgpu-bin` | `onnxruntime-provider-webgpu` (the prebuilt set has it from 1.29.0-8 on; earlier releases have no WebGPU package) |
 | `python-onnxruntime-core-bin` | `python-onnxruntime-core` |
 
 Each `-bin` package installs a package built in advance from this recipe in a clean chroot with its default inputs.
@@ -220,10 +229,10 @@ Run these checks after you install. The first three need no clone of this reposi
    You see `onnxruntime-core` (or `onnxruntime-core-bin`) and one line for each provider package you installed. The main-line packages share one version; the CUDA 12 and MIGraphX providers come from their own recipes and carry their own release number:
 
    ```text
-   onnxruntime-core 1.29.0-7
-   onnxruntime-provider-cuda13-rtx 1.29.0-7
-   onnxruntime-provider-openvino 1.29.0-7
-   python-onnxruntime-core 1.29.0-7
+   onnxruntime-core 1.29.0-8
+   onnxruntime-provider-cuda13-rtx 1.29.0-8
+   onnxruntime-provider-openvino 1.29.0-8
+   python-onnxruntime-core 1.29.0-8
    ```
 
 2. List the engine libraries beside the core:
@@ -232,7 +241,7 @@ Run these checks after you install. The first three need no clone of this reposi
    ls /usr/lib/libonnxruntime*.so
    ```
 
-   You see `libonnxruntime.so` and one `libonnxruntime_providers_<engine>.so` for each provider package you installed (`cuda`, `tensorrt`, `openvino`, `dnnl`). `libonnxruntime_providers_shared.so` is part of the core.
+   You see `libonnxruntime.so` and one `libonnxruntime_providers_<engine>.so` for each provider package you installed (`cuda`, `tensorrt`, `openvino`, `dnnl`, `webgpu`). `libonnxruntime_providers_shared.so` is part of the core.
 
 3. Ask the Python module for its engines:
 
@@ -240,7 +249,7 @@ Run these checks after you install. The first three need no clone of this reposi
    python -c "import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())"
    ```
 
-   You see the version `1.29.0` and one provider name for each engine package you installed. On a machine with every engine:
+   You see the version `1.29.0` and one provider name for each engine package you installed, except WebGPU, a plugin that this list never shows. On a machine with every other engine:
 
    ```text
    1.29.0 ['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'OpenVINOExecutionProvider', 'DnnlExecutionProvider', 'CPUExecutionProvider']
@@ -263,13 +272,17 @@ Run these checks after you install. The first three need no clone of this reposi
    openvino:GPU   ok                   283.9       0.25       0.24   0.00e+00
    openvino:NPU   ok                    24.8      76.56       0.47   0.00e+00
    dnnl           ok                    17.5      29.91       3.55   0.00e+00
+   webgpu:nvidia  ok                   149.9       9.88       0.32   0.00e+00
+       device: NVIDIA GPU 10de:2c19 at 0000:01:00.0, power preference high-performance: Dawn's adapter is inferred from the power preference (no kernel usage counters for this GPU)
+   webgpu:intel   ok                    89.1      55.38       1.11   0.00e+00
+       device: Intel GPU 8086:7d67 at 0000:00:02.0, power preference low-power: the kernel counted the work on this GPU
 
-   7 ok, 0 failed, 0 unavailable
+   9 ok, 0 failed, 0 unavailable
    ```
 
-   The times differ on your machine. `--require` takes a comma-separated list of targets and exits 1 unless each is `ok`. List only the engines your machine has, for example `--require cpu,cuda` on a machine without Intel hardware. Without `--require`, an engine whose runtime or device is missing shows `unavailable`, not a failure.
+   The default run has nine targets: the two WebGPU rows (`webgpu:nvidia`, `webgpu:intel`) come after `dnnl`, each with a `device:` line that names the GPU it ran on. A target whose engine, vendor runtime or GPU is absent reads `unavailable`: a machine without an Intel GPU shows `webgpu:intel   unavailable`. The WebGPU rows above come from two separate runs of one target each, which is how to run them for an acceptance check ([smoke test README](tools/ort-smoke/README.md#the-webgpu-targets)). The times differ on your machine. `--require` takes a comma-separated list of targets and exits 1 unless each is `ok`. List only the engines your machine has, for example `--require cpu,cuda` on a machine without Intel hardware. Without `--require`, an engine whose runtime or device is missing shows `unavailable`, not a failure.
 
-Valid smoke-test targets are `cpu`, `cuda`, `tensorrt`, `openvino:CPU`, `openvino:GPU`, `openvino:NPU` and `dnnl`. The target `migraphx-load` is for the MIGraphX package and is not in the default run ([amd.md](docs/amd.md#using-it)):
+Valid smoke-test targets are `cpu`, `cuda`, `tensorrt`, `openvino:CPU`, `openvino:GPU`, `openvino:NPU`, `dnnl`, `webgpu:nvidia` and `webgpu:intel` (`webgpu` selects both; a WebGPU target is `unavailable` without its GPU, and `--require` it only on a machine that has one). The target `migraphx-load` is for the MIGraphX package and is not in the default run ([amd.md](docs/amd.md#using-it)):
 
 ```bash
 scripts/smoke-test.sh --only cpu,migraphx-load
@@ -318,7 +331,7 @@ pacman -Qq | grep onnxruntime
 Remove them:
 
 ```bash
-sudo pacman -R python-onnxruntime-core onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-rtx onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-core
+sudo pacman -R python-onnxruntime-core onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-cuda13-rtx onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu onnxruntime-core
 ```
 
 Adjust the list:
