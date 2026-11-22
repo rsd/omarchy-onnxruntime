@@ -1,5 +1,5 @@
 pkgbase = onnxruntime-split-migraphx
-	pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)
+	pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)
 	pkgver = 1.29.0
 	pkgrel = 1
 	url = https://onnxruntime.ai
@@ -76,7 +76,7 @@ pkgbase = onnxruntime-split-migraphx
 	b2sums = e1bd2db15056f1a2740860659b0d96e8200f9367989f05d09e1d9e2c4abf7967821e25afed293db3e867170ac3a682133b4388b2841606f51cdf6081af7a6f59
 
 pkgname = onnxruntime-provider-migraphx
-	pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)
+	pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)
 	depends = onnxruntime-core>=1.29.0-7
 	depends = onnxruntime-core<1.29.1
 	depends = glibc
@@ -88,7 +88,7 @@ pkgname = onnxruntime-provider-migraphx
 	conflicts = onnxruntime-core-nccloff
 
 pkgname = python-onnxruntime-provider-migraphx
-	pkgdesc = The MIGraphX execution provider of ONNX Runtime in its Python module, python-onnxruntime-core (AMD GPUs; untested on AMD hardware)
+	pkgdesc = The MIGraphX execution provider of ONNX Runtime in its Python module, python-onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)
 	depends = onnxruntime-provider-migraphx=1.29.0-1
 	depends = python-onnxruntime-core>=1.29.0-7
 	depends = python-onnxruntime-core<1.29.1

@@ -3230,7 +3230,7 @@ if ((status == 0)) &&
 else
     fail "a wheel with the MIGraphX provider (exit $status): $out"
 fi
-# Every provider together (untested on hardware): each package as alone.
+# Every provider together (not tested on hardware): each package as alone.
 conf_every=${conf_all/ORTF_EPS=cuda tensorrt openvino dnnl webgpu/ORTF_EPS=cuda tensorrt openvino dnnl webgpu migraphx}
 conf_every+=$'\nORTF_MIGRAPHX_VERSION=7.2.3-7\nORTF_HIP_VERSION=7.2.4-1\nORTF_MIGRAPHX_SONAME_MAJOR=3\nORTF_HIP_SONAME_MAJOR=7'
 package_run "$conf_every" -- ORTF_EPS='cuda tensorrt openvino dnnl webgpu migraphx' FX_STAGE='shared cuda tensorrt openvino dnnl webgpu migraphx'
@@ -3822,11 +3822,11 @@ if command -v makepkg >/dev/null 2>&1; then
     # onnxruntime-split-migraphx makes it); the default build makes no
     # MIGraphX package and has no ROCm build input: those two optdepends are
     # the only lines of the default .SRCINFO that name migraphx.
-    mgx_opt=$'\toptdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)'
+    mgx_opt=$'\toptdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, supported, not tested on AMD hardware)'
     if [[ $a != *FAILED* && $(grep -c migraphx <<<"$a") == 2 &&
         $(only_blocks onnxruntime-core <<<"$a" | grep -cxF -- "$mgx_opt") == 1 &&
         $(only_blocks python-onnxruntime-core <<<"$a" | grep -cxF -- "$mgx_opt") == 1 ]]; then
-        ok "the default .SRCINFO: onnxruntime-core and python-onnxruntime-core list the MIGraphX provider (onnxruntime-split-migraphx, untested), nothing else names migraphx"
+        ok "the default .SRCINFO: onnxruntime-core and python-onnxruntime-core list the MIGraphX provider (onnxruntime-split-migraphx, not tested), nothing else names migraphx"
     else
         fail "migraphx in the default .SRCINFO: $(grep -n migraphx <<<"$a")"
     fi
@@ -4025,7 +4025,7 @@ if command -v makepkg >/dev/null 2>&1; then
     n=$(srcinfo ORTF_EPS=migraphx ORTF_NCCL=0 FX_CUDA_HOME="$fx/empty")
     mgx_block=$(only_blocks onnxruntime-provider-migraphx-nccloff <<<"$n")
     if [[ $n != *FAILED* && $(grep -c '^pkgname = ' <<<"$n") == 3 &&
-        $mgx_block == *$'\tpkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)\n'* &&
+        $mgx_block == *$'\tpkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)\n'* &&
         $mgx_block == *$'\tdepends = onnxruntime-core-nccloff=1.29.0-8\n'* && $mgx_block == *$'\tdepends = migraphx\n'* &&
         $mgx_block$'\n' == *$'\tdepends = hip-runtime-amd\n'* && $mgx_block != *'rocm-hip-sdk'* &&
         $(grep -c $'^\t\(provides\|conflicts\) = ' <<<"$mgx_block") == 2 &&
@@ -4132,7 +4132,7 @@ if command -v makepkg >/dev/null 2>&1; then
         $xp_block$'\n' == *$'\tconflicts = onnxruntime-core-nccloff\n'* &&
         $(sed -n 's/^\tmakedepends = //p' <<<"$x" | tr '\n' ' ') == 'git cmake ninja python migraphx hip-runtime-amd rccl ' &&
         $(sed -n '/^pkgbase = /,/^$/s/^\tpkgdesc = //p' <<<"$x") == \
-        'The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)' ]]; then
+        'The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)' ]]; then
         ok "migraphx line: pkgbase onnxruntime-split-migraphx, the MIGraphX package (pin pair, no python, the add-on optdepend) and its Python add-on (the provider exactly, the Python module's pin pair, python), ROCm makedepends only"
     else
         fail "migraphx line .SRCINFO: $x"

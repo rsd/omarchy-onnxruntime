@@ -76,9 +76,9 @@ else
 fi
 # The MIGraphX optdepend is in every build: onnxruntime-core's and
 # python-onnxruntime-core's, naming the AUR pkgbase that makes it.
-mgx_opt="${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)"
+mgx_opt="${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, supported, not tested on AMD hardware)"
 if [[ $(grep -cxF -- "$mgx_opt" "$srcinfo_file") == 2 && $(grep -c 'optdepends = onnxruntime-provider-migraphx' "$srcinfo_file") == 2 ]]; then
-    ok "the MIGraphX optdepend, twice, naming onnxruntime-split-migraphx and untested"
+    ok "the MIGraphX optdepend, twice, naming onnxruntime-split-migraphx and not tested"
 else
     fail "the MIGraphX optdepends: $(grep -n 'optdepends = onnxruntime-provider-migraphx' "$srcinfo_file")"
 fi

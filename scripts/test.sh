@@ -158,7 +158,7 @@ if command -v makepkg >/dev/null 2>&1; then
             "${T}optdepends = onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)" \
             "${T}optdepends = onnxruntime-provider-dnnl: the oneDNN execution provider (CPU)" \
             "${T}optdepends = onnxruntime-provider-webgpu: the WebGPU execution provider (GPUs with a Vulkan driver; a plugin provider)" \
-            "${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)"
+            "${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, supported, not tested on AMD hardware)"
         # The plain name and the one with the CUDA major, provided and
         # conflicted: one CUDA package at a time.
         run ".SRCINFO: onnxruntime-provider-$cu-rtx" srcinfo_has "$tmp/cuda" \
@@ -223,17 +223,17 @@ if command -v makepkg >/dev/null 2>&1; then
             "${T}optdepends = onnxruntime-provider-openvino: the OpenVINO execution provider (Intel CPU, GPU and NPU)" \
             "${T}optdepends = onnxruntime-provider-dnnl: the oneDNN execution provider (CPU)" \
             "${T}optdepends = onnxruntime-provider-webgpu: the WebGPU execution provider (GPUs with a Vulkan driver; a plugin provider)" \
-            "${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)"
+            "${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, supported, not tested on AMD hardware)"
         # The MIGraphX package is an optdepend of every build, of
         # onnxruntime-core and python-onnxruntime-core alone (the AUR pkgbase
         # onnxruntime-split-migraphx makes it; it is never prebuilt).
         mgx_optdepends_default() {
-            local want="${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)"
+            local want="${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, supported, not tested on AMD hardware)"
             [[ $(grep -c "^${T}optdepends = onnxruntime-provider-migraphx" "$srcinfo") == 2 &&
                 $(grep -cxF -- "$want" "$srcinfo") == 2 ]] ||
                 { grep -n migraphx "$srcinfo"; return 1; }
         }
-        run ".SRCINFO: two MIGraphX optdepends by default, naming onnxruntime-split-migraphx, untested" mgx_optdepends_default
+        run ".SRCINFO: two MIGraphX optdepends by default, naming onnxruntime-split-migraphx, not tested" mgx_optdepends_default
         # The core and the Python module run without any vendor runtime but
         # the core's NCCL (nccl, checked above: CMake links it into
         # libonnxruntime.so and the Python module); the provider packages depend on theirs (the
@@ -306,12 +306,12 @@ if command -v makepkg >/dev/null 2>&1; then
         run ".SRCINFO (ORTF_EPS=migraphx): packages and build inputs" srcinfo_has "$srcinfo_mgx" \
             'pkgname = onnxruntime-core' 'pkgname = onnxruntime-provider-migraphx' 'pkgname = python-onnxruntime-core' \
             "${T}makedepends = migraphx" "${T}makedepends = hip-runtime-amd" \
-            "${T}pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)" \
+            "${T}pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)" \
             "${T}depends = onnxruntime-core=1.29.0-8" "${T}depends = migraphx" "${T}depends = hip-runtime-amd"
         # The MIGraphX package links its library into the Python module's
         # capi directory, so the Python module lists it too.
         mgx_optdepends() {
-            local p want="${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)"
+            local p want="${T}optdepends = onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, supported, not tested on AMD hardware)"
             for p in onnxruntime-core python-onnxruntime-core; do
                 sed -n "/^pkgname = $p\$/,/^\$/p" "$srcinfo_mgx" | grep -qxF -- "$want" ||
                     { echo "no MIGraphX optdepend in $p"; return 1; }
@@ -402,7 +402,7 @@ fi
 
 # The MIGraphX line: a third pkgbase, onnxruntime-split-migraphx, generated
 # from onnxruntime-split's like the cuda12 one, its committed .SRCINFO read
-# for its one package, its pkgdesc (untested on AMD hardware), the pin pair
+# for its one package, its pkgdesc (supported, not tested on AMD hardware), the pin pair
 # on the main line's core, Arch's migraphx and hip-runtime-amd, no python
 # (its optdepend is its Python add-on), and the add-on,
 # python-onnxruntime-provider-migraphx (it links the provider's library
@@ -419,7 +419,7 @@ if [[ -r $simgx ]]; then
         got=$(sed -n 's/^pkgname = //p' "$simgx" | tr '\n' ' ')
         [[ $got == 'onnxruntime-provider-migraphx python-onnxruntime-provider-migraphx ' ]] || { echo "pkgnames: $got"; return 1; }
         srcinfo_has "$simgx" 'pkgbase = onnxruntime-split-migraphx' "${T}pkgrel = 1" \
-            "${T}pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)" \
+            "${T}pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)" \
             "${T}depends = onnxruntime-core>=1.29.0-7" "${T}depends = onnxruntime-core<1.29.1" \
             "${T}depends = migraphx" "${T}depends = hip-runtime-amd" \
             "${T}depends = glibc" "${T}depends = libgcc" "${T}depends = libstdc++" \

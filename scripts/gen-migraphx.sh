@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generates, or checks, onnxruntime-split-migraphx/PKGBUILD, the recipe of
-# the MIGraphX line (onnxruntime-provider-migraphx, AMD GPUs, untested on
+# the MIGraphX line (onnxruntime-provider-migraphx, AMD GPUs, not tested on
 # AMD hardware, and its Python add-on python-onnxruntime-provider-migraphx),
 # from onnxruntime-split/PKGBUILD.
 #

@@ -5,7 +5,7 @@
 # CUDA, TensorRT, OpenVINO (its CPU, Intel GPU and Intel NPU devices),
 # oneDNN (CPU) and WebGPU (any GPU with a Vulkan driver), and the training
 # ops; MIGraphX (AMD GPUs) in a pkgbase of
-# its own, onnxruntime-split-migraphx (below), untested on AMD hardware.
+# its own, onnxruntime-split-migraphx (below), supported, not tested on AMD hardware.
 # Arch's own variants each carry one GPU vendor and no TensorRT or
 # OpenVINO. It replaces them, never sits beside them: every one installs
 # /usr/lib/libonnxruntime.so (onnxruntime-core's conflicts).
@@ -28,7 +28,7 @@
 #   onnxruntime-provider-migraphx           the MIGraphX provider (AMD GPUs;
 #                                           only with migraphx in ORTF_EPS;
 #                                           shipped by onnxruntime-split-
-#                                           migraphx; untested on AMD
+#                                           migraphx; not tested on AMD
 #                                           hardware)
 #   python-onnxruntime-core                 the Python module, with
 #                                           onnxruntime.training
@@ -228,13 +228,13 @@
 # conflicts with onnxruntime-provider-cuda and onnxruntime-provider-cuda12,
 # so it is never installed beside a -cuda13 one. The main line's
 # python-onnxruntime-core serves it too (its module links no CUDA
-# library). Its architectures run untested on Pascal and Volta hardware.
+# library). Its architectures run, not tested, on Pascal and Volta hardware.
 # Its prebuilt counterpart is the AUR pkgbase onnxruntime-split-cuda12-bin,
 # from the release assets of tag cuda12-v<pkgver>-<pkgrel>.
 #
 # The MIGraphX line: pkgbase onnxruntime-split-migraphx, whose package
 # is onnxruntime-provider-migraphx, the MIGraphX provider for AMD GPUs,
-# built against Arch's migraphx and hip-runtime-amd, untested on AMD
+# built against Arch's migraphx and hip-runtime-amd, not tested on AMD
 # hardware. Its PKGBUILD is generated from this one by
 # scripts/gen-migraphx.sh (_ortf_line=migraphx), as the cuda12 line's is;
 # it builds migraphx alone, without the Python module, and loads into
@@ -316,7 +316,7 @@
 # AMD GPU provider. It ships as the MIGraphX line (above), whose recipe
 # builds migraphx alone. Here, migraphx in ORTF_EPS still builds it, alone
 # or beside the other providers (nothing in ONNX Runtime's CMake excludes
-# the combination, but it is untested, as is the provider on AMD
+# the combination, but it is not tested, as is the provider on AMD
 # hardware), for a local build only: the published package is the
 # MIGraphX line's. The main line's onnxruntime-core, built without
 # MIGraphX, has its provider interface (build()), so the provider loads
@@ -406,9 +406,9 @@
 #                      vendor install, nor does webgpu (WebGPU over Vulkan,
 #                      Dawn built from its source archive; Arch's Vulkan
 #                      and SPIR-V headers at build time, makedepends of
-#                      every build); migraphx (AMD GPUs, untested on
+#                      every build); migraphx (AMD GPUs, not tested on
 #                      AMD hardware) stands alone or joins the others
-#                      (untested together). The CPU provider is always
+#                      (not tested together). The CPU provider is always
 #                      built.
 #   ORTF_CUDA_ARCHS    CUDA architectures (CMAKE_CUDA_ARCHITECTURES): a
 #                      preset, or a list such as 120, sm_120 or "89 120"
@@ -543,7 +543,7 @@
 #                                     # the check (prepare() still checks
 #                                     # the ROCm install)
 #   ORTF_EPS='cuda tensorrt openvino dnnl webgpu migraphx' MAKEFLAGS=-j8 makepkg -s -f
-#                                     # every provider (untested together)
+#                                     # every provider (not tested together)
 #   ORTF_SOURCE=upstream MAKEFLAGS=-j8 makepkg -f
 #                                     # from the git tag of
 #                                     # microsoft/onnxruntime, not the
@@ -962,7 +962,7 @@ pkgdesc='Cross-platform inference engine for ONNX models: the C and C++ library 
 _ortf_cuda12_pkgdesc='The CUDA execution provider of ONNX Runtime, CUDA 12 build for Pascal, Volta and newer NVIDIA GPUs, for onnxruntime-core'
 [[ $_ortf_line != cuda12 ]] || pkgdesc=$_ortf_cuda12_pkgdesc
 # The MIGraphX package's, the migraphx line's pkgbase's too.
-_ortf_migraphx_pkgdesc='The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)'
+_ortf_migraphx_pkgdesc='The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)'
 [[ $_ortf_line != migraphx ]] || pkgdesc=$_ortf_migraphx_pkgdesc
 arch=('x86_64')
 url='https://onnxruntime.ai'
@@ -1078,7 +1078,7 @@ _ortf_provider_optdepends=(
   _ortf_provider_optdepends+=('onnxruntime-provider-dnnl: the oneDNN execution provider (CPU)')
 ! _ortf_makes onnxruntime-provider-webgpu ||
   _ortf_provider_optdepends+=('onnxruntime-provider-webgpu: the WebGPU execution provider (GPUs with a Vulkan driver; a plugin provider)')
-_ortf_provider_optdepends+=('onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)')
+_ortf_provider_optdepends+=('onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, supported, not tested on AMD hardware)')
 # _ortf_mgx_pylink: whether the MIGraphX package itself links its library
 # into the Python module's capi directory (package_onnxruntime-provider-
 # migraphx): in a main-line build that makes python-onnxruntime-core too,
@@ -1609,7 +1609,7 @@ _ortf_resolve() {
       # install, Arch's headers only.
       webgpu) wgpu=1 ;;
       # Alone or with the others: nothing in ONNX Runtime's CMake excludes
-      # the combination (untested together, and on AMD hardware).
+      # the combination (not tested together, and on AMD hardware).
       migraphx) mgx=1 ;;
       *) echo "ORTF_EPS: unknown provider '$w' (known: cpu, cuda, tensorrt, openvino, dnnl, webgpu, migraphx)" >&2; return 1 ;;
     esac
@@ -4028,7 +4028,7 @@ package_onnxruntime-provider-migraphx() {
 # python-onnxruntime-core. Written after the MIGraphX package
 # (_ortf_pkgnames), whose library it checks is in that package.
 package_python-onnxruntime-provider-migraphx() {
-  pkgdesc='The MIGraphX execution provider of ONNX Runtime in its Python module, python-onnxruntime-core (AMD GPUs; untested on AMD hardware)'
+  pkgdesc='The MIGraphX execution provider of ONNX Runtime in its Python module, python-onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)'
   depends=("onnxruntime-provider-migraphx$_ortf_nccl_sfx=$pkgver-$pkgrel" "${_ortf_pycore_dep[@]}" 'python')
   conflicts=("${_ortf_nccl_conflicts[@]}")
   _ortf_nccloff_names

@@ -78,10 +78,10 @@ if [[ -r $si ]]; then
     for line in "${T}pkgrel = 1" "${T}depends = onnxruntime-core>=1.29.0-7" "${T}depends = onnxruntime-core<1.29.1" \
         "${T}depends = migraphx" "${T}depends = hip-runtime-amd" "${T}makedepends = migraphx" \
         "${T}makedepends = hip-runtime-amd" \
-        "${T}pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)"; do
+        "${T}pkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; supported, not tested on AMD hardware)"; do
         grep -qxF -- "$line" "$si" || missing+=" [$line]"
     done
-    if [[ -z $missing ]]; then ok "the pin pair on the main line's core, ROCm depends and makedepends, untested pkgdesc"; else
+    if [[ -z $missing ]]; then ok "the pin pair on the main line's core, ROCm depends and makedepends, not-tested pkgdesc"; else
         fail ".SRCINFO lacks$missing"; fi
     # Not a single CUDA, OpenVINO, TensorRT or Python-module name and no
     # -bin anywhere, but the provider's optdepend on its Python add-on and
