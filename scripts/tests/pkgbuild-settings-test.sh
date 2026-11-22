@@ -39,7 +39,18 @@
 # provider (dnnl, in the default inputs): its package with no onednn and
 # with libgomp, oneDNN's licence and notices, a libdnnl NEEDED refused, the
 # cmake/external/dnnl.cmake patch (_ortf_patch_dnnl) on the upstream text
-# and its loud failure when that text changed. The migraphx line's recipe,
+# and its loud failure when that text changed. The WebGPU provider (webgpu,
+# in the default inputs): prepare()'s check of Arch's CMake packages Dawn
+# builds against, of jinja2 and markupsafe for the system python and of
+# the installed spirv-headers and vulkan-headers, whose versions it
+# records; its package with vulkan-icd-loader and the licences of Dawn,
+# SPIRV-Headers and Vulkan-Headers, a shared Dawn or a SPIRV-Tools NEEDED
+# refused, build()'s plugin, Python3, the CMake packages' directories and
+# GIT_CEILING_DIRECTORIES, and the Dawn, install and Python module
+# patches (_ortf_patch_dawn, _ortf_patch_webgpu_install,
+# _ortf_patch_pybind_webgpu) on the upstream texts, each failing loudly on
+# a patched file; Dawn's archive in the main line's sources only. The
+# migraphx line's recipe,
 # onnxruntime-split-migraphx/PKGBUILD (scripts/gen-migraphx.sh): migraphx
 # alone and no Python, its one package with the same pin pair, its
 # .SRCINFO with no CUDA. The training Python package: build() builds the
@@ -158,6 +169,28 @@ cudnn_version_h 9 | grep -v '^#define CUDNN_MAJOR ' >"$fx/cudnn-nodefine/include
 cudnn_version_h 9 10 >"$fx/cudnn910/include/cudnn_version.h"
 cudnn_version_h 9 | grep -v '^#define CUDNN_MINOR ' >"$fx/cudnn-nominor/include/cudnn_version.h"
 : >"$fx/cmake/openvino2026.4.1/OpenVINOConfig.cmake"
+# The CMake packages of Arch's spirv-headers, spirv-tools, vulkan-headers
+# and vulkan-utility-libraries under a prefix, as the WebGPU provider's
+# Dawn builds against them; webgpu-nospirv lacks SPIRV-Tools'.
+for d in webgpu webgpu-nospirv; do
+    for f in share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake lib/cmake/SPIRV-Tools/SPIRV-ToolsConfig.cmake \
+        share/cmake/VulkanHeaders/VulkanHeadersConfig.cmake \
+        lib/cmake/VulkanUtilityLibraries/VulkanUtilityLibrariesConfig.cmake; do
+        mkdir -p "$fx/$d/${f%/*}"
+        : >"$fx/$d/$f"
+    done
+done
+rm "$fx/webgpu-nospirv/lib/cmake/SPIRV-Tools/SPIRV-ToolsConfig.cmake"
+# The system python Dawn's generators run with: pyjinja's imports jinja2
+# and markupsafe (it succeeds for exactly that -I -c), pynojinja's cannot.
+mkdir -p "$fx/pyjinja" "$fx/pynojinja"
+cat >"$fx/pyjinja/python" <<'EOF2'
+#!/bin/sh
+[ "$1" = -I ] && [ "$2" = -c ] && [ "$3" = 'import jinja2, markupsafe' ] && exit 0
+exit 1
+EOF2
+printf '#!/bin/sh\necho "ModuleNotFoundError: No module named jinja2" >&2\nexit 1\n' >"$fx/pynojinja/python"
+chmod +x "$fx/pyjinja/python" "$fx/pynojinja/python"
 : >"$fx/trt/include/NvInfer.h"
 : >"$fx/trt/lib/libnvinfer.so.11"
 : >"$fx/trt64/include/NvInfer.h"
@@ -236,13 +269,14 @@ chmod +x "$fx/bin/python" "$fx/bin/ccache"
 #     name|version|provides, space-separated; provides comma-separated),
 #     or fails as for a package not installed. The default: Arch's
 #     openvino and cudnn, a local TensorRT package that provides tensorrt,
-#     and Arch's migraphx, hip-runtime-amd and rccl of ROCm 7.2.
+#     and Arch's migraphx, hip-runtime-amd and rccl of ROCm 7.2, and
+#     Arch's spirv-headers and vulkan-headers (the WebGPU provider's).
 cat >"$fx/pacbin/pacman" <<'EOF2'
 #!/bin/sh
 case $1 in
 -Qi)
     [ "$2" = -- ] && shift
-    for e in ${FX_INSTALLED-openvino|2026.4.1-1| cudnn|9.27.0.2-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106 migraphx|7.2.3-7| hip-runtime-amd|7.2.4-1|hip=7.2.4 rccl|7.2.4-1|}; do
+    for e in ${FX_INSTALLED-openvino|2026.4.1-1| cudnn|9.27.0.2-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106 migraphx|7.2.3-7| hip-runtime-amd|7.2.4-1|hip=7.2.4 rccl|7.2.4-1| spirv-headers|1:1.4.363.0-1| vulkan-headers|1:1.4.363.0-1|}; do
         n=${e%%|*} r=${e#*|} v=${r%%|*} p=${r#*|}
         hit=0
         [ "$n" = "$2" ] && hit=1
@@ -353,7 +387,8 @@ resolve() {
             PATH=$2/pacbin:$PATH
             _ortf_cuda_home=$2/${FX_CUDA_DIR:-cuda} _ortf_cudnn_home=$2/cudnn _ortf_openvino_cmake_dir=$2/cmake
             _ortf_tensorrt_default=$2/trt _ortf_cuda_profile=$2/no-cuda.sh _ortf_rocm_home=$2/${FX_ROCM_HOME:-rocm}
-            _ortf_nccl_home=$2/${FX_NCCL_HOME:-nccl}
+            _ortf_nccl_home=$2/${FX_NCCL_HOME:-nccl} _ortf_webgpu_prefix=$2/${FX_WEBGPU_PREFIX:-webgpu}
+            _ortf_system_python=$2/${FX_SYSTEM_PY:-pyjinja}/python
             [[ -z ${FX_CUDA_NOHDR:-} ]] || _ortf_cuda_home=$2/cuda-nohdr
             [[ -z ${FX_CUDNN_HOME:-} ]] || _ortf_cudnn_home=$2/$FX_CUDNN_HOME
             [[ -z ${FX_PROFILE:-} ]] || _ortf_cuda_profile=$2/cuda.sh
@@ -405,11 +440,12 @@ expect_fail() {
 }
 
 echo "== ORTF_EPS"
-expect_ok "the default is every provider" 'ORTF_EPS=cuda tensorrt openvino dnnl' \
+expect_ok "the default is every provider" 'ORTF_EPS=cuda tensorrt openvino dnnl webgpu' \
     "ORTF_TENSORRT_HOME=$fx/trt" "ORTF_TENSORRT_LIBDIR=$fx/trt/lib" \
     'ORTF_TENSORRT_VERSION=11.4.0.106' 'ORTF_CUDA_MAJOR=13' --
-if grep -qF 'ORTF_EPS=cuda tensorrt openvino dnnl (PKGBUILD default, _ortf_default_eps)' <<<"$out" &&
-    grep -qF 'dnnl: oneDNN 3.11.3 from ortf-dep-onednn.zip, built static into the provider' <<<"$out"; then
+if grep -qF 'ORTF_EPS=cuda tensorrt openvino dnnl webgpu (PKGBUILD default, _ortf_default_eps)' <<<"$out" &&
+    grep -qF 'dnnl: oneDNN 3.11.3 from ortf-dep-onednn.zip, built static into the provider' <<<"$out" &&
+    grep -qF "webgpu: Dawn v20260714.215939 from ortf-dep-dawn.zip, built static into the provider (Vulkan backend); SPIRV-Headers, SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-Libraries from $fx/webgpu (spirv-headers 1:1.4.363.0-1, vulkan-headers 1:1.4.363.0-1 installed); jinja2 and markupsafe for $fx/pyjinja/python" <<<"$out"; then
     ok "prepare() prints the providers and their source"
 else
     fail "printed: $out"
@@ -430,13 +466,44 @@ expect_fail "cuda without nvcc fails" 'nvcc not found' ORTF_EPS=cuda FX_NO_VENDO
 expect_fail "openvino without its CMake package fails" 'OpenVINOConfig.cmake' ORTF_EPS=openvino \
     FX_NO_VENDOR=1
 expect_fail "an unknown provider names migraphx among the known ones" \
-    "unknown provider 'rocm' (known: cpu, cuda, tensorrt, openvino, dnnl, migraphx)" ORTF_EPS='migraphx rocm'
+    "unknown provider 'rocm' (known: cpu, cuda, tensorrt, openvino, dnnl, webgpu, migraphx)" ORTF_EPS='migraphx rocm'
 expect_fail "cpu with migraphx fails" 'cpu stands alone' ORTF_EPS='cpu migraphx'
 # oneDNN is built from its source archive: no vendor install to look for.
 expect_ok "dnnl alone checks no vendor install" 'ORTF_EPS=dnnl' 'ORTF_CUDA_MAJOR=' 'ORTF_OPENVINO_VERSION=' -- \
     ORTF_EPS=dnnl FX_NO_VENDOR=1
 expect_ok "dnnl in any order comes out canonical, after openvino" 'ORTF_EPS=cuda openvino dnnl' -- ORTF_EPS='dnnl,openvino cuda'
 expect_fail "cpu with dnnl fails" 'cpu stands alone' ORTF_EPS='cpu dnnl'
+# The WebGPU provider: Dawn from its source archive, Arch's headers and
+# CMake packages for Dawn's dependencies (the prefix is a fixture).
+expect_ok "webgpu alone checks no vendor install, records the headers' versions" 'ORTF_EPS=webgpu' 'ORTF_CUDA_MAJOR=' \
+    'ORTF_OPENVINO_VERSION=' 'ORTF_SPIRV_HEADERS_VERSION=1:1.4.363.0-1' 'ORTF_VULKAN_HEADERS_VERSION=1:1.4.363.0-1' -- \
+    ORTF_EPS=webgpu FX_NO_VENDOR=1
+if grep -qF "webgpu: Dawn v20260714.215939 from ortf-dep-dawn.zip, built static into the provider (Vulkan backend); SPIRV-Headers, SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-Libraries from $fx/webgpu (spirv-headers 1:1.4.363.0-1, vulkan-headers 1:1.4.363.0-1 installed); jinja2 and markupsafe for $fx/pyjinja/python" <<<"$out"; then
+    ok "prepare() prints Dawn's archive and where its dependencies come from"
+else
+    fail "printed: $out"
+fi
+expect_ok "webgpu in any order comes out canonical, after dnnl" 'ORTF_EPS=cuda dnnl webgpu' -- ORTF_EPS='webgpu,dnnl cuda'
+expect_fail "cpu with webgpu fails" 'cpu stands alone' ORTF_EPS='cpu webgpu'
+expect_fail "webgpu without SPIRV-Tools' CMake package fails, naming its package" \
+    "webgpu: no $fx/webgpu-nospirv/lib/cmake/SPIRV-Tools/SPIRV-ToolsConfig.cmake (install spirv-tools)" \
+    ORTF_EPS=webgpu FX_WEBGPU_PREFIX=webgpu-nospirv
+expect_fail "webgpu with no Arch package for Dawn fails" \
+    "webgpu: no $fx/empty/share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake (install spirv-headers)" \
+    ORTF_EPS=webgpu FX_WEBGPU_PREFIX=empty
+# makepkg -d skips the makedepends check: jinja2 and markupsafe, which
+# Dawn's generators import, are checked in prepare(), not at configure.
+expect_fail "webgpu with a system python without jinja2 and markupsafe fails, naming their packages" \
+    "webgpu: $fx/pynojinja/python cannot import jinja2 and markupsafe, which Dawn's code generators need (install python-jinja and python-markupsafe)" \
+    ORTF_EPS=webgpu FX_SYSTEM_PY=pynojinja
+expect_fail "webgpu with no installed vulkan-headers package fails, naming it" \
+    "webgpu: no version recorded for vulkan-headers (pacman -Qi vulkan-headers gives none)" \
+    ORTF_EPS=webgpu FX_INSTALLED='spirv-headers|1:1.4.363.0-1|'
+expect_fail "webgpu with no installed spirv-headers package fails, naming it" \
+    "webgpu: no version recorded for spirv-headers (pacman -Qi spirv-headers gives none)" \
+    ORTF_EPS=webgpu FX_INSTALLED='vulkan-headers|1:1.4.363.0-1|'
+expect_ok "without webgpu, no header version is recorded" 'ORTF_SPIRV_HEADERS_VERSION=' 'ORTF_VULKAN_HEADERS_VERSION=' -- \
+    ORTF_EPS=dnnl FX_INSTALLED='' FX_SYSTEM_PY=pynojinja
 
 echo "== ORTF_EPS with migraphx (AMD GPUs; the ROCm root is a fixture)"
 expect_ok "migraphx alone: no CUDA, TensorRT or OpenVINO" 'ORTF_EPS=migraphx' 'ORTF_CUDA_MAJOR=' 'ORTF_CUDNN_MAJOR=' \
@@ -460,9 +527,9 @@ if grep -qF 'libamdhip64.so.7; so migraphx>=10 migraphx<11 hip-runtime-amd>=10 h
 else
     fail "printed: $out"
 fi
-expect_ok "without migraphx, no ROCm is looked at" 'ORTF_EPS=cuda tensorrt openvino dnnl' 'ORTF_MIGRAPHX_VERSION=' \
+expect_ok "without migraphx, no ROCm is looked at" 'ORTF_EPS=cuda tensorrt openvino dnnl webgpu' 'ORTF_MIGRAPHX_VERSION=' \
     'ORTF_HIP_VERSION=' 'ORTF_MIGRAPHX_SONAME_MAJOR=' 'ORTF_HIP_SONAME_MAJOR=' -- FX_ROCM_HOME=empty \
-    FX_INSTALLED='openvino|2026.4.1-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106'
+    FX_INSTALLED='openvino|2026.4.1-1| nvidia-tensorrt-sdk-local|11.4.0.106-2|tensorrt=11.4.0.106 spirv-headers|1:1.4.363.0-1| vulkan-headers|1:1.4.363.0-1|'
 if ! grep -qiE 'migraphx|hip|rocm' <<<"$out"; then ok "and prints nothing of it"; else fail "printed: $out"; fi
 expect_fail "migraphx without MIGraphX's CMake package fails" \
     "no $fx/rocm-nocmake/lib/cmake/migraphx/migraphx-config.cmake (install migraphx and hip-runtime-amd)" \
@@ -802,7 +869,7 @@ if grep -qF "ORTF_NCCL=1 (PKGBUILD default, _ortf_default_nccl; NVIDIA's NCCL, $
 else
     fail "printed: $out"
 fi
-expect_ok "the default providers: NVIDIA's NCCL" 'ORTF_EPS=cuda tensorrt openvino dnnl' 'ORTF_NCCL=1' 'ORTF_NCCL_LIB=nccl' --
+expect_ok "the default providers: NVIDIA's NCCL" 'ORTF_EPS=cuda tensorrt openvino dnnl webgpu' 'ORTF_NCCL=1' 'ORTF_NCCL_LIB=nccl' --
 expect_ok "cuda with migraphx: NVIDIA's NCCL (CMake's NCCL_LIBNAME prefers it)" 'ORTF_NCCL=1' 'ORTF_NCCL_LIB=nccl' \
     -- ORTF_EPS='cuda migraphx'
 # The main line without cuda: no NCCL, RCCL included (a core with NCCL
@@ -922,17 +989,17 @@ expect_names() { # expect_names <names> <env...>
     got=$(names_for "$@") || got="FAILED: $got"
     if [[ $got == "$wanted" ]]; then ok "names with [$*]: $wanted"; else fail "names with [$*]: '$got', not '$wanted'"; fi
 }
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core'
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core'
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     ORTF_EPS= ORTF_CUDA_ARCHS= ORTF_PYTHON=
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-sm120 onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-sm120 onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     ORTF_CUDA_ARCHS=120
 expect_names 'onnxruntime-core' ORTF_EPS=cpu ORTF_PYTHON=0
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     ORTF_CUDA_ARCHS=rtx
 expect_names 'onnxruntime-core onnxruntime-provider-cuda13-all onnxruntime-provider-tensorrt-cuda13 python-onnxruntime-core' \
     ORTF_EPS='cuda tensorrt' ORTF_CUDA_ARCHS=all
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-invalid onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-invalid onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     ORTF_CUDA_ARCHS='rtx 120'
 expect_names 'onnxruntime-core python-onnxruntime-core' ORTF_EPS=cpu
 expect_names 'onnxruntime-core onnxruntime-provider-cuda13-sm89-sm120 onnxruntime-provider-openvino' \
@@ -945,13 +1012,17 @@ expect_names 'onnxruntime-core onnxruntime-provider-openvino python-onnxruntime-
 # the names before it installs cuda), _ortf_cuda_major_default, 13.
 expect_names 'onnxruntime-core onnxruntime-provider-cuda12-sm89 onnxruntime-provider-openvino' \
     FX_CUDA_HOME="$fx/cuda12" ORTF_EPS='cuda openvino' ORTF_CUDA_ARCHS=89 ORTF_PYTHON=0
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     FX_CUDA_HOME="$fx/empty"
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     FX_CUDA_HOME="$fx/cuda-nodefine"
 expect_names 'onnxruntime-core onnxruntime-provider-openvino' FX_CUDA_HOME="$fx/empty" ORTF_EPS=openvino ORTF_PYTHON=0
 # The oneDNN package: no CUDA major, no vendor in the name.
 expect_names 'onnxruntime-core onnxruntime-provider-dnnl' ORTF_EPS=dnnl ORTF_PYTHON=0
+# The WebGPU package: no CUDA major, no vendor in the name, after dnnl.
+expect_names 'onnxruntime-core-nccloff onnxruntime-provider-webgpu-nccloff' ORTF_EPS=webgpu ORTF_PYTHON=0 ORTF_NCCL=0
+expect_names 'onnxruntime-core onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
+    ORTF_EPS='webgpu,dnnl'
 expect_names 'onnxruntime-core onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
     ORTF_EPS='dnnl,openvino'
 expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino python-onnxruntime-core' \
@@ -982,12 +1053,12 @@ onmgx expect_names 'onnxruntime-provider-migraphx python-onnxruntime-provider-mi
 
 # Without NCCL (ORTF_NCCL=0, or a copy's _ortf_default_nccl=0): every name
 # with -nccloff, in every line.
-expect_names 'onnxruntime-core-nccloff onnxruntime-provider-cuda13-rtx-nccloff onnxruntime-provider-tensorrt-cuda13-nccloff onnxruntime-provider-openvino-nccloff onnxruntime-provider-dnnl-nccloff python-onnxruntime-core-nccloff' \
+expect_names 'onnxruntime-core-nccloff onnxruntime-provider-cuda13-rtx-nccloff onnxruntime-provider-tensorrt-cuda13-nccloff onnxruntime-provider-openvino-nccloff onnxruntime-provider-dnnl-nccloff onnxruntime-provider-webgpu-nccloff python-onnxruntime-core-nccloff' \
     ORTF_NCCL=0
 expect_names 'onnxruntime-core-nccloff' ORTF_EPS=cpu ORTF_PYTHON=0 ORTF_NCCL=0
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     ORTF_NCCL=1
-expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl python-onnxruntime-core' \
+expect_names 'onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-tensorrt-cuda13 onnxruntime-provider-openvino onnxruntime-provider-dnnl onnxruntime-provider-webgpu python-onnxruntime-core' \
     ORTF_NCCL=
 expect_names 'onnxruntime-core-nccloff onnxruntime-provider-migraphx-nccloff python-onnxruntime-core-nccloff' ORTF_EPS=migraphx ORTF_NCCL=0
 on12 expect_names 'onnxruntime-provider-cuda12-legacy-nccloff' FX_CUDA_HOME="$fx/empty" ORTF_NCCL=0
@@ -1019,15 +1090,15 @@ check_names() {
         _ortf_check_names
     ' _ "$pkgbuild" "$dir" 2>&1) || status=$?
 }
-check_names $'ORTF_EPS=cuda tensorrt openvino dnnl\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=13\nORTF_PYTHON=1\nORTF_NCCL=1'
+check_names $'ORTF_EPS=cuda tensorrt openvino dnnl webgpu\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=13\nORTF_PYTHON=1\nORTF_NCCL=1'
 if ((status == 0)); then ok "recorded inputs that give makepkg's names pass"; else fail "check_names: $out"; fi
-check_names $'ORTF_EPS=cuda tensorrt openvino dnnl\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=12\nORTF_PYTHON=1\nORTF_NCCL=1'
+check_names $'ORTF_EPS=cuda tensorrt openvino dnnl webgpu\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=12\nORTF_PYTHON=1\nORTF_NCCL=1'
 if ((status != 0)) && grep -qF "the build used CUDA 12, $fx/cuda/include/cuda.h is now CUDA 13" <<<"$out"; then
     ok "a build of another CUDA major than cuda.h now has fails and says so"
 else
     fail "check_names (exit $status): $out"
 fi
-check_names $'ORTF_EPS=cuda tensorrt openvino dnnl\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=12\nORTF_PYTHON=1\nORTF_NCCL=1' FX_CUDA_HOME="$fx/empty"
+check_names $'ORTF_EPS=cuda tensorrt openvino dnnl webgpu\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=12\nORTF_PYTHON=1\nORTF_NCCL=1' FX_CUDA_HOME="$fx/empty"
 if ((status != 0)) && grep -qF "$fx/empty/include/cuda.h is absent so the names use _ortf_cuda_major_default (13)" <<<"$out" &&
     ! grep -qF 'is now CUDA' <<<"$out"; then
     ok "a build of CUDA 12 without a cuda.h now fails and names the default"
@@ -1139,6 +1210,10 @@ needed_migraphx='libmigraphx_c.so.3 libamdhip64.so.7 libstdc++.so.6 libm.so.6 li
 # statically, so no libdnnl, and its OpenMP runtime, libgomp, beside the
 # system libraries.
 needed_dnnl='libgomp.so.1 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2'
+# The WebGPU provider's, from a build of its target here (1.29.0 with Dawn
+# v20260714.215939, makepkg's LDFLAGS): Dawn and Tint linked in
+# statically, and Dawn opens libvulkan.so.1 at run time, no NEEDED entry.
+needed_webgpu='libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2'
 # lib_depends <package> <depends> <trt> <CUDA major> <TensorRT version>
 # <NEEDED...>: runs _ortf_lib_depends for a library of <package> with
 # depends=(<depends>, space-separated) on those NEEDED entries, with the
@@ -1176,11 +1251,11 @@ expect_libs_fail() { # expect_libs_fail <description> <message fragment> <lib_de
 # The static depends of each package, as the PKGBUILD writes them, with
 # what package() adds before the check (the TensorRT package).
 core_deps='glibc libgcc libstdc++'
-cuda_deps='onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ cuda cudnn nvidia-utils nccl'
-trt_deps='onnxruntime-core=1.29.0-7 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt'
-ov_deps='onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ openvino'
-py_deps='onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools'
-mgx_deps='onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ migraphx hip-runtime-amd'
+cuda_deps='onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ cuda cudnn nvidia-utils nccl'
+trt_deps='onnxruntime-core=1.29.0-8 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ cuda cudnn nvidia-utils tensorrt'
+ov_deps='onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ openvino'
+py_deps='onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ python python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools'
+mgx_deps='onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ migraphx hip-runtime-amd'
 cu_pkg=onnxruntime-provider-cuda13-rtx trt_pkg=onnxruntime-provider-tensorrt-cuda13 ov_pkg=onnxruntime-provider-openvino
 mgx_pkg=onnxruntime-provider-migraphx
 # shellcheck disable=SC2086 # the NEEDED lists are words
@@ -1330,7 +1405,7 @@ echo "== the package functions"
 # Stubs for a package function (makepkg runs them after build()):
 #   cmake --install: installs a stub build under DESTDIR: libonnxruntime.so
 #     with its links, the provider libraries of FX_STAGE (default: shared
-#     cuda tensorrt openvino dnnl), headers, pkg-config and CMake files, and two
+#     cuda tensorrt openvino dnnl webgpu), headers, pkg-config and CMake files, and two
 #     files of the bundled dependencies; it logs each install (DESTDIR) to
 #     FX_INSTALLS;
 #   readelf -d -- <file>: the NEEDED entries in FX_NEEDED/<file's name>
@@ -1394,7 +1469,7 @@ mkdir -p "$d/lib/pkgconfig" "$d/lib/cmake/onnxruntime" "$d/include/onnxruntime" 
 echo core >"$d/lib/libonnxruntime.so.1.29.0"
 ln -s libonnxruntime.so.1.29.0 "$d/lib/libonnxruntime.so.1"
 ln -s libonnxruntime.so.1 "$d/lib/libonnxruntime.so"
-for ep in ${FX_STAGE-shared cuda tensorrt openvino dnnl}; do echo "$ep" >"$d/lib/libonnxruntime_providers_$ep.so"; done
+for ep in ${FX_STAGE-shared cuda tensorrt openvino dnnl webgpu}; do echo "$ep" >"$d/lib/libonnxruntime_providers_$ep.so"; done
 # A RUNPATH for the stub libraries, as readelf then reports it.
 [ -z "${FX_DNNL_RUNPATH:-}" ] || printf '%s' "$FX_DNNL_RUNPATH" >"$FX_RPATH/libonnxruntime_providers_dnnl.so"
 [ -z "${FX_CORE_RUNPATH:-}" ] || printf '%s' "$FX_CORE_RUNPATH" >"$FX_RPATH/libonnxruntime.so.1.29.0"
@@ -1483,7 +1558,7 @@ package_run() {
     # (a stand-in text) and a LICENSE deeper in the tree, which is not the
     # one to take; FX_NO_DEP_LICENSE=<dependency> leaves that archive out.
     local dep top
-    for dep in pytorch_cpuinfo:cpuinfo-4628dc0 protobuf:protobuf-21.12 onednn:oneDNN-3.11.3; do
+    for dep in pytorch_cpuinfo:cpuinfo-4628dc0 protobuf:protobuf-21.12 onednn:oneDNN-3.11.3 dawn:dawn-20260714.215939; do
         top=${dep#*:} dep=${dep%%:*}
         [[ ${FX_NO_DEP_LICENSE:-} != "$dep" ]] || continue
         mkdir -p "$dir/zip/$top/third_party"
@@ -1495,6 +1570,14 @@ package_run() {
             echo 'oneDNN third-party programs stand-in' >"$dir/zip/$top/THIRD-PARTY-PROGRAMS"
         (cd "$dir/zip" && bsdtar --format=zip -cf "$dir/src/ortf-dep-$dep.zip" "$top")
     done
+    # The licence directories of Arch's spirv-headers and vulkan-headers
+    # (stand-in texts) the WebGPU package copies from;
+    # FX_NO_SYS_LICENSE=<package> leaves that one out.
+    for dep in spirv-headers/LICENSE vulkan-headers/MIT.txt; do
+        [[ ${FX_NO_SYS_LICENSE:-} != "${dep%%/*}" ]] || continue
+        mkdir -p "$dir/syslic/${dep%%/*}"
+        echo "${dep%%/*} licence stand-in" >"$dir/syslic/$dep"
+    done
     printf '%s\n' "$conf" >"$dir/src/ortf.conf"
     tr ' ' '\n' <<<"$needed_core" >"$dir/needed/libonnxruntime.so.1.29.0"
     : >"$dir/needed/libonnxruntime_providers_shared.so"
@@ -1503,6 +1586,7 @@ package_run() {
     tr ' ' '\n' <<<"$needed_openvino" >"$dir/needed/libonnxruntime_providers_openvino.so"
     tr ' ' '\n' <<<"$needed_migraphx" >"$dir/needed/libonnxruntime_providers_migraphx.so"
     tr ' ' '\n' <<<"$needed_dnnl" >"$dir/needed/libonnxruntime_providers_dnnl.so"
+    tr ' ' '\n' <<<"$needed_webgpu" >"$dir/needed/libonnxruntime_providers_webgpu.so"
     tr ' ' '\n' <<<"$needed_python" >"$dir/needed/onnxruntime_pybind11_state.so"
     while (($#)) && [[ $1 != -- ]]; do
         kv=$1
@@ -1517,7 +1601,7 @@ package_run() {
         PATH="$fx/pkgbin:$PATH" FX_NEEDED="$dir/needed" FX_RPATH="$dir/rpath" FX_INSTALLS="$dir/installs" bash -c '
         # shellcheck disable=SC1090
         . "$1"
-        srcdir=$2/src
+        srcdir=$2/src _ortf_system_licenses=$2/syslic
         _ortf_system_python=${FX_SYSTEM_PYTHON:-$3}
         first=0
         for p in "${pkgname[@]}"; do
@@ -1547,7 +1631,7 @@ package_run() {
 }
 # has_line <line>: out has that line, exactly.
 has_line() { grep -qxF -- "$1" <<<"$out"; }
-conf_all=$'ORTF_EPS=cuda tensorrt openvino dnnl\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=13\nORTF_CUDNN_MAJOR=9\nORTF_PYTHON=1\nORTF_TENSORRT_HOME=/opt/nvidia/tensorrt\nORTF_TENSORRT_LIBDIR=/opt/nvidia/tensorrt/lib\nORTF_TENSORRT_PKG=a-stale-package\nORTF_TENSORRT_VERSION=11.4.0.106\nORTF_OPENVINO_VERSION=2026.4.1-1'
+conf_all=$'ORTF_EPS=cuda tensorrt openvino dnnl webgpu\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_PRESET=rtx\nORTF_CUDA_MAJOR=13\nORTF_CUDNN_MAJOR=9\nORTF_PYTHON=1\nORTF_TENSORRT_HOME=/opt/nvidia/tensorrt\nORTF_TENSORRT_LIBDIR=/opt/nvidia/tensorrt/lib\nORTF_TENSORRT_PKG=a-stale-package\nORTF_TENSORRT_VERSION=11.4.0.106\nORTF_OPENVINO_VERSION=2026.4.1-1'
 conf_all+=$'\nORTF_PYTHON_EXE='"$fx/pystub/python"$'\nORTF_PYTHON_VERSION=3.14.8\nORTF_NCCL=1\nORTF_NCCL_LIB=nccl'
 package_run "$conf_all" --
 if ((status == 0)); then ok "every package function of the default build runs under set -eE"; else
@@ -1562,10 +1646,12 @@ lic() {
     printf '%s/LICENSE %s/ThirdPartyNotices.txt %s/cpuinfo-LICENSE' "$d" "$d" "$d"
     [[ ${2:-} != cudnn ]] || printf ' %s/cudnn-frontend-LICENSE.txt' "$d"
     [[ ${2:-} != onednn ]] || printf ' %s/onednn-LICENSE %s/onednn-THIRD-PARTY-PROGRAMS' "$d" "$d"
+    [[ ${2:-} != dawn ]] || printf ' %s/dawn-LICENSE' "$d"
     printf ' %s/protobuf-LICENSE' "$d"
+    [[ ${2:-} != dawn ]] || printf ' %s/spirv-headers-LICENSE %s/vulkan-headers-MIT.txt' "$d" "$d"
 }
 cu=onnxruntime-provider-cuda13-rtx trt=onnxruntime-provider-tensorrt-cuda13 ov=onnxruntime-provider-openvino
-dn=onnxruntime-provider-dnnl
+dn=onnxruntime-provider-dnnl wg=onnxruntime-provider-webgpu
 py=python-onnxruntime-core site=usr/lib/python3.14/site-packages
 for line in \
     'onnxruntime-core depends: glibc libgcc libstdc++ nccl' \
@@ -1573,21 +1659,25 @@ for line in \
     'onnxruntime-core conflicts: onnxruntime onnxruntime-cpu onnxruntime-cuda onnxruntime-opt-cuda onnxruntime-rocm onnxruntime-opt-rocm onnxruntime-git onnxruntime-full onnxruntime-provider-cuda12-legacy<1.29.0-2 onnxruntime-provider-cuda12-legacy-bin<1.29.0-2' \
     'onnxruntime-core replaces: onnxruntime-full' \
     "onnxruntime-core files: ./usr/include/onnxruntime/onnxruntime_c_api.h ./usr/include/onnxruntime/onnxruntime_cxx_api.h ./usr/lib/cmake/onnxruntime/onnxruntimeConfig.cmake ./usr/lib/libonnxruntime.so ./usr/lib/libonnxruntime.so.1 ./usr/lib/libonnxruntime.so.1.29.0 ./usr/lib/libonnxruntime_providers_shared.so ./usr/lib/pkgconfig/libonnxruntime.pc $(lic onnxruntime-core) " \
-    "$cu depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ nvidia-utils nccl cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$cu depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ nvidia-utils nccl cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$cu provides: onnxruntime-provider-cuda=1.29.0 onnxruntime-provider-cuda13=1.29.0" \
     "$cu conflicts: onnxruntime-provider-cuda onnxruntime-provider-cuda13 onnxruntime-core-nccloff" \
     "$cu files: ./usr/lib/libonnxruntime_providers_cuda.so $(lic "$cu" cudnn) " \
-    "$trt depends: onnxruntime-core=1.29.0-7 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$trt depends: onnxruntime-core=1.29.0-8 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
     "$trt provides: onnxruntime-provider-tensorrt=1.29.0" \
     "$trt conflicts: onnxruntime-provider-tensorrt onnxruntime-core-nccloff" \
     "$trt files: ./usr/lib/libonnxruntime_providers_tensorrt.so $(lic "$trt") " \
-    "$ov depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5" \
+    "$ov depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5" \
     "$ov provides: " "$ov conflicts: onnxruntime-core-nccloff" "$ov replaces: " \
     "$ov files: ./usr/lib/libonnxruntime_providers_openvino.so $(lic "$ov") " \
-    "$dn depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ libgomp" \
+    "$dn depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ libgomp" \
     "$dn provides: " "$dn conflicts: onnxruntime-core-nccloff" "$dn replaces: " \
     "$dn files: ./usr/lib/libonnxruntime_providers_dnnl.so $(lic "$dn" onednn) " \
-    "$py depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ nccl python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools python>=3.14 python<3.15" \
+    "$wg depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ vulkan-icd-loader" \
+    "$wg provides: " "$wg conflicts: onnxruntime-core-nccloff" "$wg replaces: " \
+    "$wg optdepends: vulkan-intel: the Vulkan driver for Intel graphics (Mesa ANV) vulkan-radeon: the Vulkan driver for AMD graphics (Mesa RADV) nvidia-utils: the Vulkan driver for NVIDIA graphics (the proprietary driver)" \
+    "$wg files: ./usr/lib/libonnxruntime_providers_webgpu.so $(lic "$wg" dawn) " \
+    "$py depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ nccl python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools python>=3.14 python<3.15" \
     "$py provides: python-onnxruntime=1.29.0" \
     "$py conflicts: python-onnxruntime python-onnxruntime-cpu python-onnxruntime-cuda python-onnxruntime-opt-cuda python-onnxruntime-rocm python-onnxruntime-opt-rocm python-onnxruntime-full onnxruntime-core-nccloff" \
     "$py replaces: python-onnxruntime-full" \
@@ -1647,7 +1737,7 @@ fi
 package_run $'ORTF_EPS=cpu\nORTF_CUDA_ARCHS=120\nORTF_CUDA_PRESET=\nORTF_CUDA_MAJOR=\nORTF_PYTHON=0\nORTF_TENSORRT_HOME=\nORTF_TENSORRT_LIBDIR=\nORTF_TENSORRT_VERSION=\nORTF_NCCL=0\nORTF_NCCL_LIB=' \
     -- ORTF_EPS=cpu FX_STAGE=
 if ((status == 0)) && [[ $out == 'onnxruntime-core-nccloff depends: glibc libgcc libstdc++'$'\n'* ]] &&
-    has_line 'onnxruntime-core-nccloff provides: onnxruntime=1.29.0 libonnxruntime.so onnxruntime-core=1.29.0-7' &&
+    has_line 'onnxruntime-core-nccloff provides: onnxruntime=1.29.0 libonnxruntime.so onnxruntime-core=1.29.0-8' &&
     has_line 'onnxruntime-core-nccloff conflicts: onnxruntime onnxruntime-cpu onnxruntime-cuda onnxruntime-opt-cuda onnxruntime-rocm onnxruntime-opt-rocm onnxruntime-git onnxruntime-full onnxruntime-provider-cuda12-legacy<1.29.0-2 onnxruntime-provider-cuda12-legacy-bin<1.29.0-2 onnxruntime-core' &&
     has_line "onnxruntime-core-nccloff files: ./usr/include/onnxruntime/onnxruntime_c_api.h ./usr/include/onnxruntime/onnxruntime_cxx_api.h ./usr/lib/cmake/onnxruntime/onnxruntimeConfig.cmake ./usr/lib/libonnxruntime.so ./usr/lib/libonnxruntime.so.1 ./usr/lib/libonnxruntime.so.1.29.0 ./usr/lib/pkgconfig/libonnxruntime.pc $(lic onnxruntime-core-nccloff) "; then
     ok "a CPU-only build: onnxruntime-core-nccloff alone (no NCCL), without the shared provider library"
@@ -1691,7 +1781,7 @@ fi
 # counts them (three at least).
 package_run "$conf_all" --
 dep_lic_ok=1
-for p in onnxruntime-core "$cu" "$trt" "$ov" "$dn" "$py"; do
+for p in onnxruntime-core "$cu" "$trt" "$ov" "$dn" "$wg" "$py"; do
     d=$pkgroot/$p/usr/share/licenses/$p
     n=$(find "$d" -maxdepth 1 -type f | wc -l)
     if [[ $(<"$d/cpuinfo-LICENSE") != 'pytorch_cpuinfo licence stand-in' ||
@@ -1732,6 +1822,40 @@ FX_NO_ONEDNN_NOTICES=1 expect_package_fail "the oneDNN package without THIRD-PAR
 # (a shared oneDNN, Arch's or the build's own) fails the package.
 expect_package_fail "a libdnnl.so.3 in the oneDNN provider's NEEDED entries fails" "$dn" \
     'libdnnl.so.3: oneDNN must be linked statically' "$conf_all" "libonnxruntime_providers_dnnl.so=libdnnl.so.3 $needed_dnnl" --
+# Dawn linked in statically: a shared Dawn in the WebGPU provider's NEEDED
+# entries fails the package.
+expect_package_fail "a libwebgpu_dawn.so in the WebGPU provider's NEEDED entries fails" "$wg" \
+    'libwebgpu_dawn.so: Dawn must be linked statically into the WebGPU provider' "$conf_all" \
+    "libonnxruntime_providers_webgpu.so=libwebgpu_dawn.so $needed_webgpu" --
+# A library of Dawn's dependencies (Arch's SPIRV-Tools is a shared
+# library) would be a run-time dependency no package declares: it fails.
+expect_package_fail "a libSPIRV-Tools.so in the WebGPU provider's NEEDED entries fails" "$wg" \
+    'libSPIRV-Tools.so is a library no package is known for' "$conf_all" \
+    "libonnxruntime_providers_webgpu.so=libSPIRV-Tools.so $needed_webgpu" --
+package_run "$conf_all" --
+if ((status == 0)) && [[ $(<"$pkgroot/$wg/usr/share/licenses/$wg/dawn-LICENSE") == 'dawn licence stand-in' ]] &&
+    [[ -z $(find "$pkgroot" -name dawn-LICENSE ! -path "$pkgroot/$wg/*") ]]; then
+    ok "the WebGPU package carries Dawn's licence, no other package does"
+else
+    fail "Dawn's licence (exit $status): $(find "$pkgroot" -name '*LICENSE*')"
+fi
+FX_NO_DEP_LICENSE=dawn expect_package_fail "the WebGPU package without Dawn's archive fails" "$wg" \
+    'src/ortf-dep-dawn.zip not found' "$conf_all" --
+# The licences of Arch's headers compiled into the provider, copied from
+# their packages' licence directories, into the WebGPU package only.
+package_run "$conf_all" --
+if ((status == 0)) &&
+    [[ $(<"$pkgroot/$wg/usr/share/licenses/$wg/spirv-headers-LICENSE") == 'spirv-headers licence stand-in' ]] &&
+    [[ $(<"$pkgroot/$wg/usr/share/licenses/$wg/vulkan-headers-MIT.txt") == 'vulkan-headers licence stand-in' ]] &&
+    [[ -z $(find "$pkgroot" \( -name spirv-headers-LICENSE -o -name vulkan-headers-MIT.txt \) ! -path "$pkgroot/$wg/*") ]]; then
+    ok "the WebGPU package carries SPIRV-Headers' and Vulkan-Headers' licences, no other package does"
+else
+    fail "the headers' licences (exit $status): $(find "$pkgroot" -path "*/$wg/usr/share/licenses/*")"
+fi
+FX_NO_SYS_LICENSE=spirv-headers expect_package_fail "the WebGPU package without spirv-headers' licence fails" "$wg" \
+    "syslic/spirv-headers/LICENSE not found or empty: spirv-headers's licence" "$conf_all" --
+FX_NO_SYS_LICENSE=vulkan-headers expect_package_fail "the WebGPU package without vulkan-headers' licence fails" "$wg" \
+    "syslic/vulkan-headers/MIT.txt not found or empty: vulkan-headers's licence" "$conf_all" --
 # The RUNPATHs. The stub wheel's module has the RUNPATH a build with the
 # oneDNN provider leaves, $ORIGIN and the build's oneDNN link directory
 # (a namcap "insecure RUNPATH"): python-onnxruntime-core sets it to $ORIGIN,
@@ -1869,14 +1993,14 @@ out=$(bash -c '
     set -euo pipefail
     # shellcheck disable=SC1090
     . "$1"
-    depends=(onnxruntime-core=1.29.0-7 python python-numpy cuda nvidia-utils "python>=3.14" "python<3.15" "cuda>=13" "cuda<14")
+    depends=(onnxruntime-core=1.29.0-8 python python-numpy cuda nvidia-utils "python>=3.14" "python<3.15" "cuda>=13" "cuda<14")
     _ortf_drop_bare_depends
     echo "${depends[*]}"
     depends=()
     _ortf_drop_bare_depends
     echo "[${depends[*]}]"
 ' _ "$pkgbuild" 2>&1) || out="FAILED: $out"
-if [[ $out == $'onnxruntime-core=1.29.0-7 python-numpy nvidia-utils python>=3.14 python<3.15 cuda>=13 cuda<14\n[]' ]]; then
+if [[ $out == $'onnxruntime-core=1.29.0-8 python-numpy nvidia-utils python>=3.14 python<3.15 cuda>=13 cuda<14\n[]' ]]; then
     ok "_ortf_drop_bare_depends drops the bare names of bounded dependencies only"
 else
     fail "_ortf_drop_bare_depends: $out"
@@ -1942,22 +2066,22 @@ if ((status == 0)); then ok "every package function of a build without NCCL runs
 cor0=onnxruntime-core-nccloff cu0=$cu-nccloff trt0=$trt-nccloff ov0=$ov-nccloff dn0=$dn-nccloff py0=$py-nccloff
 for line in \
     "$cor0 depends: glibc libgcc libstdc++" \
-    "$cor0 provides: onnxruntime=1.29.0 libonnxruntime.so onnxruntime-core=1.29.0-7" \
+    "$cor0 provides: onnxruntime=1.29.0 libonnxruntime.so onnxruntime-core=1.29.0-8" \
     "$cor0 conflicts: onnxruntime onnxruntime-cpu onnxruntime-cuda onnxruntime-opt-cuda onnxruntime-rocm onnxruntime-opt-rocm onnxruntime-git onnxruntime-full onnxruntime-provider-cuda12-legacy<1.29.0-2 onnxruntime-provider-cuda12-legacy-bin<1.29.0-2 onnxruntime-core" \
-    "$cu0 depends: onnxruntime-core-nccloff=1.29.0-7 glibc libgcc libstdc++ nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
-    "$cu0 provides: onnxruntime-provider-cuda=1.29.0 onnxruntime-provider-cuda13=1.29.0 $cu=1.29.0-7" \
+    "$cu0 depends: onnxruntime-core-nccloff=1.29.0-8 glibc libgcc libstdc++ nvidia-utils cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$cu0 provides: onnxruntime-provider-cuda=1.29.0 onnxruntime-provider-cuda13=1.29.0 $cu=1.29.0-8" \
     "$cu0 conflicts: onnxruntime-provider-cuda onnxruntime-provider-cuda13 $cu" \
     "$cu0 files: ./usr/lib/libonnxruntime_providers_cuda.so $(lic "$cu0" cudnn) " \
-    "$trt0 depends: onnxruntime-core-nccloff=1.29.0-7 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
-    "$trt0 provides: onnxruntime-provider-tensorrt=1.29.0 $trt=1.29.0-7" \
+    "$trt0 depends: onnxruntime-core-nccloff=1.29.0-8 onnxruntime-provider-cuda13=1.29.0 glibc libgcc libstdc++ nvidia-utils tensorrt>=11.4 tensorrt<11.5 cuda>=13 cuda<14 cudnn>=9 cudnn<10" \
+    "$trt0 provides: onnxruntime-provider-tensorrt=1.29.0 $trt=1.29.0-8" \
     "$trt0 conflicts: onnxruntime-provider-tensorrt $trt" \
-    "$ov0 depends: onnxruntime-core-nccloff=1.29.0-7 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5" \
-    "$ov0 provides: $ov=1.29.0-7" "$ov0 conflicts: $ov" \
-    "$dn0 depends: onnxruntime-core-nccloff=1.29.0-7 glibc libgcc libstdc++ libgomp" \
-    "$dn0 provides: $dn=1.29.0-7" "$dn0 conflicts: $dn" \
+    "$ov0 depends: onnxruntime-core-nccloff=1.29.0-8 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5" \
+    "$ov0 provides: $ov=1.29.0-8" "$ov0 conflicts: $ov" \
+    "$dn0 depends: onnxruntime-core-nccloff=1.29.0-8 glibc libgcc libstdc++ libgomp" \
+    "$dn0 provides: $dn=1.29.0-8" "$dn0 conflicts: $dn" \
     "$dn0 files: ./usr/lib/libonnxruntime_providers_dnnl.so $(lic "$dn0" onednn) " \
-    "$py0 depends: onnxruntime-core-nccloff=1.29.0-7 glibc libgcc libstdc++ python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools python>=3.14 python<3.15" \
-    "$py0 provides: python-onnxruntime=1.29.0 $py=1.29.0-7" \
+    "$py0 depends: onnxruntime-core-nccloff=1.29.0-8 glibc libgcc libstdc++ python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools python>=3.14 python<3.15" \
+    "$py0 provides: python-onnxruntime=1.29.0 $py=1.29.0-8" \
     "$py0 conflicts: python-onnxruntime python-onnxruntime-cpu python-onnxruntime-cuda python-onnxruntime-opt-cuda python-onnxruntime-rocm python-onnxruntime-opt-rocm python-onnxruntime-full $py"; do
     if has_line "$line"; then ok "package without NCCL: $line"; else fail "package without NCCL: no line [$line] in: $out"; fi
 done
@@ -2091,8 +2215,8 @@ if [[ $out == *'cudnn'* ]]; then
 else
     ok "_ortf_check_libs (cuda12): no cudnn in depends, no cuDNN bound"
 fi
-check_libs12 "$pkgbuild" 10 onnxruntime-core=1.29.0-7 nvidia-utils cuda cudnn
-if [[ $out == 'status 0: onnxruntime-core=1.29.0-7 nvidia-utils cuda cudnn cudnn>=9 cudnn<10' ]]; then
+check_libs12 "$pkgbuild" 10 onnxruntime-core=1.29.0-8 nvidia-utils cuda cudnn
+if [[ $out == 'status 0: onnxruntime-core=1.29.0-8 nvidia-utils cuda cudnn cudnn>=9 cudnn<10' ]]; then
     ok "_ortf_check_libs (main line): the bare cudnn gets the recorded major's bounds added"
 else
     fail "_ortf_check_libs (main line): $out"
@@ -2100,7 +2224,7 @@ fi
 # The main line ignores the minor: its CUDA package keeps the major's bound,
 # and a CUDA 13 library there is the CUDA major check's (by the names).
 package_run "${conf_all/ORTF_CUDNN_MAJOR=9/ORTF_CUDNN_MAJOR=9$'\n'ORTF_CUDNN_MINOR=10}" --
-if ((status == 0)) && has_line "$cu depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ nvidia-utils nccl cuda>=13 cuda<14 cudnn>=9 cudnn<10"; then
+if ((status == 0)) && has_line "$cu depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ nvidia-utils nccl cuda>=13 cuda<14 cudnn>=9 cudnn<10"; then
     ok "the main line's CUDA package keeps the cuDNN major bound with a minor recorded"
 else
     fail "the main line with ORTF_CUDNN_MINOR (exit $status): $out"
@@ -2138,6 +2262,7 @@ if [ "$1" = --build ]; then
     exit 0
 fi
 printf '%s\n' "$@" >"$FX_CMAKE_ARGS"
+printf '%s\n' "${GIT_CEILING_DIRECTORIES-unset}" >"$FX_CMAKE_ARGS.git"
 EOF2
 chmod +x "$fx/buildbin/cmake"
 build_flags() {
@@ -2162,6 +2287,7 @@ build_flags() {
     grep -v '^-DCMAKE_CUDA_FLAGS=\|^-DCMAKE_CUDA_ARCHITECTURES=\|^-Donnxruntime_CMAKE_DEPS_MIRROR_DIR=' "$dir/args" |
         sed "s|$dir|DIR|g" >"$tmp/build-rest-${3:-x}"
     sed "s|$dir|DIR|g" "$dir/args.build" >"$tmp/build-run-${3:-x}"
+    sed "s|$dir|DIR|g" "$dir/args.git" >"$tmp/build-git-${3:-x}"
 }
 conf_build=$'ORTF_EPS=cuda\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_MAJOR=13\nORTF_JOBS=\nORTF_CCACHE=\nORTF_PYTHON=0\nNVCC_CCBIN=/usr/bin/g++\nORTF_NVCC_THREADS=1\nORTF_NCCL_LIB=nccl'
 flags13=$(build_flags "$conf_build" "$pkgbuild" 13)
@@ -2192,6 +2318,33 @@ if grep -qxF -- '-Donnxruntime_ENABLE_TRAINING=ON' "$tmp/build-rest-13" && grep 
     ok "build(): onnxruntime_ENABLE_TRAINING=ON in both lines; no oneDNN without dnnl"
 else
     fail "build() training/oneDNN arguments: $(grep -E 'TRAINING|DNNL' "$tmp/build-rest-13")"
+fi
+# The WebGPU plugin provider with webgpu in ORTF_EPS only: the plugin
+# (EP API adapters), Dawn's generators on the system python, and git kept
+# out of the repository around src/ for Dawn's version header.
+conf_wgpu=$'ORTF_EPS=webgpu\nORTF_CUDA_ARCHS=75;86;89;120\nORTF_CUDA_MAJOR=\nORTF_JOBS=\nORTF_CCACHE=\nORTF_PYTHON=0\nNVCC_CCBIN=\nORTF_NVCC_THREADS=1\nORTF_NCCL_LIB='
+build_flags "$conf_wgpu" "$pkgbuild" webgpu >/dev/null
+if grep -qxF -- '-Donnxruntime_USE_WEBGPU=ON' "$tmp/build-rest-webgpu" &&
+    grep -qxF -- '-Donnxruntime_USE_EP_API_ADAPTERS=ON' "$tmp/build-rest-webgpu" &&
+    grep -qxF -- '-DPython3_EXECUTABLE=/usr/bin/python' "$tmp/build-rest-webgpu" &&
+    [[ $(<"$tmp/build-git-webgpu") == DIR/src ]] &&
+    ! grep -q 'WEBGPU\|EP_API_ADAPTERS\|Python3_EXECUTABLE' "$tmp/build-rest-13" && [[ $(<"$tmp/build-git-13") == unset ]]; then
+    ok "build(): the WebGPU plugin provider, Dawn's python and GIT_CEILING_DIRECTORIES=\$srcdir with webgpu only"
+else
+    fail "build() WebGPU arguments: $(cat "$tmp/build-rest-webgpu" "$tmp/build-git-webgpu" "$tmp/build-git-13" 2>&1 | grep -E 'WEBGPU|ADAPTERS|Python3|src|unset')"
+fi
+# CMake's <name>_DIR of each of Arch's CMake packages Dawn builds against
+# points at the directory prepare() checked under _ortf_webgpu_prefix,
+# with webgpu only.
+if grep -qxF -- '-DSPIRV-Headers_DIR=/usr/share/cmake/SPIRV-Headers' "$tmp/build-rest-webgpu" &&
+    grep -qxF -- '-DSPIRV-Tools_DIR=/usr/lib/cmake/SPIRV-Tools' "$tmp/build-rest-webgpu" &&
+    grep -qxF -- '-DVulkanHeaders_DIR=/usr/share/cmake/VulkanHeaders' "$tmp/build-rest-webgpu" &&
+    grep -qxF -- '-DVulkanUtilityLibraries_DIR=/usr/lib/cmake/VulkanUtilityLibraries' "$tmp/build-rest-webgpu" &&
+    [[ $(grep -c '_DIR=/usr/.*/cmake/' "$tmp/build-rest-webgpu") == 4 ]] &&
+    ! grep -q 'SPIRV\|Vulkan' "$tmp/build-rest-13"; then
+    ok "build(): Dawn's CMake packages from _ortf_webgpu_prefix, the ones prepare() checked, with webgpu only"
+else
+    fail "build() WebGPU CMake package directories: $(grep -E 'SPIRV|Vulkan' "$tmp/build-rest-webgpu" "$tmp/build-rest-13")"
 fi
 # LazyTensor, on by default with training, off in every line: it needs
 # PyTorch at build time, and the Python module (fatal without it).
@@ -2849,6 +3002,118 @@ else
     fail "prepare() does not run _ortf_patch_pybind_providers"
 fi
 
+echo "== the WebGPU provider's Dawn, install and Python module (_ortf_patch_dawn, _ortf_patch_webgpu_install, _ortf_patch_pybind_webgpu)"
+# The upstream files: the v1.29.0 checkout's, when one is at hand, else a
+# copy of the lines each patch replaces, in their block.
+dw_up=$tmp/dawn-deps.cmake.upstream
+moe_git cmake/external/onnxruntime_external_deps.cmake "$dw_up" || cat >"$dw_up" <<'EOF2'
+    if (onnxruntime_CUSTOM_DAWN_SRC_PATH)
+      set(DAWN_FETCH_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+      onnxruntime_fetchcontent_declare(
+        dawn
+        SOURCE_DIR ${onnxruntime_CUSTOM_DAWN_SRC_PATH}
+        EXCLUDE_FROM_ALL
+      )
+    else()
+      set(DAWN_FETCH_DEPENDENCIES ON CACHE BOOL "" FORCE)
+      set(ONNXRUNTIME_Dawn_PATCH_COMMAND
+          ${CMAKE_COMMAND} -E rm -rf <SOURCE_DIR>/test)
+EOF2
+dw=$tmp/dawn-deps.cmake
+cp -- "$dw_up" "$dw"
+patch_tops _ortf_patch_dawn "$dw"
+# One line replaced: no fetching in the FetchContent branch (the patches
+# and the test/ removal stay), Arch's CMake packages found GLOBAL, the
+# SPIRV-Headers name Dawn checks, and empty jinja2 and markupsafe
+# directories; the custom-source branch as upstream has it.
+if ((status == 0)) && ! grep -qF 'set(DAWN_FETCH_DEPENDENCIES ON' "$dw" &&
+    [[ $(grep -c 'set(DAWN_FETCH_DEPENDENCIES OFF CACHE BOOL "" FORCE)' "$dw") == 2 ]] &&
+    grep -qxF '      find_package(SPIRV-Tools CONFIG REQUIRED GLOBAL)' "$dw" &&
+    grep -qxF '      find_package(VulkanUtilityLibraries CONFIG REQUIRED GLOBAL)' "$dw" &&
+    grep -qxF '        target_link_libraries(SPIRV-Headers INTERFACE SPIRV-Headers::SPIRV-Headers)' "$dw" &&
+    grep -qxF '      set(DAWN_JINJA2_DIR "")' "$dw" && grep -qF '<SOURCE_DIR>/test' "$dw" &&
+    grep -qF 'omarchy-onnxruntime (onnxruntime-split/PKGBUILD, _ortf_patch_dawn)' "$dw" &&
+    [[ $(diff "$dw_up" "$dw" | grep -c '^<') == 1 ]]; then
+    ok "the Dawn patch: no fetching, Arch's targets, the system jinja2; one upstream line replaced"
+else
+    fail "the Dawn patch (exit $status): $out"$'\n'"$(diff "$dw_up" "$dw")"
+fi
+cp -- "$dw" "$dw.once"
+patch_tops _ortf_patch_dawn "$dw"
+if ((status != 0)) && grep -qF 'look at the file and update _ortf_patch_dawn' <<<"$out" &&
+    cmp -s "$dw" "$dw.once" && [[ ! -e $dw.tmp ]]; then
+    ok "a second Dawn patch fails loudly and leaves the file as it was"
+else
+    fail "a second Dawn patch (exit $status): $out"
+fi
+wi_up=$tmp/webgpu.cmake.upstream
+# shellcheck disable=SC2016 # CMake's ${...}
+moe_git cmake/onnxruntime_providers_webgpu.cmake "$wi_up" || cat >"$wi_up" <<'EOF2'
+  if (NOT onnxruntime_BUILD_SHARED_LIB)
+    install(TARGETS onnxruntime_providers_webgpu EXPORT ${PROJECT_NAME}Targets
+            ARCHIVE   DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY   DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME   DESTINATION ${CMAKE_INSTALL_BINDIR}
+            FRAMEWORK DESTINATION ${CMAKE_INSTALL_BINDIR})
+  endif()
+EOF2
+wi=$tmp/webgpu.cmake
+cp -- "$wi_up" "$wi"
+patch_tops _ortf_patch_webgpu_install "$wi"
+# One upstream line replaced: the plugin's install rule first, upstream's
+# own the branch after it.
+# shellcheck disable=SC2016 # CMake's ${...}
+if ((status == 0)) && grep -qxF '  if (onnxruntime_USE_EP_API_ADAPTERS)' "$wi" &&
+    grep -qxF '            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})' "$wi" &&
+    grep -qxF '  elseif (NOT onnxruntime_BUILD_SHARED_LIB)' "$wi" &&
+    grep -qxF '    install(TARGETS onnxruntime_providers_webgpu EXPORT ${PROJECT_NAME}Targets' "$wi" &&
+    [[ $(diff "$wi_up" "$wi" | grep -c '^<') == 1 ]]; then
+    ok "the WebGPU install patch: the plugin library installed, upstream's static rule kept"
+else
+    fail "the WebGPU install patch (exit $status): $out"$'\n'"$(diff "$wi_up" "$wi")"
+fi
+cp -- "$wi" "$wi.once"
+patch_tops _ortf_patch_webgpu_install "$wi"
+if ((status != 0)) && grep -qF 'look at the file and update _ortf_patch_webgpu_install' <<<"$out" && cmp -s "$wi" "$wi.once"; then
+    ok "a second WebGPU install patch fails loudly and leaves the file as it was"
+else
+    fail "a second WebGPU install patch (exit $status): $out"
+fi
+pw_up=$tmp/pybind-webgpu.cc.upstream
+moe_git onnxruntime/python/onnxruntime_pybind_state.cc "$pw_up" || cat >"$pw_up" <<'EOF2'
+  } else if (type == kWebGpuExecutionProvider) {
+#if defined(USE_WEBGPU)
+    return onnxruntime::WebGpuProviderFactoryCreator::Create(session_options.config_options);
+#endif
+  } else if (type == kCannExecutionProvider) {
+EOF2
+pw=$tmp/pybind-webgpu.cc
+cp -- "$pw_up" "$pw"
+patch_tops _ortf_patch_pybind_webgpu "$pw"
+# One line replaced: the module's built-in WebGPU factory under the core's
+# condition, the call itself kept.
+if ((status == 0)) && grep -qxF '#if defined(USE_WEBGPU) && !defined(ORT_USE_EP_API_ADAPTERS)' "$pw" &&
+    grep -qF 'return onnxruntime::WebGpuProviderFactoryCreator::Create(session_options.config_options);' "$pw" &&
+    [[ $(diff "$pw_up" "$pw" | grep -c '^<') == 1 ]]; then
+    ok "the Python module's WebGPU patch: no built-in factory with the plugin provider, one upstream line replaced"
+else
+    fail "the Python module's WebGPU patch (exit $status): $out"$'\n'"$(diff "$pw_up" "$pw")"
+fi
+cp -- "$pw" "$pw.once"
+patch_tops _ortf_patch_pybind_webgpu "$pw"
+if ((status != 0)) && grep -qF 'look at the file and update _ortf_patch_pybind_webgpu' <<<"$out" && cmp -s "$pw" "$pw.once"; then
+    ok "a second Python module WebGPU patch fails loudly and leaves the file as it was"
+else
+    fail "a second Python module WebGPU patch (exit $status): $out"
+fi
+if grep -qxF '  _ortf_patch_dawn cmake/external/onnxruntime_external_deps.cmake || return 1' "$pkgbuild" &&
+    grep -qxF '  _ortf_patch_webgpu_install cmake/onnxruntime_providers_webgpu.cmake || return 1' "$pkgbuild" &&
+    grep -qxF '  _ortf_patch_pybind_webgpu onnxruntime/python/onnxruntime_pybind_state.cc || return 1' "$pkgbuild"; then
+    ok "prepare() applies the three to their files"
+else
+    fail "prepare() does not run _ortf_patch_dawn, _ortf_patch_webgpu_install and _ortf_patch_pybind_webgpu"
+fi
+
 echo "== the setup.py patch (_ortf_patch_setup)"
 # The upstream file: the v1.29.0 checkout's, when one is at hand, else a
 # copy of the text the patch replaces, in its block.
@@ -2917,10 +3182,10 @@ if ((status == 0)); then ok "every package function of a migraphx build runs und
     fail "the package functions of a migraphx build (exit $status): $out"; fi
 for line in \
     'onnxruntime-core-nccloff depends: glibc libgcc libstdc++' \
-    "$mgxo depends: onnxruntime-core-nccloff=1.29.0-7 glibc libgcc libstdc++ migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" \
-    "$mgxo provides: $mgx=1.29.0-7" "$mgxo conflicts: $mgx" "$mgxo replaces: " \
+    "$mgxo depends: onnxruntime-core-nccloff=1.29.0-8 glibc libgcc libstdc++ migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" \
+    "$mgxo provides: $mgx=1.29.0-8" "$mgxo conflicts: $mgx" "$mgxo replaces: " \
     "$mgxo files: ./usr/lib/libonnxruntime_providers_migraphx.so ./usr/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime_providers_migraphx.so $(lic "$mgxo") " \
-    "$pyo depends: onnxruntime-core-nccloff=1.29.0-7 glibc libgcc libstdc++ python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools python>=3.14 python<3.15"; do
+    "$pyo depends: onnxruntime-core-nccloff=1.29.0-8 glibc libgcc libstdc++ python-numpy python-flatbuffers python-packaging python-protobuf python-cerberus python-h5py python-onnx python-sympy python-setuptools python>=3.14 python<3.15"; do
     if has_line "$line"; then ok "migraphx package: $line"; else fail "migraphx package: no line [$line] in: $out"; fi
 done
 if [[ $out != *"$cu"* && $out != *"$trt"* && $out != *"$ov "* ]]; then ok "a migraphx build makes no NVIDIA or OpenVINO package"; else
@@ -2928,7 +3193,7 @@ if [[ $out != *"$cu"* && $out != *"$trt"* && $out != *"$ov "* ]]; then ok "a mig
 # ROCm 10.1: the same sonames, the package versions' bounds.
 package_run "${conf_mgx//=7.2.[34]-[17]/=10.1-1}" -- ORTF_EPS=migraphx FX_STAGE='shared migraphx' FX_WHEEL_LIBS='core shared'
 if ((status == 0)) &&
-    has_line "$mgxo depends: onnxruntime-core-nccloff=1.29.0-7 glibc libgcc libstdc++ migraphx>=10 migraphx<11 hip-runtime-amd>=10 hip-runtime-amd<11" &&
+    has_line "$mgxo depends: onnxruntime-core-nccloff=1.29.0-8 glibc libgcc libstdc++ migraphx>=10 migraphx<11 hip-runtime-amd>=10 hip-runtime-amd<11" &&
     grep -qxF 'libonnxruntime_providers_migraphx.so needs: libmigraphx_c.so.3 libamdhip64.so.7 libstdc++.so.6 libm.so.6 libgcc_s.so.1 libc.so.6 ld-linux-x86-64.so.2' \
         "${pkgroot%/pkg}/$mgxo.log"; then
     ok "a ROCm 10.1 build: bounds from the package versions (10), the sonames still .so.3 and .so.7"
@@ -2966,13 +3231,13 @@ else
     fail "a wheel with the MIGraphX provider (exit $status): $out"
 fi
 # Every provider together (untested on hardware): each package as alone.
-conf_every=${conf_all/ORTF_EPS=cuda tensorrt openvino dnnl/ORTF_EPS=cuda tensorrt openvino dnnl migraphx}
+conf_every=${conf_all/ORTF_EPS=cuda tensorrt openvino dnnl webgpu/ORTF_EPS=cuda tensorrt openvino dnnl webgpu migraphx}
 conf_every+=$'\nORTF_MIGRAPHX_VERSION=7.2.3-7\nORTF_HIP_VERSION=7.2.4-1\nORTF_MIGRAPHX_SONAME_MAJOR=3\nORTF_HIP_SONAME_MAJOR=7'
-package_run "$conf_every" -- ORTF_EPS='cuda tensorrt openvino dnnl migraphx' FX_STAGE='shared cuda tensorrt openvino dnnl migraphx'
-if ((status == 0)) && has_line "$dn depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ libgomp" &&
-    has_line "$mgx depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" &&
-    has_line "$cu depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ nvidia-utils nccl cuda>=13 cuda<14 cudnn>=9 cudnn<10" &&
-    has_line "$ov depends: onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5" &&
+package_run "$conf_every" -- ORTF_EPS='cuda tensorrt openvino dnnl webgpu migraphx' FX_STAGE='shared cuda tensorrt openvino dnnl webgpu migraphx'
+if ((status == 0)) && has_line "$dn depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ libgomp" &&
+    has_line "$mgx depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ migraphx>=7 migraphx<8 hip-runtime-amd>=7 hip-runtime-amd<8" &&
+    has_line "$cu depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ nvidia-utils nccl cuda>=13 cuda<14 cudnn>=9 cudnn<10" &&
+    has_line "$ov depends: onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ openvino>=2026.4 openvino<2026.5" &&
     has_line 'onnxruntime-core depends: glibc libgcc libstdc++ nccl'; then
     ok "a build of every provider: the migraphx package beside the others, each with its own depends"
 else
@@ -3236,13 +3501,13 @@ sa_mirror=$(source_arrays "$pkgbuild")
 sa_up=$(source_arrays "$pkgbuild" ORTF_SOURCE=upstream)
 sa_bad=$(source_arrays "$pkgbuild" ORTF_SOURCE=github)
 if [[ $(sed -n 1p <<<"$sa_mirror") == "$mirror_url" && $(sed -n 2p <<<"$sa_mirror") == "$mirror_b2" &&
-    $(sed -n 3p <<<"$sa_mirror") == '20 20' && " $(sed -n 4p <<<"$sa_mirror") " == *' onnxruntime-1.29.0.tar.gz '* ]]; then
+    $(sed -n 3p <<<"$sa_mirror") == '21 21' && " $(sed -n 4p <<<"$sa_mirror") " == *' onnxruntime-1.29.0.tar.gz '* ]]; then
     ok "the default source is the mirror's archive, with its b2sum, in noextract"
 else
     fail "the default source arrays: $sa_mirror"
 fi
 if [[ $(sed -n 1p <<<"$sa_up") == "$git_url" && $(sed -n 2p <<<"$sa_up") == "$git_b2" &&
-    $(sed -n 3p <<<"$sa_up") == '20 20' && " $(sed -n 4p <<<"$sa_up") " != *' onnxruntime-1.29.0.tar.gz '* ]]; then
+    $(sed -n 3p <<<"$sa_up") == '21 21' && " $(sed -n 4p <<<"$sa_up") " != *' onnxruntime-1.29.0.tar.gz '* ]]; then
     ok "ORTF_SOURCE=upstream: the git tag with makepkg's checksum of its tree, no archive in noextract"
 else
     fail "ORTF_SOURCE=upstream source arrays: $sa_up"
@@ -3581,6 +3846,14 @@ if command -v makepkg >/dev/null 2>&1; then
     else
         fail "no oneDNN optdepend by default: $(grep -n dnnl <<<"$a")"
     fi
+    # The WebGPU package's likewise, with webgpu in ORTF_EPS (the default).
+    wgpu_opt=$'\toptdepends = onnxruntime-provider-webgpu: the WebGPU execution provider (GPUs with a Vulkan driver; a plugin provider)'
+    if [[ $(only_blocks onnxruntime-core <<<"$a" | grep -cxF -- "$wgpu_opt") == 1 &&
+        $(only_blocks python-onnxruntime-core <<<"$a" | grep -cxF -- "$wgpu_opt") == 1 ]]; then
+        ok "the default onnxruntime-core and python-onnxruntime-core list the WebGPU provider"
+    else
+        fail "no WebGPU optdepend by default: $(grep -n webgpu <<<"$a")"
+    fi
     # The training Python package's requirements (requirements-training.txt)
     # are depends; PyTorch, which onnxruntime.training imports, an optdepend;
     # onnx and sympy are no longer optdepends.
@@ -3597,7 +3870,7 @@ if command -v makepkg >/dev/null 2>&1; then
     # (and the core's depend on nccl, which a build with the CUDA package
     # has: a CPU-only build has no NCCL, and prepare() refuses it with
     # ORTF_NCCL=1; the names, and the makedepends, take ORTF_NCCL alone)
-    a_core=$(only_blocks onnxruntime-core <<<"$a" | grep -vxF -e "$trt_mk" -e "$dnnl_opt" -e $'\tdepends = nccl')
+    a_core=$(only_blocks onnxruntime-core <<<"$a" | grep -vxF -e "$trt_mk" -e "$dnnl_opt" -e "$wgpu_opt" -e $'\tdepends = nccl')
     if [[ $a != *FAILED* && $(only_blocks onnxruntime-core <<<"$b") == "$a_core" &&
         $(grep -c '^pkgname = ' <<<"$b") == 1 ]]; then
         ok "a CPU-only build without Python: the pkgbase (without tensorrt) and onnxruntime-core blocks alone, unchanged"
@@ -3644,7 +3917,7 @@ if command -v makepkg >/dev/null 2>&1; then
     else
         fail "_ortf_default_eps='cuda openvino' _ortf_default_python=0: $f"
     fi
-    f=$(srcinfo_all ORTF_EPS='cuda tensorrt openvino dnnl' ORTF_PYTHON=1)
+    f=$(srcinfo_all ORTF_EPS='cuda tensorrt openvino dnnl webgpu' ORTF_PYTHON=1)
     if [[ $f == "$a" ]]; then ok "ORTF_EPS and ORTF_PYTHON still override the copy's defaults"; else
         fail "the environment over the copy's defaults: $(diff <(echo "$a") <(echo "$f") | head -8)"; fi
     # The CUDA major is the toolkit's: another toolkit renames the CUDA and
@@ -3680,26 +3953,49 @@ if command -v makepkg >/dev/null 2>&1; then
     else
         fail "the TensorRT block: $trt_block"
     fi
-    d=$(srcinfo ORTF_EPS='openvino cuda dnnl')
+    d=$(srcinfo ORTF_EPS='openvino cuda dnnl webgpu')
     if [[ $(only_blocks onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-openvino python-onnxruntime-core <<<"$a" |
         grep -vxF -- "$trt_mk") == \
         "$(only_blocks onnxruntime-core onnxruntime-provider-cuda13-rtx onnxruntime-provider-openvino python-onnxruntime-core <<<"$d")" &&
         $d != *'pkgname = onnxruntime-provider-tensorrt'* && $d != *"$trt_mk"* && $d != *FAILED* ]]; then
         ok "ORTF_EPS without tensorrt drops the TensorRT package and the tensorrt makedepends only"
     else
-        fail "ORTF_EPS='openvino cuda dnnl': $d"
+        fail "ORTF_EPS='openvino cuda dnnl webgpu': $d"
     fi
     # Without dnnl: no oneDNN package and no optdepend on it, nothing else.
-    d=$(srcinfo ORTF_EPS='cuda tensorrt openvino')
+    d=$(srcinfo ORTF_EPS='cuda tensorrt openvino webgpu')
     # shellcheck disable=SC2046 # the names are words
     if [[ $d != *FAILED* && $d != *dnnl* &&
         $(only_blocks $(sed -n 's/^pkgname = //p' <<<"$d") <<<"$a" | grep -vxF -- "$dnnl_opt") == "$d" ]]; then
         ok "ORTF_EPS without dnnl drops the oneDNN package and the optdepends on it only"
     else
-        fail "ORTF_EPS='cuda tensorrt openvino': $(grep -n dnnl <<<"$d")"
+        fail "ORTF_EPS='cuda tensorrt openvino webgpu': $(grep -n dnnl <<<"$d")"
+    fi
+    # Without webgpu: no WebGPU package and no optdepend on it, nothing
+    # else (Dawn's archive and build inputs stay: the main line's sources
+    # and makedepends are the same for every build).
+    d=$(srcinfo ORTF_EPS='cuda tensorrt openvino dnnl')
+    # shellcheck disable=SC2046 # the names are words
+    if [[ $d != *FAILED* && $d != *provider-webgpu* &&
+        $(only_blocks $(sed -n 's/^pkgname = //p' <<<"$d") <<<"$a" | grep -vxF -- "$wgpu_opt") == "$d" ]]; then
+        ok "ORTF_EPS without webgpu drops the WebGPU package and the optdepends on it only"
+    else
+        fail "ORTF_EPS='cuda tensorrt openvino dnnl': $(grep -n webgpu <<<"$d")"
+    fi
+    wgpu_block=$(only_blocks onnxruntime-provider-webgpu <<<"$a")
+    if [[ $(sed -n 's/^\tdepends = //p' <<<"$wgpu_block" | tr '\n' ' ') == 'onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ vulkan-icd-loader ' &&
+        $(grep -c $'^\toptdepends = ' <<<"$wgpu_block") == 3 &&
+        $(grep -c $'^\t\(provides\|conflicts\) = ' <<<"$wgpu_block") == 1 &&
+        $wgpu_block$'\n' == *$'\tconflicts = onnxruntime-core-nccloff\n'* &&
+        $wgpu_block == *$'\toptdepends = nvidia-utils: the Vulkan driver for NVIDIA graphics (the proprietary driver)\n'* &&
+        $wgpu_block == *$'\tpkgdesc = The WebGPU execution provider of ONNX Runtime, for onnxruntime-core (GPUs with a Vulkan driver; a plugin provider)\n'* &&
+        $a == *$'\tmakedepends = spirv-tools\n'* && $a == *$'\tmakedepends = python-jinja\n'* ]]; then
+        ok "the WebGPU package: the core pin, the system libraries and vulkan-icd-loader, a Vulkan driver per vendor as optdepends; no provides, the one conflict; Dawn's build inputs in makedepends"
+    else
+        fail "the WebGPU block: $wgpu_block"
     fi
     dnnl_block=$(only_blocks onnxruntime-provider-dnnl <<<"$a")
-    if [[ $(sed -n 's/^\tdepends = //p' <<<"$dnnl_block" | tr '\n' ' ') == 'onnxruntime-core=1.29.0-7 glibc libgcc libstdc++ libgomp ' &&
+    if [[ $(sed -n 's/^\tdepends = //p' <<<"$dnnl_block" | tr '\n' ' ') == 'onnxruntime-core=1.29.0-8 glibc libgcc libstdc++ libgomp ' &&
         $(grep -c $'^\t\(provides\|conflicts\|optdepends\) = ' <<<"$dnnl_block") == 1 &&
         $dnnl_block$'\n' == *$'\tconflicts = onnxruntime-core-nccloff\n'* &&
         $dnnl_block == *$'\tpkgdesc = The oneDNN execution provider of ONNX Runtime, for onnxruntime-core (CPU)\n'* ]]; then
@@ -3711,7 +4007,7 @@ if command -v makepkg >/dev/null 2>&1; then
     # optdepends on it are there in every build): with them taken out, the
     # .SRCINFO is the default one.
     a_names=$(sed -n 's/^pkgname = //p' <<<"$a" | tr '\n' ' ')
-    m=$(srcinfo ORTF_EPS='cuda tensorrt openvino dnnl migraphx')
+    m=$(srcinfo ORTF_EPS='cuda tensorrt openvino dnnl webgpu migraphx')
     # shellcheck disable=SC2086 # the names are words
     m_rest=$(only_blocks $a_names <<<"$m" | grep -vxF -e $'\tmakedepends = migraphx' -e $'\tmakedepends = hip-runtime-amd')
     # shellcheck disable=SC2086 # the names are words
@@ -3730,7 +4026,7 @@ if command -v makepkg >/dev/null 2>&1; then
     mgx_block=$(only_blocks onnxruntime-provider-migraphx-nccloff <<<"$n")
     if [[ $n != *FAILED* && $(grep -c '^pkgname = ' <<<"$n") == 3 &&
         $mgx_block == *$'\tpkgdesc = The MIGraphX execution provider of ONNX Runtime, for onnxruntime-core (AMD GPUs; untested on AMD hardware)\n'* &&
-        $mgx_block == *$'\tdepends = onnxruntime-core-nccloff=1.29.0-7\n'* && $mgx_block == *$'\tdepends = migraphx\n'* &&
+        $mgx_block == *$'\tdepends = onnxruntime-core-nccloff=1.29.0-8\n'* && $mgx_block == *$'\tdepends = migraphx\n'* &&
         $mgx_block$'\n' == *$'\tdepends = hip-runtime-amd\n'* && $mgx_block != *'rocm-hip-sdk'* &&
         $(grep -c $'^\t\(provides\|conflicts\) = ' <<<"$mgx_block") == 2 &&
         $mgx_block$'\n' == *$'\tconflicts = onnxruntime-provider-migraphx\n'* && $n != *cudax* &&
@@ -3797,10 +4093,16 @@ if command -v makepkg >/dev/null 2>&1; then
         fail "cuda12 line pkgbase pkgdesc: $(sed -n '/^pkgbase = /,/^$/p' <<<"$k" | grep pkgdesc)"
     fi
     # Beside the main line's .SRCINFO, only the stamped lines differ: the
-    # pkgbase, pkgdesc, pkgrel, makedepends and the package blocks.
-    if [[ $(only_blocks <<<"$a" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ') == \
-        "$(only_blocks <<<"$k" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ')" ]]; then
-        ok "cuda12 line: the pkgbase block is the main line's but its name, pkgdesc, pkgrel and makedepends"
+    # pkgbase, pkgdesc, pkgrel, makedepends and the package blocks; and
+    # Dawn's archive, which only the main line's WebGPU provider reads
+    # (its source, noextract and b2sums entries).
+    dawn_b2=$'\tb2sums = 6619f7eb24ea05fca4814cb2868558e3e19b74c0b88df9c24724082bbfab5cbf411afa3bc6cff00be6fc4971f041bd9bec4e1098eea3ae711e160d970d6fd2f4'
+    if [[ $(only_blocks <<<"$a" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ' \
+        -e 'ortf-dep-dawn\.zip' -e "$dawn_b2") == \
+        "$(only_blocks <<<"$k" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ')" &&
+        $(grep -c 'ortf-dep-dawn\.zip' <<<"$a") == 2 && $(grep -cxF -- "$dawn_b2" <<<"$a") == 1 &&
+        $k != *dawn* && $k != *"${dawn_b2#*= }"* ]]; then
+        ok "cuda12 line: the pkgbase block is the main line's but its name, pkgdesc, pkgrel, makedepends and Dawn's archive"
     else
         fail "cuda12 line pkgbase block: $(diff <(only_blocks <<<"$a") <(only_blocks <<<"$k") | head -12)"
     fi
@@ -3838,9 +4140,11 @@ if command -v makepkg >/dev/null 2>&1; then
     y=$(srcinfomgx FX_CUDA_HOME="$fx/cuda" ORTF_EPS='cuda tensorrt openvino dnnl' ORTF_PYTHON=1)
     if [[ $y == "$x" ]]; then ok "migraphx line: the same .SRCINFO with CUDA 13 and other ORTF_* values"; else
         fail "migraphx line with other inputs: $(diff <(echo "$x") <(echo "$y") | head -8)"; fi
-    if [[ $(only_blocks <<<"$a" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ') == \
-        "$(only_blocks <<<"$x" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ')" ]]; then
-        ok "migraphx line: the pkgbase block is the main line's but its name, pkgdesc, pkgrel and makedepends"
+    if [[ $(only_blocks <<<"$a" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ' \
+        -e 'ortf-dep-dawn\.zip' -e "$dawn_b2") == \
+        "$(only_blocks <<<"$x" | grep -v -e '^pkgbase = ' -e $'^\tpkgdesc = ' -e $'^\tpkgrel = ' -e $'^\tmakedepends = ')" &&
+        $x != *dawn* && $x != *"${dawn_b2#*= }"* ]]; then
+        ok "migraphx line: the pkgbase block is the main line's but its name, pkgdesc, pkgrel, makedepends and Dawn's archive"
     else
         fail "migraphx line pkgbase block: $(diff <(only_blocks <<<"$a") <(only_blocks <<<"$x") | head -12)"
     fi
@@ -3854,9 +4158,9 @@ if command -v makepkg >/dev/null 2>&1; then
         $(only_blocks onnxruntime-provider-cuda13-rtx <<<"$a" | sed '1,/^$/d' | grep -cxF $'\tdepends = nccl') == 1 &&
         $(only_blocks python-onnxruntime-core <<<"$a" | sed '1,/^$/d' | grep -cxF $'\tdepends = nccl') == 1 &&
         $(grep -cxF $'\tdepends = nccl' <<<"$a") == 3 &&
-        $(grep -cxF -- "$nccl_conf" <<<"$a") == 5 &&
+        $(grep -cxF -- "$nccl_conf" <<<"$a") == 6 &&
         $(only_blocks onnxruntime-core <<<"$a" | grep -cxF -- "$nccl_conf") == 0 ]]; then
-        ok "NCCL by default: nccl a makedepend; onnxruntime-core, the CUDA package and the Python package depend on it; the five others conflict with onnxruntime-core-nccloff"
+        ok "NCCL by default: nccl a makedepend; onnxruntime-core, the CUDA package and the Python package depend on it; the six others conflict with onnxruntime-core-nccloff"
     else
         fail "NCCL in the default .SRCINFO: $(grep -n 'nccl' <<<"$a")"
     fi
@@ -3883,8 +4187,8 @@ if command -v makepkg >/dev/null 2>&1; then
     if [[ $o != *FAILED* && $(sed -n 's/^pkgname = //p' <<<"$o" | tr '\n' ' ') == \
         "$(sed -n 's/^pkgname = \(.*\)$/\1-nccloff/p' <<<"$a" | tr '\n' ' ')" &&
         $(nccloff_view "$o") == "$a_nonccl" &&
-        $(only_blocks onnxruntime-core-nccloff <<<"$o" | sed '1,/^$/d' | grep -cxE $'\t(provides = onnxruntime-core=1\\.29\\.0-7|conflicts = onnxruntime-core)') == 2 &&
-        $(grep -cxF $'\tdepends = onnxruntime-core-nccloff=1.29.0-7' <<<"$o") == 5 &&
+        $(only_blocks onnxruntime-core-nccloff <<<"$o" | sed '1,/^$/d' | grep -cxE $'\t(provides = onnxruntime-core=1\\.29\\.0-8|conflicts = onnxruntime-core)') == 2 &&
+        $(grep -cxF $'\tdepends = onnxruntime-core-nccloff=1.29.0-8' <<<"$o") == 6 &&
         $o != *$'\tdepends = onnxruntime-core='* && $(grep -ciE 'nccl([^o]|$)|rccl' <<<"$o") == 0 ]]; then
         ok "ORTF_NCCL=0: every package -nccloff, providing and conflicting with its base name, pinning onnxruntime-core-nccloff; no NCCL"
     else
@@ -4080,12 +4384,12 @@ if command -v makepkg >/dev/null 2>&1; then
             else
                 fail "cuda12 line: a main line of pkgver 1.30.0 meets its pin pair ($view)"
             fi
-            if ! chain "$k" "$view" '' "${a/$'\tpkgrel = 7'/$'\tpkgrel = 6'}" >/dev/null; then
+            if ! chain "$k" "$view" '' "${a/$'\tpkgrel = 8'/$'\tpkgrel = 6'}" >/dev/null; then
                 ok "cuda12 line: the main line's 1.29.0-6, without the training ops, does not meet it ($view packages)"
             else
                 fail "cuda12 line: onnxruntime-core 1.29.0-6 meets its pin pair ($view)"
             fi
-            if chain "$k" "$view" '' "${a/$'\tpkgrel = 7'/$'\tpkgrel = 9'}" >/dev/null; then
+            if chain "$k" "$view" '' "${a/$'\tpkgrel = 8'/$'\tpkgrel = 9'}" >/dev/null; then
                 ok "cuda12 line: a later main-line pkgrel, 1.29.0-9, still meets it ($view packages)"
             else
                 fail "cuda12 line: onnxruntime-core 1.29.0-9 does not meet its pin pair ($view)"
@@ -4097,7 +4401,7 @@ if command -v makepkg >/dev/null 2>&1; then
                 fail "migraphx line, the dependencies ($view): $msg"
             fi
             if [[ $x != *FAILED* ]] && ! chain "$x" "$view" >/dev/null &&
-                ! chain "$x" "$view" '' "${a/$'\tpkgrel = 7'/$'\tpkgrel = 6'}" >/dev/null; then
+                ! chain "$x" "$view" '' "${a/$'\tpkgrel = 8'/$'\tpkgrel = 6'}" >/dev/null; then
                 ok "migraphx line: alone, or with the main line's 1.29.0-6, its onnxruntime-core depend is unmet ($view packages)"
             else
                 fail "migraphx line: its depends are met without a training-on main line ($view)"
@@ -4194,7 +4498,7 @@ if command -v makepkg >/dev/null 2>&1; then
             for p in "${off_pkgs[@]}"; do
                 if msg=$(coinstall "a|onnxruntime-core|$view" "o|$p|source"); then
                     fail "$p installs with onnxruntime-core ($view)"
-                elif [[ $msg == *"depends on onnxruntime-core-nccloff=1.29.0-7, met by none of the set"* ]]; then
+                elif [[ $msg == *"depends on onnxruntime-core-nccloff=1.29.0-8, met by none of the set"* ]]; then
                     ok "$p does not install with onnxruntime-core ($view): its onnxruntime-core-nccloff depend is unmet"
                 else
                     fail "$p with onnxruntime-core ($view), refused for another reason: $msg"

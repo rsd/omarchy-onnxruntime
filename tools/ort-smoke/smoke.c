@@ -6,15 +6,38 @@
  *
  * MODEL.onnx is the model written by make-model.py.  LIST is a comma-separated
  * set of targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU,
- * openvino:NPU, dnnl, migraphx-load (case-insensitive; "openvino" selects all
- * three OpenVINO devices).
+ * openvino:NPU, dnnl, webgpu:nvidia, webgpu:intel, migraphx-load
+ * (case-insensitive; "openvino" selects all three OpenVINO devices, "webgpu"
+ * both WebGPU GPUs).
+ *
+ * The WebGPU provider is a plugin library (libonnxruntime_providers_webgpu.so,
+ * a separate package): the main library neither lists it nor appends it by
+ * name.  The program registers it from next to libonnxruntime.so, asks for its
+ * devices and appends it for the GPU of the target's vendor.  In ORT 1.29.0
+ * that device does not choose the GPU: the provider ignores it and Dawn takes
+ * the first adapter in its order for the requested power preference, discrete
+ * GPUs first for "high-performance" (the provider's default) and integrated
+ * ones first for "low-power".  So webgpu:nvidia asks for high-performance and
+ * webgpu:intel for low-power, which picks the right GPU on a machine with an
+ * NVIDIA card and an Intel integrated GPU.  A target is "unavailable" when the
+ * provider library is not installed or when it reports no GPU of that vendor.
+ * Since the API does not say which adapter Dawn took, the kernel's per-process
+ * GPU usage counters (/proc/self/fdinfo) are read after the runs: work
+ * counted on another GPU and none on the target's is a failure, and so is an
+ * Intel GPU whose device file this process never opened (its Vulkan driver is
+ * missing, so the work went elsewhere) and a GPU whose driver keeps counters
+ * but counted no work during the runs (Mesa keeps the Intel device file open
+ * after listing the GPUs, so an open file alone does not show the work ran
+ * there).  The NVIDIA driver publishes no such counters, so for it the line
+ * says the adapter is inferred.
  *
  * A target is "unavailable" (not a failure) when its provider is not in the
  * library, when the provider's vendor runtime is not installed (CUDA, cuDNN,
  * TensorRT, OpenVINO, oneDNN and MIGraphX are optional dependencies, so every
- * provider is compiled in), when the oneDNN or MIGraphX provider library
- * (libonnxruntime_providers_dnnl.so / _migraphx.so, separate packages) is not
- * installed, or when OpenVINO reports the device absent.
+ * provider is compiled in), when the oneDNN, WebGPU or MIGraphX provider
+ * library (libonnxruntime_providers_dnnl.so / _webgpu.so / _migraphx.so,
+ * separate packages) is not installed, or when OpenVINO reports the device
+ * absent.
  *
  * migraphx-load is the one target nobody can be sure to run: it needs an AMD
  * GPU.  It appends the MIGraphX provider by name and creates the session.  The
@@ -51,6 +74,7 @@
 #include <onnxruntime_c_api.h>
 
 #include <ctype.h>
+#include <dirent.h>
 #ifndef SMOKE_UNIT_TEST
 #include <dlfcn.h>
 #endif
@@ -65,6 +89,10 @@
 /* Oldest API table we accept: SessionOptionsAppendExecutionProvider_OpenVINO_V2
  * (the newest entry point used here) appeared in ORT 1.17. */
 #define MIN_API_VERSION 17
+/* RegisterExecutionProviderLibrary, GetEpDevices and
+ * SessionOptionsAppendExecutionProvider_V2, which the WebGPU targets need,
+ * appeared in ORT 1.22: an older library makes those targets unavailable. */
+#define EP_LIBRARY_API_VERSION 22
 
 /*
  * The model, see make-model.py:  Y = Add(Relu(Conv3x3(X, W, B)), A)
@@ -115,13 +143,13 @@ static void build_reference(void)
 
 /* ---- targets ------------------------------------------------------------- */
 
-typedef enum { EP_CPU, EP_CUDA, EP_TENSORRT, EP_OPENVINO, EP_DNNL, EP_MIGRAPHX } EpKind;
+typedef enum { EP_CPU, EP_CUDA, EP_TENSORRT, EP_OPENVINO, EP_DNNL, EP_WEBGPU, EP_MIGRAPHX } EpKind;
 
 typedef struct {
     const char *id;       /* name used on the command line and in the report */
     EpKind kind;
-    const char *provider; /* name reported by GetAvailableProviders */
-    const char *device;   /* OpenVINO device_type, else NULL */
+    const char *provider; /* name reported by GetAvailableProviders, or the plugin's EP name */
+    const char *device;   /* OpenVINO device_type, WebGPU vendor key, else NULL */
     int opt_in;           /* not part of the default set: runs only when named */
     /*
      * Accepted error per element: atol + rtol * |expected|.  The reference
@@ -137,6 +165,8 @@ typedef struct {
      *    kernels' summation order, as for CUDA.
      *  - MIGraphX: fp32 unless fp16 is requested, which it is not; 1e-2 as for
      *    the other GPU engines (never measured: no AMD GPU was available).
+     *  - WebGPU: fp32 shaders, but the kernels are chosen per GPU vendor and
+     *    may use reduced-precision paths; 1e-2 as for the other GPU engines.
      */
     double atol, rtol;
 } Target;
@@ -149,9 +179,55 @@ static const Target TARGETS[] = {
     {"openvino:GPU", EP_OPENVINO, "OpenVINOExecutionProvider", "GPU", 0, 1e-2, 1e-2},
     {"openvino:NPU", EP_OPENVINO, "OpenVINOExecutionProvider", "NPU", 0, 1e-2, 1e-2},
     {"dnnl", EP_DNNL, "DnnlExecutionProvider", NULL, 0, 1e-3, 1e-3},
+    {"webgpu:nvidia", EP_WEBGPU, "WebGpuExecutionProvider", "nvidia", 0, 1e-2, 1e-2},
+    {"webgpu:intel", EP_WEBGPU, "WebGpuExecutionProvider", "intel", 0, 1e-2, 1e-2},
     {"migraphx-load", EP_MIGRAPHX, "MIGraphXExecutionProvider", NULL, 1, 1e-2, 1e-2},
 };
 #define NTARGETS (sizeof TARGETS / sizeof TARGETS[0])
+
+/*
+ * The GPU vendors a WebGPU target can name.  The PCI vendor id is what ORT's
+ * device discovery reports for a GPU (it leaves the vendor name empty on
+ * Linux).  power is the Dawn power preference that makes Dawn take that
+ * vendor's GPU, from the adapter order described at the top: NVIDIA GPUs are
+ * discrete (ORT's own discovery assumes so), Intel's are taken as integrated.
+ * An Intel discrete card (Arc) next to an NVIDIA one would break that
+ * assumption; the usage counters below would then report the mismatch.
+ * opens_drm_node: the vendor's Vulkan driver (Mesa's) keeps the GPU's DRM
+ * device file open, and its kernel driver (i915, xe) counts the work there.
+ */
+typedef struct {
+    const char *key, *name;
+    uint32_t pci_vendor;
+    const char *power;
+    int opens_drm_node;
+} WebGpuVendor;
+
+static const WebGpuVendor WEBGPU_VENDORS[] = {
+    {"nvidia", "NVIDIA", 0x10de, "high-performance", 0},
+    {"intel", "Intel", 0x8086, "low-power", 1},
+};
+
+static const WebGpuVendor *webgpu_vendor(const Target *t)
+{
+    for (size_t i = 0; t->kind == EP_WEBGPU && i < sizeof WEBGPU_VENDORS / sizeof WEBGPU_VENDORS[0]; i++)
+        if (strcmp(t->device, WEBGPU_VENDORS[i].key) == 0)
+            return &WEBGPU_VENDORS[i];
+    return NULL;
+}
+
+static const char *pci_vendor_name(uint32_t id)
+{
+    switch (id) {
+    case 0x10de:
+        return "NVIDIA";
+    case 0x8086:
+        return "Intel";
+    case 0x1002:
+        return "AMD";
+    }
+    return NULL;
+}
 
 /* A LIST token selects a target when it equals the id (case-insensitive) or is
  * the id's prefix before the colon ("openvino" selects all openvino:*). */
@@ -198,6 +274,7 @@ typedef struct {
     int have_timing;
     int no_device; /* status is ST_OK because the provider failed cleanly (migraphx-load) */
     char msg[1024];
+    char device[512]; /* WebGPU: the GPU chosen and what the usage counters say */
 } Result;
 
 static const OrtApi *g_api;
@@ -303,14 +380,16 @@ static int says_no_device(const char *msg)
            (contains_ci(msg, "Invalid device ID: 0") && contains_ci(msg, "and 0 (exclusive)"));
 }
 
-/* The provider library of the two engines that ship as separate packages
- * (onnxruntime-provider-dnnl, onnxruntime-provider-migraphx), else NULL. */
+/* The provider library of the engines that ship as separate packages
+ * (onnxruntime-provider-dnnl, -migraphx, -webgpu), else NULL. */
 static const char *own_provider_library(EpKind kind)
 {
     if (kind == EP_DNNL)
         return "libonnxruntime_providers_dnnl.so";
     if (kind == EP_MIGRAPHX)
         return "libonnxruntime_providers_migraphx.so";
+    if (kind == EP_WEBGPU)
+        return "libonnxruntime_providers_webgpu.so";
     return NULL;
 }
 
@@ -364,8 +443,231 @@ static int provider_listed(char **providers, int n, const char *name)
     return 0;
 }
 
-/* Append the target's execution provider to opts. */
-static OrtStatus *append_provider(const Target *t, OrtSessionOptions *opts)
+/* The path of a separately packaged provider library next to the
+ * libonnxruntime.so that is loaded, which is where ORT looks for the ones it
+ * loads itself.  Returns 0 when that location is unknown, leaving the bare name
+ * in path: the dynamic loader then searches its usual directories. */
+static int provider_library_path(const char *name, char *path, size_t n)
+{
+#ifndef SMOKE_UNIT_TEST
+    Dl_info info;
+    if (dladdr((void *)(size_t)&OrtGetApiBase, &info) != 0 && info.dli_fname != NULL) {
+        const char *slash = strrchr(info.dli_fname, '/');
+        int len = slash == NULL ? snprintf(path, n, "%s", name)
+                                : snprintf(path, n, "%.*s/%s", (int)(slash - info.dli_fname),
+                                           info.dli_fname, name);
+        if (len >= 0 && (size_t)len < n)
+            return 1;
+    }
+#endif
+    snprintf(path, n, "%s", name);
+    return 0;
+}
+
+/* ---- WebGPU: which GPU did the work -------------------------------------- */
+
+/*
+ * The kernel's GPU usage counters for this process, per GPU.  Each DRM file
+ * descriptor has a /proc/self/fdinfo entry; drivers that keep per-client
+ * statistics (i915, xe, amdgpu) write "drm-pdev: <PCI address>" and one
+ * counter per engine, "drm-engine-<name>: <ns> ns" (i915, amdgpu) or
+ * "drm-cycles-<name>: <cycles>" (xe).  The counters only grow while this
+ * process's work runs, so a difference across the runs says which GPU ran it.
+ * "drm-engine-capacity-*" is a number of engines and "drm-total-cycles-*" the
+ * GPU's own clock, which grows anyway: neither is work.
+ */
+enum { MAX_DRM_DEVICES = 16 };
+typedef struct {
+    char pdev[32];
+    unsigned long long busy; /* sum of the work counters over its descriptors */
+    int fds;                 /* descriptors open on it */
+    int counters;            /* work counters seen: its driver keeps them */
+} DrmDevice;
+typedef struct {
+    int n;
+    DrmDevice dev[MAX_DRM_DEVICES];
+} DrmUsage;
+
+static DrmDevice *drm_device(DrmUsage *u, const char *pdev)
+{
+    for (int i = 0; i < u->n; i++)
+        if (strcmp(u->dev[i].pdev, pdev) == 0)
+            return &u->dev[i];
+    if (u->n == MAX_DRM_DEVICES)
+        return NULL;
+    DrmDevice *d = &u->dev[u->n++];
+    memset(d, 0, sizeof *d);
+    snprintf(d->pdev, sizeof d->pdev, "%s", pdev);
+    return d;
+}
+
+static const DrmDevice *drm_find(const DrmUsage *u, const char *pdev)
+{
+    for (int i = 0; i < u->n; i++)
+        if (strcmp(u->dev[i].pdev, pdev) == 0)
+            return &u->dev[i];
+    return NULL;
+}
+
+/* Read every fdinfo entry in dir (normally /proc/self/fdinfo) into u. */
+static void drm_usage(const char *dir, DrmUsage *u)
+{
+    char path[4096], line[256];
+    memset(u, 0, sizeof *u);
+    DIR *d = opendir(dir);
+    if (d == NULL)
+        return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.')
+            continue;
+        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        FILE *f = fopen(path, "r");
+        if (f == NULL)
+            continue;
+        char pdev[32] = "";
+        unsigned long long busy = 0;
+        int counters = 0;
+        while (fgets(line, sizeof line, f) != NULL) {
+            char *colon = strchr(line, ':');
+            if (colon == NULL || strncmp(line, "drm-", 4) != 0)
+                continue;
+            *colon = '\0';
+            const char *v = colon + 1;
+            while (*v == ' ' || *v == '\t')
+                v++;
+            if (strcmp(line, "drm-pdev") == 0)
+                snprintf(pdev, sizeof pdev, "%.*s", (int)strcspn(v, " \t\n"), v);
+            else if ((strncmp(line, "drm-engine-", 11) == 0 && strncmp(line, "drm-engine-capacity-", 20) != 0) ||
+                     strncmp(line, "drm-cycles-", 11) == 0) {
+                busy += strtoull(v, NULL, 10);
+                counters++;
+            }
+        }
+        fclose(f);
+        DrmDevice *dev = pdev[0] ? drm_device(u, pdev) : NULL;
+        if (dev != NULL) {
+            dev->busy += busy;
+            dev->fds++;
+            dev->counters += counters;
+        }
+    }
+    closedir(d);
+}
+
+static unsigned long long drm_delta(const DrmUsage *before, const DrmDevice *after)
+{
+    const DrmDevice *b = drm_find(before, after->pdev);
+    unsigned long long was = b == NULL ? 0 : b->busy;
+    return after->busy > was ? after->busy - was : 0;
+}
+
+typedef enum { GPU_CONFIRMED, GPU_INFERRED, GPU_ELSEWHERE, GPU_NOT_OPENED, GPU_IDLE } GpuVerdict;
+
+/* What the counters say about the runs for a target GPU at PCI address pdev
+ * (empty when ORT did not report one).  Work counted on the target is a
+ * confirmation; work counted only on another GPU (copied into other) means
+ * Dawn took the wrong adapter; for a vendor whose Vulkan driver keeps the
+ * device file open, a target this process never opened means that driver is
+ * missing and the work ran elsewhere; a target whose driver keeps counters
+ * (the descriptors it has open show them) but counted nothing means the work
+ * ran on a GPU that keeps none, such as the NVIDIA one: Mesa keeps the Intel
+ * device file open after listing the GPUs, so being open is not enough.
+ * Anything else (the NVIDIA driver keeps no counters) leaves the adapter
+ * inferred from the power preference. */
+static GpuVerdict gpu_verdict(const char *pdev, int opens_drm_node, const DrmUsage *before,
+                              const DrmUsage *after, char *other, size_t n)
+{
+    other[0] = '\0';
+    if (pdev[0] == '\0')
+        return GPU_INFERRED;
+    const DrmDevice *target = drm_find(after, pdev);
+    if (target != NULL && drm_delta(before, target) > 0)
+        return GPU_CONFIRMED;
+    for (int i = 0; i < after->n; i++)
+        if (strcmp(after->dev[i].pdev, pdev) != 0 && drm_delta(before, &after->dev[i]) > 0) {
+            snprintf(other, n, "%s", after->dev[i].pdev);
+            return GPU_ELSEWHERE;
+        }
+    if (opens_drm_node && (target == NULL || target->fds == 0))
+        return GPU_NOT_OPENED;
+    if (target != NULL && target->counters > 0)
+        return GPU_IDLE;
+    return GPU_INFERRED;
+}
+
+/* Register the WebGPU plugin library with the environment, once per process
+ * (a second registration under the same name is an error).  A failed attempt
+ * leaves nothing registered, so the next WebGPU target tries again and
+ * reports the same error. */
+static OrtStatus *webgpu_register(OrtEnv *env)
+{
+    static int registered;
+    char path[4096];
+    if (registered)
+        return NULL;
+    provider_library_path(own_provider_library(EP_WEBGPU), path, sizeof path);
+    OrtStatus *st = g_api->RegisterExecutionProviderLibrary(env, "WebGpuExecutionProvider", path);
+    if (st == NULL)
+        registered = 1;
+    return st;
+}
+
+/* Pick the WebGPU provider's device on a GPU of the target's vendor: the
+ * provider offers one per GPU ORT found.  On success the GPU is described in
+ * r->device and its PCI address copied into pdev.  When there is none, *dev
+ * stays NULL and r says the target is unavailable, naming the GPUs that were
+ * offered.  With two GPUs of the vendor the first one is taken. */
+static OrtStatus *webgpu_pick(const OrtEnv *env, const Target *t, const OrtEpDevice **dev, char *pdev,
+                              size_t pn, Result *r)
+{
+    const OrtEpDevice *const *all = NULL;
+    const WebGpuVendor *v = webgpu_vendor(t);
+    char seen[384] = "";
+    size_t n = 0, used = 0;
+    *dev = NULL;
+    pdev[0] = '\0';
+    OrtStatus *st = g_api->GetEpDevices(env, &all, &n);
+    if (st != NULL)
+        return st;
+    for (size_t i = 0; i < n; i++) {
+        const char *ep = g_api->EpDevice_EpName(all[i]);
+        const OrtHardwareDevice *hw = g_api->EpDevice_Device(all[i]);
+        if (ep == NULL || strcmp(ep, t->provider) != 0 || hw == NULL ||
+            g_api->HardwareDevice_Type(hw) != OrtHardwareDeviceType_GPU)
+            continue;
+        const OrtKeyValuePairs *md = g_api->HardwareDevice_Metadata(hw);
+        const char *virt = md == NULL ? NULL : g_api->GetKeyValue(md, "is_virtual");
+        if (virt != NULL && strcmp(virt, "1") == 0)
+            continue; /* a stand-in for compile-only sessions, no GPU behind it */
+        const char *bus = md == NULL ? NULL : g_api->GetKeyValue(md, "pci_bus_id");
+        const char *vendor = g_api->HardwareDevice_Vendor(hw);
+        uint32_t vid = g_api->HardwareDevice_VendorId(hw), did = g_api->HardwareDevice_DeviceId(hw);
+        if (vendor == NULL || vendor[0] == '\0')
+            vendor = pci_vendor_name(vid);
+        char desc[160];
+        snprintf(desc, sizeof desc, "%s GPU %04x:%04x at %s", vendor != NULL ? vendor : "unknown vendor's",
+                 (unsigned)vid, (unsigned)did, bus != NULL ? bus : "an unknown PCI address");
+        if (*dev == NULL && vid == v->pci_vendor) {
+            *dev = all[i];
+            snprintf(r->device, sizeof r->device, "%s", desc);
+            snprintf(pdev, pn, "%s", bus != NULL ? bus : "");
+        } else if (used < sizeof seen) {
+            int k = snprintf(seen + used, sizeof seen - used, "%s%s", used ? "; " : "", desc);
+            used += k > 0 ? (size_t)k : 0;
+        }
+    }
+    if (*dev == NULL) {
+        r->status = ST_UNAVAILABLE;
+        snprintf(r->msg, sizeof r->msg, "the WebGPU provider offers no %s GPU (it offers: %s)", v->name,
+                 seen[0] ? seen : "none");
+    }
+    return NULL;
+}
+
+/* Append the target's execution provider to opts.  env and dev are for the
+ * WebGPU plugin, which is appended for one of its devices. */
+static OrtStatus *append_provider(const Target *t, OrtSessionOptions *opts, OrtEnv *env, const OrtEpDevice *dev)
 {
     OrtStatus *st = NULL;
     switch (t->kind) {
@@ -423,11 +725,17 @@ static OrtStatus *append_provider(const Target *t, OrtSessionOptions *opts)
         const char *keys[] = {"device_id"}, *vals[] = {"0"};
         return g_api->SessionOptionsAppendExecutionProvider(opts, "MIGraphX", keys, vals, 1);
     }
+    case EP_WEBGPU: {
+        /* The one option that steers Dawn's choice of GPU (see the top); the
+         * plugin reads it as ep.webgpuexecutionprovider.powerPreference. */
+        const char *keys[] = {"powerPreference"}, *vals[] = {webgpu_vendor(t)->power};
+        return g_api->SessionOptionsAppendExecutionProvider_V2(opts, env, &dev, 1, keys, vals, 1);
+    }
     }
     return NULL;
 }
 
-static void run_target(const Target *t, const OrtEnv *env, const OrtMemoryInfo *mem,
+static void run_target(const Target *t, OrtEnv *env, const OrtMemoryInfo *mem,
                        const char *model_path, int runs, Result *r)
 {
     OrtSessionOptions *opts = NULL;
@@ -437,12 +745,22 @@ static void run_target(const Target *t, const OrtEnv *env, const OrtMemoryInfo *
     OrtTensorTypeAndShapeInfo *info = NULL;
     const char *in_names[] = {"X"}, *out_names[] = {"Y"};
     const int64_t shape[4] = {1, IN_C, H, W};
+    const OrtEpDevice *dev = NULL;
+    char pdev[32] = "";
+    DrmUsage before, after;
 
     memset(r, 0, sizeof *r);
     r->status = ST_OK;
     r->phase = PH_SETUP;
 
     double t0 = now_ms();
+    if (t->kind == EP_WEBGPU) {
+        TRY("RegisterExecutionProviderLibrary", webgpu_register(env));
+        TRY("GetEpDevices", webgpu_pick(env, t, &dev, pdev, sizeof pdev, r));
+        if (dev == NULL)
+            goto done; /* unavailable: no GPU of that vendor, r says which were offered */
+        drm_usage("/proc/self/fdinfo", &before);
+    }
     TRY("CreateSessionOptions", g_api->CreateSessionOptions(&opts));
     if (t->kind != EP_CPU) {
         /* Without this, a graph the EP cannot take (or an EP that registers
@@ -450,7 +768,7 @@ static void run_target(const Target *t, const OrtEnv *env, const OrtMemoryInfo *
         TRY("disable_cpu_ep_fallback",
             g_api->AddSessionConfigEntry(opts, "session.disable_cpu_ep_fallback", "1"));
     }
-    TRY("append provider", append_provider(t, opts));
+    TRY("append provider", append_provider(t, opts, env, dev));
     TRY("CreateSession", g_api->CreateSession(env, model_path, opts, &session));
     r->create_ms = now_ms() - t0;
 
@@ -516,6 +834,35 @@ static void run_target(const Target *t, const OrtEnv *env, const OrtMemoryInfo *
     if (runs > 0)
         r->warm_ms = warm_total / runs;
 
+    if (t->kind == EP_WEBGPU) {
+        /* Read while the session is open: its device files are still there. */
+        const WebGpuVendor *v = webgpu_vendor(t);
+        char other[32];
+        size_t len = strlen(r->device);
+        drm_usage("/proc/self/fdinfo", &after);
+        GpuVerdict verdict = gpu_verdict(pdev, v->opens_drm_node, &before, &after, other, sizeof other);
+        snprintf(r->device + len, sizeof r->device - len, ", power preference %s: %s", v->power,
+                 verdict == GPU_CONFIRMED ? "the kernel counted the work on this GPU"
+                 : verdict == GPU_INFERRED ? "Dawn's adapter is inferred from the power preference "
+                                             "(no kernel usage counters for this GPU)"
+                                           : "the kernel counted no work on this GPU");
+        if (verdict == GPU_ELSEWHERE) {
+            snprintf(r->msg, sizeof r->msg, "the work ran on the GPU at %s, not on the %s GPU at %s", other,
+                     v->name, pdev);
+            r->status = ST_FAIL;
+        } else if (verdict == GPU_IDLE) {
+            snprintf(r->msg, sizeof r->msg,
+                     "work not seen on the %s GPU at %s: its driver keeps usage counters and they did "
+                     "not grow during the runs, so the work ran on a GPU that keeps none", v->name, pdev);
+            r->status = ST_FAIL;
+        } else if (verdict == GPU_NOT_OPENED) {
+            snprintf(r->msg, sizeof r->msg,
+                     "this process never opened the %s GPU at %s, so the work ran on another GPU: "
+                     "is its Vulkan driver installed?", v->name, pdev);
+            r->status = ST_FAIL;
+        }
+    }
+
 done:
     if (info != NULL)
         g_api->ReleaseTensorTypeAndShapeInfo(info);
@@ -550,10 +897,38 @@ done:
  *   classify TARGET MESSAGE
  * prints "unavailable: REASON", "no device" or "fail" for a setup error MESSAGE
  * on TARGET.
+ *   verdict PDEV OPENS_DRM_NODE BEFORE_DIR AFTER_DIR
+ * prints what GPU usage counters read from two fdinfo-like directories say
+ * about a WebGPU target's GPU at PCI address PDEV: "confirmed", "inferred",
+ * "elsewhere OTHER_PDEV", "not opened" or "idle".
  */
 int main(int argc, char **argv)
 {
     char reason[256];
+    if (argc == 6 && !strcmp(argv[1], "verdict")) {
+        static DrmUsage before, after;
+        char other[32];
+        drm_usage(argv[4], &before);
+        drm_usage(argv[5], &after);
+        switch (gpu_verdict(argv[2], atoi(argv[3]), &before, &after, other, sizeof other)) {
+        case GPU_CONFIRMED:
+            puts("confirmed");
+            break;
+        case GPU_INFERRED:
+            puts("inferred");
+            break;
+        case GPU_ELSEWHERE:
+            printf("elsewhere %s\n", other);
+            break;
+        case GPU_NOT_OPENED:
+            puts("not opened");
+            break;
+        case GPU_IDLE:
+            puts("idle");
+            break;
+        }
+        return 0;
+    }
     if (argc != 3)
         return 2;
     for (size_t i = 0; i < NTARGETS; i++)
@@ -574,20 +949,15 @@ int main(int argc, char **argv)
 }
 #else
 
+static int g_api_version; /* of the table in g_api */
+
 /* Whether the provider library of a separately packaged engine sits next to
  * the libonnxruntime.so that is loaded, where ORT looks for it.  An unknown
  * location counts as present: the load error then says what is missing. */
 static int provider_library_present(const char *name)
 {
-    Dl_info info;
     char path[4096];
-    if (dladdr((void *)(size_t)&OrtGetApiBase, &info) == 0 || info.dli_fname == NULL)
-        return 1;
-    const char *slash = strrchr(info.dli_fname, '/');
-    int len = slash == NULL ? snprintf(path, sizeof path, "%s", name)
-                            : snprintf(path, sizeof path, "%.*s/%s", (int)(slash - info.dli_fname),
-                                       info.dli_fname, name);
-    if (len < 0 || (size_t)len >= sizeof path)
+    if (!provider_library_path(name, path, sizeof path))
         return 1;
     return access(path, F_OK) == 0;
 }
@@ -606,8 +976,11 @@ static void usage(FILE *f)
 {
     fputs("usage: smoke MODEL.onnx [--only LIST] [--require LIST] [--runs N] [--log-level N]\n"
           "targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU, openvino:NPU, dnnl,\n"
-          "         migraphx-load (\"openvino\" selects the three OpenVINO devices)\n"
+          "         webgpu:nvidia, webgpu:intel, migraphx-load (\"openvino\" selects the three\n"
+          "         OpenVINO devices, \"webgpu\" both WebGPU GPUs)\n"
           "default set: all but migraphx-load, which runs only when named in --only or --require\n"
+          "webgpu:*: unavailable without libonnxruntime_providers_webgpu.so or a GPU of that vendor;\n"
+          "         the line below the result names the GPU and what the kernel counted on it\n"
           "migraphx-load: unavailable without libonnxruntime_providers_migraphx.so or its AMD\n"
           "         libraries; \"ok (no device)\" only for a hipGetDeviceCount or no-device error, any other error fails\n",
           f);
@@ -683,6 +1056,7 @@ int main(int argc, char **argv)
                 base->GetVersionString(), MIN_API_VERSION);
         return 3;
     }
+    g_api_version = api_version;
     printf("ONNX Runtime %s (API %d, built against headers for API %d)\n", base->GetVersionString(),
            api_version, ORT_API_VERSION);
     printf("build: ");
@@ -743,16 +1117,22 @@ int main(int argc, char **argv)
 
         Result r;
         /* The main library never lists MIGraphX (its provider is loaded on
-         * demand), so for migraphx-load the provider library on disk decides. */
+         * demand) nor the WebGPU plugin, so for those the provider library on
+         * disk decides. */
         const char *own = own_provider_library(t->kind);
-        if (t->kind == EP_MIGRAPHX ? !provider_library_present(own)
-                                   : !provider_listed(providers, nproviders, t->provider)) {
+        int on_disk = t->kind == EP_MIGRAPHX || t->kind == EP_WEBGPU;
+        if (on_disk ? !provider_library_present(own) : !provider_listed(providers, nproviders, t->provider)) {
             memset(&r, 0, sizeof r);
             r.status = ST_UNAVAILABLE;
-            if (t->kind == EP_MIGRAPHX)
+            if (on_disk)
                 snprintf(r.msg, sizeof r.msg, "provider library not installed: %s", own);
             else
                 snprintf(r.msg, sizeof r.msg, "%s is not in the available providers", t->provider);
+        } else if (t->kind == EP_WEBGPU && g_api_version < EP_LIBRARY_API_VERSION) {
+            memset(&r, 0, sizeof r);
+            r.status = ST_UNAVAILABLE;
+            snprintf(r.msg, sizeof r.msg, "API %d cannot register a plugin provider (needs API %d)",
+                     g_api_version, EP_LIBRARY_API_VERSION);
         } else {
             run_target(t, env, mem, model, runs, &r);
         }
@@ -767,6 +1147,12 @@ int main(int argc, char **argv)
         else
             printf(" %10s %10s %10s %10s", "-", "-", "-", "-");
         putchar('\n');
+        if (r.device[0]) {
+            /* Which GPU a WebGPU target ran on, whatever the outcome. */
+            fputs("    device: ", stdout);
+            print_oneline(r.device);
+            putchar('\n');
+        }
         if ((r.status != ST_OK || r.no_device) && r.msg[0]) {
             printf("    %s: %s", r.status == ST_FAIL ? "error" : "note", r.no_device ? "no device: " : "");
             print_oneline(r.msg);

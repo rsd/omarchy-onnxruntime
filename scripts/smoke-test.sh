@@ -20,7 +20,22 @@
 #
 # Targets (LIST is comma-separated): cpu, cuda, tensorrt, openvino:CPU,
 # openvino:GPU, openvino:NPU ("openvino" selects all three devices), dnnl
-# (oneDNN, on the CPU) and migraphx-load (AMD GPU, see below).
+# (oneDNN, on the CPU), webgpu:nvidia, webgpu:intel ("webgpu" selects both,
+# see below) and migraphx-load (AMD GPU, see below).
+#
+# The WebGPU targets register the plugin libonnxruntime_providers_webgpu.so
+# found next to libonnxruntime.so and run on the GPU of the named vendor.  The
+# GPU is steered by Dawn's power preference, not by the device ORT is given:
+# webgpu:nvidia asks for high-performance (discrete GPUs first), webgpu:intel
+# for low-power (integrated GPUs first).  A target is "unavailable" when the
+# plugin is not installed or offers no GPU of that vendor.  A "device:" line
+# names the GPU and what the kernel's per-process usage counters say: work
+# counted only on another GPU, an Intel GPU this process never opened (no
+# Intel Vulkan driver), or one whose counters did not grow during the runs
+# ("work not seen": Mesa keeps the Intel GPU open after listing the GPUs), is a
+# FAIL; the NVIDIA driver keeps no such counters, so there the GPU is inferred.  For an acceptance check run each WebGPU target
+# alone (--require webgpu:intel --only webgpu:intel), so that its result cannot
+# depend on a Dawn device left over from an earlier target in the same process.
 #
 # A target whose provider or vendor runtime is not installed is reported as
 # "unavailable", which is not a failure unless it is in --require.  The default
@@ -88,6 +103,10 @@ fi
     die 3 "onnxruntime_c_api.h not found in $include: is onnxruntime-core installed? (see --prefix / --include)"
 [[ -e $libdir/libonnxruntime.so ]] ||
     die 3 "libonnxruntime.so not found in $libdir: is onnxruntime-core installed? (see --prefix / --libdir)"
+# ORT resolves a relative provider path against libonnxruntime's own directory,
+# so every path the target builds from these options must be absolute.
+include=$(realpath -sm -- "$include")
+libdir=$(realpath -sm -- "$libdir")
 command -v "$cc" >/dev/null || die 3 "C compiler '$cc' not found (set CC)"
 command -v "$python" >/dev/null || die 3 "'$python' not found (set PYTHON)"
 

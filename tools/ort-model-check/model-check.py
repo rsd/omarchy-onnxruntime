@@ -14,6 +14,25 @@ TensorRT, fp16 on the OpenVINO GPU and NPU) and judges those targets with
 reduced-precision bounds; --precision fp32 asks every provider that can for
 full fp32 arithmetic and judges it with tight bounds.
 
+The WebGPU targets (webgpu:nvidia, webgpu:intel) use a plugin provider,
+libonnxruntime_providers_webgpu.so (a separate package): the module neither
+lists it in get_available_providers nor reaches it through providers=[...].
+The library is registered (from the module's capi directory, else from beside
+the libonnxruntime.so it links, or from --webgpu-lib) and the session gets the
+WebGPU device of the target's GPU vendor through add_provider_for_devices.  In
+ONNX Runtime 1.29 that device does not choose the GPU: Dawn takes the first
+adapter for the requested power preference, discrete GPUs first for
+"high-performance" and integrated ones first for "low-power".  So
+webgpu:nvidia asks for high-performance and webgpu:intel for low-power, as
+tools/ort-smoke/smoke.c does.  Since the API does not say which adapter Dawn
+took, the kernel's per-process GPU usage counters (/proc/self/fdinfo) are read
+before the session and after the timed runs, as smoke.c does: work counted on
+another GPU and none on the target's is a failure, and so is an Intel GPU
+whose device file this process never opened (its Vulkan driver is missing, so
+the work went elsewhere) and a GPU whose driver keeps counters but counted no
+work during the runs.  The NVIDIA driver publishes no such counters, so for
+it the note says the adapter is inferred.
+
 Exit status: 0 when no available target failed and every --require'd target is
 ok; 1 otherwise; 2 on a usage error; 3 when onnxruntime or numpy cannot be
 imported.
@@ -34,7 +53,8 @@ import re
 import sys
 import time
 
-# (id, provider name as reported by get_available_providers, OpenVINO device).
+# (id, provider name as reported by get_available_providers or the plugin's
+# EP name, OpenVINO device or WebGPU vendor key).
 TARGETS = [
     ("cpu", "CPUExecutionProvider", None),
     ("cuda", "CUDAExecutionProvider", None),
@@ -43,11 +63,26 @@ TARGETS = [
     ("openvino:GPU", "OpenVINOExecutionProvider", "GPU"),
     ("openvino:NPU", "OpenVINOExecutionProvider", "NPU"),
     ("dnnl", "DnnlExecutionProvider", None),
+    ("webgpu:nvidia", "WebGpuExecutionProvider", "nvidia"),
+    ("webgpu:intel", "WebGpuExecutionProvider", "intel"),
 ]
 TARGET_IDS = [t[0] for t in TARGETS]
 BY_ID = {t[0]: t for t in TARGETS}
 
 PRECISIONS = ("default", "fp32")
+
+# The WebGPU plugin provider: its library, and per target the GPU's PCI vendor
+# id (what ORT's device discovery reports; the vendor name is empty on Linux),
+# its name, the Dawn power preference that makes Dawn take that vendor's GPU
+# on a machine with an NVIDIA card and an Intel integrated GPU (NVIDIA GPUs are
+# discrete, Intel's are taken as integrated) and whether the vendor's Vulkan
+# driver (Mesa's) keeps the GPU's DRM device file open, its kernel driver (i915,
+# xe) counting the work there.
+WEBGPU_LIB = "libonnxruntime_providers_webgpu.so"
+WEBGPU_VENDORS = {
+    "webgpu:nvidia": (0x10DE, "NVIDIA", "high-performance", False),
+    "webgpu:intel": (0x8086, "Intel", "low-power", True),
+}
 
 # Bounds against the cpu target, as (arithmetic, max abs error, mean abs error
 # or None).  A target passes when every bound holds.
@@ -57,6 +92,10 @@ PRECISIONS = ("default", "fp32")
 # (uniform-noise input, ONNX Runtime 1.29.0) the worst is 2.8e-4 (CUDA with
 # use_tf32=0, MODNet at 512x512).
 FP32 = ("fp32", 1e-3, None)
+# WebGPU runs an fp32 model in fp32 shaders and has no reduced-precision
+# default, so it gets the fp32 bound in both modes; measured on the three
+# reference models it runs correctly (ONNX Runtime 1.29.0, an RTX GPU) the
+# worst is 6.0e-7.
 # The cpu target is the reference, compared with itself.
 EXACT = ("fp32", 0.0, None)
 # TF32 (CUDA and TensorRT defaults) and fp16 (OpenVINO GPU and NPU defaults)
@@ -81,9 +120,11 @@ FP16 = ("fp16", 1.0, 1e-2)
 # fp32 inference (an f32 hint fails to compile), so it stays at fp16.
 BOUNDS = {
     "default": {"cpu": EXACT, "cuda": TF32, "tensorrt": TF32, "openvino:CPU": FP32,
-                "openvino:GPU": FP16, "openvino:NPU": FP16, "dnnl": FP32},
+                "openvino:GPU": FP16, "openvino:NPU": FP16, "dnnl": FP32,
+                "webgpu:nvidia": FP32, "webgpu:intel": FP32},
     "fp32": {"cpu": EXACT, "cuda": FP32, "tensorrt": FP32, "openvino:CPU": FP32,
-             "openvino:GPU": FP32, "openvino:NPU": FP16, "dnnl": FP32},
+             "openvino:GPU": FP32, "openvino:NPU": FP16, "dnnl": FP32,
+             "webgpu:nvidia": FP32, "webgpu:intel": FP32},
 }
 TF32_OVERRIDE = "NVIDIA_TF32_OVERRIDE"
 FP32_NOTES = {
@@ -102,7 +143,7 @@ def expand_targets(text, option):
     """Turn a comma-separated LIST into target ids in table order.
 
     A token matches an id case-insensitively, or the part of an id before the
-    colon ("openvino" selects all three devices).
+    colon ("openvino" selects all three devices, "webgpu" both GPUs).
     """
     chosen = set()
     for tok in (s.strip() for s in text.split(",")):
@@ -114,7 +155,7 @@ def expand_targets(text, option):
             if tid.lower() == tok.lower() or (":" in tid and tid.split(":")[0].lower() == tok.lower())
         ]
         if not hits:
-            raise ValueError("%s: unknown target '%s' (known: cpu, cuda, tensorrt, openvino, dnnl, %s)" % (
+            raise ValueError("%s: unknown target '%s' (known: cpu, cuda, tensorrt, openvino, dnnl, webgpu, %s)" % (
                 option, tok, ", ".join(t for t in TARGET_IDS if ":" in t)))
         chosen.update(hits)
     return [tid for tid in TARGET_IDS if tid in chosen]
@@ -132,8 +173,8 @@ def build_parser():
         prog="model-check.py",
         description="Run an ONNX model on each ONNX Runtime execution provider, "
         "compare the outputs with the CPU provider's and time the runs.",
-        epilog="targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU, openvino:NPU, dnnl "
-        "('openvino' selects all three devices).  Exit status: 0 ok, 1 a target "
+        epilog="targets: cpu, cuda, tensorrt, openvino:CPU, openvino:GPU, openvino:NPU, dnnl, "
+        "webgpu:nvidia, webgpu:intel ('openvino' selects all three devices, 'webgpu' both GPUs).  Exit status: 0 ok, 1 a target "
         "failed or a required target is not ok, 2 usage error, 3 onnxruntime or "
         "numpy cannot be imported.",
     )
@@ -149,6 +190,9 @@ def build_parser():
     p.add_argument("--json", metavar="FILE", dest="json_path", help="also write the results as JSON")
     p.add_argument("--trt-cache", metavar="DIR",
                    help="enable the TensorRT engine cache in DIR (default: cache off)")
+    p.add_argument("--webgpu-lib", metavar="PATH",
+                   help="the WebGPU plugin provider library to register (default: %s in the module's "
+                   "capi directory, else beside the libonnxruntime.so it links)" % WEBGPU_LIB)
     p.add_argument("--allow-cpu-fallback", action="store_true",
                    help="let non-cpu targets leave nodes to the CPU EP (rows are marked ok*)")
     p.add_argument("--precision", choices=PRECISIONS, default="default",
@@ -305,6 +349,192 @@ def preload_provider(ort, target):
     return None
 
 
+def webgpu_library(ort, override):
+    """The paths where the WebGPU plugin library is looked for, in order:
+    --webgpu-lib alone when given, else capi/libonnxruntime_providers_webgpu.so
+    and the same name beside the real file of capi/libonnxruntime.so.* (a link
+    to /usr/lib in the system package).  The first that exists is registered."""
+    if override:
+        return [os.path.abspath(override)]
+    capi = os.path.join(os.path.dirname(os.path.abspath(ort.__file__)), "capi")
+    candidates = [os.path.join(capi, WEBGPU_LIB)]
+    for name in sorted(os.listdir(capi)):
+        if name.startswith("libonnxruntime.so"):
+            candidates.append(os.path.join(os.path.dirname(os.path.realpath(os.path.join(capi, name))), WEBGPU_LIB))
+            break
+    return list(dict.fromkeys(candidates))
+
+
+class WebGpu:
+    """The WebGPU plugin provider, registered once per process on first use.
+
+    gate(target) is None when the target's GPU is there (device(target) is then
+    its OrtEpDevice), else a (status, note) pair: unavailable when the library
+    does not exist, when this onnxruntime has no plugin API (before 1.22) or
+    when the provider reports no GPU of the target's vendor; FAIL when the
+    library exists but does not register.
+    """
+
+    def __init__(self, ort, candidates):
+        self.ort, self.candidates = ort, candidates
+        self.path = next((p for p in candidates if os.path.exists(p)), None)
+        self.state = None  # None: not tried; else (status, note) or the list of WebGPU devices
+
+    def _register(self):
+        ort = self.ort
+        provider = BY_ID["webgpu:nvidia"][1]
+        if self.path is None:
+            if len(self.candidates) == 1:
+                return UNAVAILABLE, "provider not installed: %s does not exist" % self.candidates[0]
+            return UNAVAILABLE, "provider not installed: neither %s exists" % " nor ".join(self.candidates)
+        if not hasattr(ort, "register_execution_provider_library") or not hasattr(ort, "get_ep_devices"):
+            return UNAVAILABLE, "onnxruntime %s has no plugin provider API (1.22 or later)" % ort.__version__
+        try:
+            ort.register_execution_provider_library(provider, self.path)
+        except Exception as e:  # noqa: BLE001
+            reason = unavailable_reason("webgpu:nvidia", str(e))
+            if reason:
+                return UNAVAILABLE, "%s (ORT said: %s)" % (reason, first_line(e))
+            return FAIL, "registering %s: %s" % (self.path, first_line(e))
+        return [d for d in ort.get_ep_devices() if d.ep_name == provider]
+
+    def gate(self, target):
+        if self.state is None:
+            self.state = self._register()
+        if isinstance(self.state, tuple):
+            return self.state
+        if self.device(target) is None:
+            vendor_id, name = WEBGPU_VENDORS[target][:2]
+            seen = ", ".join("0x%04x" % d.device.vendor_id for d in self.state) or "none"
+            return UNAVAILABLE, "no %s GPU (PCI vendor 0x%04x) among the WebGPU devices (vendors: %s)" % (
+                name, vendor_id, seen)
+        return None
+
+    def device(self, target):
+        """The first real GPU of the target's vendor the provider offers: a
+        virtual device (a stand-in for compile-only sessions, no GPU behind it)
+        and a device that is not a GPU are skipped, as smoke.c does."""
+        vendor_id = WEBGPU_VENDORS[target][0]
+        gpu = getattr(getattr(self.ort, "OrtHardwareDeviceType", None), "GPU", None)
+        for d in self.state if isinstance(self.state, list) else []:
+            if gpu is not None and d.device.type != gpu:
+                continue
+            if dict(d.device.metadata).get("is_virtual") == "1":
+                continue
+            if d.device.vendor_id == vendor_id:
+                return d
+        return None
+
+    def pdev(self, target):
+        """The PCI address ORT reports for the target's GPU, or ""."""
+        return dict(self.device(target).device.metadata).get("pci_bus_id") or ""
+
+
+# ---- WebGPU: which GPU did the work -----------------------------------------
+#
+# The kernel's GPU usage counters for this process, per GPU.  Each DRM file
+# descriptor has a /proc/self/fdinfo entry; drivers that keep per-client
+# statistics (i915, xe, amdgpu) write "drm-pdev: <PCI address>" and one counter
+# per engine, "drm-engine-<name>: <ns> ns" (i915, amdgpu) or
+# "drm-cycles-<name>: <cycles>" (xe).  The counters only grow while this
+# process's work runs, so a difference across the runs says which GPU ran it.
+# "drm-engine-capacity-*" is a number of engines and "drm-total-cycles-*" the
+# GPU's own clock, which grows anyway: neither is work.
+
+GPU_CONFIRMED, GPU_INFERRED, GPU_ELSEWHERE, GPU_NOT_OPENED, GPU_IDLE = (
+    "confirmed", "inferred", "elsewhere", "not opened", "idle")
+
+
+def drm_usage(directory="/proc/self/fdinfo"):
+    """{pdev: {"busy": sum of the work counters, "fds": descriptors open on it,
+    "counters": work counters seen (its driver keeps them)}} for every fdinfo
+    entry in directory that names a drm-pdev."""
+    usage = {}
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return usage
+    for name in names:
+        if name.startswith("."):
+            continue
+        pdev, busy, counters = "", 0, 0
+        try:
+            with open(os.path.join(directory, name), errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+        for line in lines:
+            key, colon, value = line.partition(":")
+            if not colon or not key.startswith("drm-"):
+                continue
+            value = value.strip()
+            if key == "drm-pdev":
+                pdev = value.split()[0] if value else ""
+            elif (key.startswith("drm-engine-") and not key.startswith("drm-engine-capacity-")) \
+                    or key.startswith("drm-cycles-"):
+                m = re.match(r"\d+", value)
+                busy += int(m.group()) if m else 0
+                counters += 1
+        if pdev:
+            dev = usage.setdefault(pdev, {"busy": 0, "fds": 0, "counters": 0})
+            dev["busy"] += busy
+            dev["fds"] += 1
+            dev["counters"] += counters
+    return usage
+
+
+def drm_delta(before, pdev, after_dev):
+    was = before.get(pdev, {}).get("busy", 0)
+    return max(after_dev["busy"] - was, 0)
+
+
+def gpu_verdict(pdev, opens_drm_node, before, after):
+    """(verdict, other pdev or None) for a target GPU at PCI address pdev ("" when
+    ORT did not report one), from the usage before and after the runs.  Work
+    counted on the target is a confirmation; work counted only on another GPU
+    means Dawn took the wrong adapter; for a vendor whose Vulkan driver keeps the
+    device file open, a target this process never opened means that driver is
+    missing and the work ran elsewhere; a target whose driver keeps counters but
+    counted nothing means the work ran on a GPU that keeps none, such as the
+    NVIDIA one (Mesa keeps the Intel device file open after listing the GPUs, so
+    being open is not enough).  Anything else (the NVIDIA driver keeps no
+    counters) leaves the adapter inferred from the power preference."""
+    if not pdev:
+        return GPU_INFERRED, None
+    target = after.get(pdev)
+    if target is not None and drm_delta(before, pdev, target) > 0:
+        return GPU_CONFIRMED, None
+    for other, dev in after.items():
+        if other != pdev and drm_delta(before, other, dev) > 0:
+            return GPU_ELSEWHERE, other
+    if opens_drm_node and (target is None or target["fds"] == 0):
+        return GPU_NOT_OPENED, None
+    if target is not None and target["counters"] > 0:
+        return GPU_IDLE, None
+    return GPU_INFERRED, None
+
+
+def gpu_verdict_notes(target, pdev, verdict, other):
+    """(the adapter note, the failure message or None) for a verdict."""
+    _, name, power, _ = WEBGPU_VENDORS[target]
+    where = " at %s" % pdev if pdev else ""
+    said = {GPU_CONFIRMED: "the kernel counted the work on this GPU",
+            GPU_INFERRED: "Dawn's adapter is inferred from the power preference "
+                          "(no kernel usage counters for this GPU)"}.get(
+        verdict, "the kernel counted no work on this GPU")
+    note = "%s GPU%s, power preference %s: %s" % (name, where, power, said)
+    failure = None
+    if verdict == GPU_ELSEWHERE:
+        failure = "the work ran on the GPU at %s, not on the %s GPU at %s" % (other, name, pdev)
+    elif verdict == GPU_IDLE:
+        failure = ("work not seen on the %s GPU at %s: its driver keeps usage counters and they did not "
+                   "grow during the runs, so the work ran on a GPU that keeps none" % (name, pdev))
+    elif verdict == GPU_NOT_OPENED:
+        failure = ("this process never opened the %s GPU at %s, so the work ran on another GPU: "
+                   "is its Vulkan driver installed?" % (name, pdev))
+    return note, failure
+
+
 # ---- running ---------------------------------------------------------------
 
 def provider_config(target, trt_cache, precision="default"):
@@ -328,12 +558,18 @@ def provider_config(target, trt_cache, precision="default"):
     return [provider]
 
 
-def make_session(ort, model_path, target, trt_cache, allow_cpu_fallback=False, precision="default"):
+def make_session(ort, model_path, target, trt_cache, allow_cpu_fallback=False, precision="default", webgpu=None):
     so = ort.SessionOptions()
     so.log_severity_level = 3
     if target != "cpu" and not allow_cpu_fallback:
         so.add_session_config_entry("session.disable_cpu_ep_fallback", "1")
-    sess = ort.InferenceSession(model_path, sess_options=so, providers=provider_config(target, trt_cache, precision))
+    if target in WEBGPU_VENDORS:
+        # A plugin provider is added to the options, and providers= stays unset:
+        # given, it would take precedence over the options' provider.
+        so.add_provider_for_devices([webgpu.device(target)], {"powerPreference": WEBGPU_VENDORS[target][2]})
+        sess = ort.InferenceSession(model_path, sess_options=so)
+    else:
+        sess = ort.InferenceSession(model_path, sess_options=so, providers=provider_config(target, trt_cache, precision))
     if hasattr(sess, "disable_fallback"):
         sess.disable_fallback()  # a failing run must not retry on the CPU behind our back
     return sess
@@ -404,7 +640,7 @@ def compare(np, outputs, reference):
     return worst, (total / count if count else 0.0), None, skipped
 
 
-def run_target(ort, np, args, target, model_path, feeds, reference, bounds, available):
+def run_target(ort, np, args, target, model_path, feeds, reference, bounds, available, webgpu=None):
     arith, max_tol, mean_tol = bounds
     r = {"target": target, "status": FAIL, "precision": arith, "max_tolerance": max_tol,
          "mean_tolerance": mean_tol, "note": None, "providers": None,
@@ -412,7 +648,7 @@ def run_target(ort, np, args, target, model_path, feeds, reference, bounds, avai
          "max_err": None, "mean_err": None}
     outputs = None
     provider = BY_ID[target][1]
-    if provider not in available:
+    if target not in WEBGPU_VENDORS and provider not in available:
         r["status"] = UNAVAILABLE
         r["note"] = "%s is not in the available providers" % provider
         return r, None
@@ -420,13 +656,15 @@ def run_target(ort, np, args, target, model_path, feeds, reference, bounds, avai
     sess = None
     printed = io.StringIO()  # InferenceSession prints its "EP Error ... Falling back" banner to stdout
     t0 = time.perf_counter()
-    gate = preload_provider(ort, target)
+    gate = webgpu.gate(target) if target in WEBGPU_VENDORS else preload_provider(ort, target)
     if gate:
         r["status"], r["note"] = gate
         return r, None
+    before = drm_usage() if target in WEBGPU_VENDORS else None
     try:
         with contextlib.redirect_stdout(printed):
-            sess = make_session(ort, model_path, target, args.trt_cache, args.allow_cpu_fallback, args.precision)
+            sess = make_session(ort, model_path, target, args.trt_cache, args.allow_cpu_fallback, args.precision,
+                                webgpu)
         r["create_ms"] = (time.perf_counter() - t0) * 1e3
     except Exception as e:  # noqa: BLE001 - every ORT error is reported
         r["create_ms"] = None
@@ -439,6 +677,7 @@ def run_target(ort, np, args, target, model_path, feeds, reference, bounds, avai
         return r, None
 
     notes = [FP32_NOTES[target]] if args.precision == "fp32" and target in FP32_NOTES else []
+    gpu_failure = None
     try:
         r["providers"] = list(sess.get_providers())
         if not r["providers"] or r["providers"][0] != provider:
@@ -447,6 +686,12 @@ def run_target(ort, np, args, target, model_path, feeds, reference, bounds, avai
                 r["note"] += " (ORT printed: %s)" % first_line(printed.getvalue())
             return r, None
         outputs = timed_run(sess, feeds, args.warmup, args.runs, r)
+        if target in WEBGPU_VENDORS:
+            # Read while the session is open: its device files are still there.
+            pdev = webgpu.pdev(target)
+            verdict, other = gpu_verdict(pdev, WEBGPU_VENDORS[target][3], before, drm_usage())
+            adapter, gpu_failure = gpu_verdict_notes(target, pdev, verdict, other)
+            notes.append(adapter)
     except Exception as e:  # noqa: BLE001
         r["note"] = "run: " + first_line(e)
         return r, None
@@ -465,7 +710,9 @@ def run_target(ort, np, args, target, model_path, feeds, reference, bounds, avai
         exceeded.append("max error %.2e exceeds tolerance %.2e" % (worst, max_tol))
     if not problem and mean_tol is not None and mean > mean_tol:
         exceeded.append("mean error %.2e exceeds tolerance %.2e" % (mean, mean_tol))
-    if problem:
+    if gpu_failure:
+        r["note"] = "; ".join([gpu_failure] + ([problem] if problem else []) + exceeded + notes)
+    elif problem:
         r["note"] = "; ".join([problem] + notes)
     elif exceeded:
         r["note"] = "; ".join(exceeded + notes)
@@ -519,6 +766,8 @@ def main(argv=None):
         parser.error("--runs and --warmup must not be negative")
     if not os.path.isfile(args.model):
         parser.error("model not found: %s" % args.model)
+    if args.webgpu_lib and not os.path.isfile(args.webgpu_lib):
+        parser.error("--webgpu-lib: not found: %s" % args.webgpu_lib)
     try:
         reported = expand_targets(args.targets, "--targets")
         required = expand_targets(args.require, "--require") if args.require else []
@@ -613,10 +862,15 @@ def main(argv=None):
           % (args.warmup, args.runs, "allowed" if args.allow_cpu_fallback else "disabled"))
     if args.trt_cache:
         os.makedirs(args.trt_cache, exist_ok=True)
+    webgpu = None
+    if any(t in WEBGPU_VENDORS for t in to_run):
+        webgpu = WebGpu(ort, webgpu_library(ort, args.webgpu_lib))
+        print("WebGPU plugin provider library: %s\n" % (webgpu.path or "not found"))
 
     results, reference = [], None
     for tid in to_run:
-        r, outputs = run_target(ort, np, args, tid, model_path, feeds, reference, tuple(bounds[tid]), available)
+        r, outputs = run_target(ort, np, args, tid, model_path, feeds, reference, tuple(bounds[tid]), available,
+                                webgpu)
         if tid == "cpu":
             reference = outputs
             if outputs is None and r["status"] == FAIL:
@@ -637,6 +891,7 @@ def main(argv=None):
             "model": {"name": os.path.basename(model_path), "sha256": sha},
             "inputs": inputs_desc,
             "available_providers": available,
+            "webgpu_library": webgpu.path if webgpu else None,
             "warmup": args.warmup,
             "runs": args.runs,
             "seed": args.seed,

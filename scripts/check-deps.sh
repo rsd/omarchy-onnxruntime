@@ -34,6 +34,10 @@
 #               it: the oneDNN provider links oneDNN statically, and no
 #               package of this recipe may need Arch's onednn (or a
 #               libdnnl.so.3 of its own, which would be onednn's file)
+#   DAWN        a needed libwebgpu_dawn or libdawn* (Dawn as a shared
+#               library), whoever owns it: the WebGPU provider links Dawn
+#               statically, and no package of this recipe installs a Dawn
+#               library
 # Limit: it sees only DT_NEEDED entries. A library a package dlopen()s at run
 # time (cuDNN, which the CUDA provider opens, libcuda, libnvrtc, libcufft) is
 # invisible to it: those are covered by the recipe's recorded bounds (cudnn by
@@ -149,7 +153,7 @@ offers() {
     for p in "${words[@]}"; do printf '%s\n' "$p"; done
 }
 
-gaps=0 unresolved=0 bounds=0 missing=0 dnnl=0
+gaps=0 unresolved=0 bounds=0 missing=0 dnnl=0 dawn=0
 row() { printf '  %-44s %-26s %-44s %-28s %-24s %s\n' "$@"; }
 drow() { printf '  %-44s %-34s %-28s %s\n' "$@"; }
 
@@ -182,6 +186,11 @@ for i in "${!roots[@]}"; do
             if [[ $soname == libdnnl.so* ]]; then
                 row "$lib" "$soname" '' '' '' 'DNNL (oneDNN must be linked statically)'
                 dnnl=$((dnnl + 1))
+                continue
+            fi
+            if [[ $soname == libwebgpu_dawn.so* || $soname == libdawn*.so* ]]; then
+                row "$lib" "$soname" '' '' '' 'DAWN (Dawn must be linked statically)'
+                dawn=$((dawn + 1))
                 continue
             fi
             # The library's RUNPATH, in the packages given, then here.
@@ -273,9 +282,9 @@ for i in "${!roots[@]}"; do
     echo
 done
 
-flags=$((gaps + unresolved + bounds + missing + dnnl))
+flags=$((gaps + unresolved + bounds + missing + dnnl + dawn))
 if ((flags > 0)); then
-    echo "flagged: $gaps GAP, $unresolved UNRESOLVED, $bounds BOUND, $missing MISSING, $dnnl DNNL"
+    echo "flagged: $gaps GAP, $unresolved UNRESOLVED, $bounds BOUND, $missing MISSING, $dnnl DNNL, $dawn DAWN"
     exit 1
 fi
-echo "no gaps, unresolved libraries, bound violations or shared libdnnl"
+echo "no gaps, unresolved libraries, bound violations, shared libdnnl or shared Dawn"

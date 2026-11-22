@@ -40,7 +40,7 @@ want=$(
 > #
 < pkgbase=onnxruntime-split
 > pkgbase=onnxruntime-split-migraphx
-< _ortf_default_eps='cuda tensorrt openvino dnnl'
+< _ortf_default_eps='cuda tensorrt openvino dnnl webgpu'
 > _ortf_default_eps='migraphx'
 < _ortf_default_python=1
 > _ortf_default_python=0

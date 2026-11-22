@@ -13,7 +13,8 @@
 #     setup error is classified: vendor runtime missing / OpenVINO device absent /
 #     the oneDNN or MIGraphX provider library absent are "unavailable", the HIP
 #     no-device errors of migraphx-load (hipGetDeviceCount only) are "no device" (a pass), everything else
-#     a failure.
+#     a failure; and, for the WebGPU targets, what fake /proc/self/fdinfo
+#     snapshots say about the GPU that did the work.
 # Usage: scripts/tests/smoke-test-test.sh. Exits non-zero on any failure.
 set -euo pipefail
 
@@ -89,6 +90,8 @@ contains "--help prints the usage" "Usage: scripts/smoke-test.sh" "$help"
 contains "--help names the dnnl target" "dnnl" "$help"
 contains "--help names the migraphx-load target" "migraphx-load" "$help"
 contains "--help says migraphx-load is not in the default set" "set is every target except migraphx-load" "$help"
+contains "--help names the webgpu targets" "webgpu:nvidia, webgpu:intel" "$help"
+contains "--help says how the WebGPU GPU is chosen" "steered by Dawn's power preference" "$help"
 expect "--help exits 0" 0 "$(status_of "$smoke" --help)"
 expect "an unknown option is a usage error" 2 "$(status_of "$smoke" --frobnicate)"
 expect "--only without a value is a usage error" 2 "$(status_of "$smoke" --only)"
@@ -163,6 +166,10 @@ CC=$fakecc "$smoke" --prefix "$fakeprefix" --only cpu,dnnl,migraphx-load --requi
 run_args=$(cat "$FAKE_LOG.run")
 contains "run: --only forwards dnnl and migraphx-load" $'--only\ncpu,dnnl,migraphx-load' "$run_args"
 contains "run: --require forwards dnnl and migraphx-load" $'--require\ndnnl,migraphx-load' "$run_args"
+CC=$fakecc "$smoke" --prefix "$fakeprefix" --only cpu,webgpu --require webgpu:intel >/dev/null 2>&1
+run_args=$(cat "$FAKE_LOG.run")
+contains "run: --only forwards webgpu" $'--only\ncpu,webgpu' "$run_args"
+contains "run: --require forwards webgpu:intel" $'--require\nwebgpu:intel' "$run_args"
 CC=$fakecc "$smoke" --prefix "$fakeprefix" >/dev/null 2>&1
 run_args=$(cat "$FAKE_LOG.run")
 if [[ $run_args == *--only* || $run_args == *--require* || $run_args == *--runs* ]]; then
@@ -191,6 +198,10 @@ cc_args=$(cat "$FAKE_LOG.cc")
 contains "tree layout: finds the header under core/session" "-I$tree/include/onnxruntime/core/session" "$cc_args"
 contains "tree layout: uses --libdir" "-L$tmp/build" "$cc_args"
 contains "tree layout: LD_LIBRARY_PATH points at --libdir" "LD=$tmp/build" "$(cat "$FAKE_LOG.run")"
+
+(cd "$tmp" && CC=$fakecc "$smoke" --prefix prefix --only cpu >/dev/null 2>&1)
+contains "relative --prefix: library directory made absolute" "-L$fakeprefix/lib" "$(cat "$FAKE_LOG.cc")"
+contains "relative --prefix: LD_LIBRARY_PATH made absolute" "LD=$fakeprefix/lib" "$(cat "$FAKE_LOG.run")"
 
 CC=$fakecc "$smoke" --prefix "$fakeprefix" --keep >/dev/null 2>"$tmp/keep.err"
 kept=$(sed -n 's/^kept: //p' "$tmp/keep.err")
@@ -311,6 +322,71 @@ if [[ -f $hdr/onnxruntime_c_api.h ]]; then
             "$("$classify" migraphx-load "CreateSession: MIGraphX EP could not be created")"
         expect "no device never applies to cuda" fail \
             "$("$classify" cuda "CreateSession: hipSetDevice failed: hipErrorNoDevice")"
+
+        # WebGPU: a plugin library, registered by path.  Absent is unavailable;
+        # a library that loads wrong, or a provider that finds no adapter, fails.
+        for t in webgpu:nvidia webgpu:intel; do
+            expect "$t: absent provider library is unavailable" \
+                "unavailable: provider library not installed: libonnxruntime_providers_webgpu.so" \
+                "$("$classify" "$t" "RegisterExecutionProviderLibrary: Failed to load library /usr/lib/libonnxruntime_providers_webgpu.so with error: /usr/lib/libonnxruntime_providers_webgpu.so: cannot open shared object file: No such file or directory")"
+        done
+        expect "webgpu: a library without the plugin entry points is a failure" fail \
+            "$("$classify" webgpu:nvidia "RegisterExecutionProviderLibrary: Failed to get symbol CreateEpFactories with error: /usr/lib/libonnxruntime_providers_webgpu.so: undefined symbol: CreateEpFactories")"
+        expect "webgpu: no Dawn adapter is a failure, not unavailable" fail \
+            "$("$classify" webgpu:intel "CreateSession: Failed to get a WebGPU adapter: No supported adapters")"
+        expect "webgpu: the HIP no-device pass does not apply" fail \
+            "$("$classify" webgpu:nvidia "no ROCm-capable device is detected")"
+        expect "webgpu: OpenVINO's device-absent text does not apply" fail \
+            "$("$classify" webgpu:intel "[ERROR] [OpenVINO] Device GPU is not available")"
+        expect "the webgpu provider library is not special for cuda" fail \
+            "$("$classify" cuda "Failed to load library libonnxruntime_providers_webgpu.so with error: libonnxruntime_providers_webgpu.so: cannot open shared object file")"
+
+        # Which GPU did the work: fdinfo snapshots before and after the runs.
+        # fdinfo <dir> <name> <pdev> <counter lines...> writes one entry.
+        fdinfo() {
+            local d=$1 f=$2 p=$3
+            shift 3
+            mkdir -p "$d"
+            { printf 'pos:\t0\nflags:\t02100002\n'; [[ -z $p ]] || printf 'drm-driver:\txe\ndrm-pdev:\t%s\n' "$p"; printf '%s\n' "$@"; } >"$d/$f"
+        }
+        intel=0000:00:02.0 nv=0000:02:00.0
+        b=$tmp/fd-before a=$tmp/fd-after
+        fdinfo "$b" 3 "" ; fdinfo "$a" 3 ""   # not a DRM descriptor
+        fdinfo "$b" 7 "$intel" $'drm-cycles-rcs:\t100' $'drm-total-cycles-rcs:\t5000' $'drm-engine-capacity-ccs:\t4'
+        fdinfo "$a" 7 "$intel" $'drm-cycles-rcs:\t100' $'drm-total-cycles-rcs:\t9000' $'drm-engine-capacity-ccs:\t4'
+        expect "verdict: an idle Intel GPU's clock is not work" "inferred" "$("$classify" verdict "$nv" 0 "$b" "$a")"
+        expect "verdict: an open Intel GPU whose counters did not grow is idle, not inferred" "idle" \
+            "$("$classify" verdict "$intel" 1 "$b" "$a")"
+        fdinfo "$a" 9 "$intel" $'drm-cycles-ccs:\t250'
+        expect "verdict: work counted on the target confirms it (xe cycles)" "confirmed" "$("$classify" verdict "$intel" 1 "$b" "$a")"
+        expect "verdict: work counted on another GPU is elsewhere" "elsewhere $intel" "$("$classify" verdict "$nv" 0 "$b" "$a")"
+        rm -rf "$a"; fdinfo "$a" 3 ""
+        fdinfo "$a" 7 "$intel" $'drm-engine-render:\t0 ns' $'drm-engine-compute:\t1200 ns'
+        expect "verdict: work counted on the target confirms it (i915 ns)" "confirmed" "$("$classify" verdict "$intel" 1 "$b" "$a")"
+        # Reuse after webgpu:nvidia: Mesa already holds the Intel node (open,
+        # counters kept) and the work goes to NVIDIA, which writes no fdinfo.
+        rm -rf "$b" "$a"; fdinfo "$b" 3 ""; fdinfo "$a" 3 ""
+        fdinfo "$b" 5 "$intel" $'drm-engine-render:\t40 ns' $'drm-engine-compute:\t0 ns'
+        fdinfo "$a" 5 "$intel" $'drm-engine-render:\t40 ns' $'drm-engine-compute:\t0 ns'
+        expect "verdict: Intel node held from an earlier target, work on NVIDIA, is idle" "idle" \
+            "$("$classify" verdict "$intel" 1 "$b" "$a")"
+        expect "verdict: the same snapshots leave an NVIDIA target inferred" "inferred" \
+            "$("$classify" verdict "$nv" 0 "$b" "$a")"
+        # An Intel node opened during the runs with zero counters is idle too.
+        rm -rf "$b" "$a"; fdinfo "$b" 3 ""; fdinfo "$a" 3 ""
+        fdinfo "$a" 6 "$intel" $'drm-cycles-rcs:\t0' $'drm-total-cycles-rcs:\t7000'
+        expect "verdict: an Intel node opened during the runs with no work is idle" "idle" \
+            "$("$classify" verdict "$intel" 1 "$b" "$a")"
+        # A DRM descriptor whose driver keeps no counters leaves it inferred.
+        rm -rf "$a"; fdinfo "$a" 3 ""; fdinfo "$a" 6 "$intel"
+        expect "verdict: an open GPU without counters is only inferred" "inferred" \
+            "$("$classify" verdict "$intel" 1 "$b" "$a")"
+        rm -rf "$b" "$a"; fdinfo "$b" 3 ""; fdinfo "$a" 3 ""
+        expect "verdict: an Intel GPU never opened is 'not opened'" "not opened" "$("$classify" verdict "$intel" 1 "$b" "$a")"
+        expect "verdict: an NVIDIA GPU never opened is only inferred" "inferred" "$("$classify" verdict "$nv" 0 "$b" "$a")"
+        expect "verdict: no PCI address leaves the GPU inferred" "inferred" "$("$classify" verdict "" 1 "$b" "$a")"
+        expect "verdict: a missing fdinfo directory is not opened for Intel" "not opened" \
+            "$("$classify" verdict "$intel" 1 "$tmp/none" "$tmp/none")"
     else
         fail "smoke.c classifier test build does not compile against $hdr"
     fi

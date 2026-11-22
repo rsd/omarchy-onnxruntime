@@ -10,7 +10,8 @@
 # library covered by a depend on a name its owner provides; a depend met by a
 # virtual provision; a non-ELF *.so skipped; $ORIGIN in a RUNPATH; a
 # needed libdnnl is a DNNL flag whoever owns it, the package's own copy
-# included (oneDNN must be linked statically).
+# included (oneDNN must be linked statically); a needed libwebgpu_dawn or
+# libdawn* is a DAWN flag the same way (Dawn must be linked statically).
 # It queries the real pacman and ldconfig (read-only) and needs gcc, zlib
 # installed and pacman's vercmp; without them it says so and skips.
 # Usage: scripts/tests/check-deps-test.sh. Exits non-zero on any failure.
@@ -97,7 +98,7 @@ has() { grep -qE -- "$1" <<<"$out"; }
 covered=$(pack fx-zlib-user 1-1 libfxz.so.1 -- glibc "$zlib_owner")
 check "$covered"
 if ((status == 0)) && has "libfxz\.so\.1 +libz\.so\.1 +/usr/lib/libz\.so\.1 +$zlib_owner .*ok \($zlib_owner\)" &&
-    has 'libc\.so\.6 .* glibc .*ok \(glibc\)' && has 'no gaps, unresolved libraries, bound violations or shared libdnnl'; then
+    has 'libc\.so\.6 .* glibc .*ok \(glibc\)' && has 'no gaps, unresolved libraries, bound violations, shared libdnnl or shared Dawn'; then
     ok "every needed library covered by a depend: exit 0"
 else
     fail "covered (exit $status): $out"
@@ -239,6 +240,29 @@ static_dnnl=$(pack fx-provider-static 1-1 libfxdep.so.1 -- glibc)
 check "$static_dnnl"
 if ((status == 0)) && ! has 'DNNL'; then ok "no libdnnl needed: no DNNL flag"; else
     fail "no libdnnl (exit $status): $out"; fi
+
+# A shared Dawn, the same way: stand-ins libwebgpu_dawn.so (the soname of
+# Dawn's monolithic shared library) and libdawn_proc.so shipped in the
+# provider's own package and needed by its library, each flagged: the
+# WebGPU provider links Dawn statically.
+printf 'int wgpuCreateInstance(void) { return 1; }\n' >"$tmp/src/fxdawn.c"
+printf 'int dawnProcSetProcs(void) { return 1; }\n' >"$tmp/src/fxdawnproc.c"
+printf 'int wgpuCreateInstance(void);\nint dawnProcSetProcs(void);\nint fxw(void) { return wgpuCreateInstance() + dawnProcSetProcs(); }\n' >"$tmp/src/fxw.c"
+build "$tmp/libwebgpu_dawn.so" libwebgpu_dawn.so "$tmp/src/fxdawn.c"
+build "$tmp/libdawn_proc.so" libdawn_proc.so "$tmp/src/fxdawnproc.c"
+build "$tmp/libfxw.so" libfxw.so "$tmp/src/fxw.c" -L"$tmp" -l:libwebgpu_dawn.so -l:libdawn_proc.so
+shared_dawn=$(pack fx-provider-webgpu 1-1 libfxw.so libwebgpu_dawn.so libdawn_proc.so -- glibc)
+check "$shared_dawn"
+if ((status == 1)) && has 'libfxw\.so +libwebgpu_dawn\.so .*DAWN \(Dawn must be linked statically\)' &&
+    has 'libfxw\.so +libdawn_proc\.so .*DAWN \(Dawn must be linked statically\)' &&
+    has 'flagged: 0 GAP, 0 UNRESOLVED, 0 BOUND, 0 MISSING, 0 DNNL, 2 DAWN'; then
+    ok "a needed libwebgpu_dawn or libdawn*, even the package's own, is a DAWN flag: exit 1"
+else
+    fail "shared Dawn (exit $status): $out"
+fi
+check "$static_dnnl"
+if ((status == 0)) && ! has 'DAWN \('; then ok "no Dawn library needed: no DAWN flag"; else
+    fail "no Dawn library (exit $status): $out"; fi
 
 check
 if ((status == 2)) && has 'scripts/check-deps.sh <package file>'; then ok "no arguments: usage, exit 2"; else

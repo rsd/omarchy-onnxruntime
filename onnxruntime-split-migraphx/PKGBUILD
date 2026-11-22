@@ -6,8 +6,9 @@
 #
 # ONNX Runtime built from upstream source at a pinned release, with every
 # execution provider this kind of machine can use in one installation: CPU,
-# CUDA, TensorRT, OpenVINO (its CPU, Intel GPU and Intel NPU devices) and
-# oneDNN (CPU), and the training ops; MIGraphX (AMD GPUs) in a pkgbase of
+# CUDA, TensorRT, OpenVINO (its CPU, Intel GPU and Intel NPU devices),
+# oneDNN (CPU) and WebGPU (any GPU with a Vulkan driver), and the training
+# ops; MIGraphX (AMD GPUs) in a pkgbase of
 # its own, onnxruntime-split-migraphx (below), untested on AMD hardware.
 # Arch's own variants each carry one GPU vendor and no TensorRT or
 # OpenVINO. It replaces them, never sits beside them: every one installs
@@ -24,6 +25,10 @@
 #   onnxruntime-provider-dnnl               the oneDNN provider (CPU), with
 #                                           oneDNN built from source and
 #                                           linked in statically
+#   onnxruntime-provider-webgpu             the WebGPU provider (any GPU
+#                                           with a Vulkan driver), a plugin
+#                                           provider, with Dawn built from
+#                                           source and linked in statically
 #   onnxruntime-provider-migraphx           the MIGraphX provider (AMD GPUs;
 #                                           only with migraphx in ORTF_EPS;
 #                                           shipped by onnxruntime-split-
@@ -82,6 +87,30 @@
 # pointer to an int on the Python module's stack, and from Python the
 # provider crashed or asked libgomp for hundreds of GB
 # (_ortf_patch_dnnl_threadpool_args).
+#
+# The WebGPU package (onnxruntime-provider-webgpu) is a plugin execution
+# provider, upstream's --use_webgpu shared_lib (onnxruntime_USE_WEBGPU with
+# onnxruntime_USE_EP_API_ADAPTERS): an application registers its library
+# with RegisterExecutionProviderLibrary and appends one of the devices
+# GetEpDevices lists, instead of naming the provider as it names the
+# others, and the Python module's providers=["WebGpuExecutionProvider"]
+# does not reach it (_ortf_patch_pybind_webgpu). It runs on Dawn, Google's
+# WebGPU implementation, over Vulkan, so it reaches any GPU with a Vulkan
+# driver: Mesa's for Intel and AMD graphics, NVIDIA's own. Dawn is the
+# release cmake/deps.txt pins (_ortf_dawn_tag), in the dependency mirror
+# like the other pinned sources and patched by ONNX Runtime's own
+# patches; it is built static into libonnxruntime_providers_webgpu.so,
+# with Tint, its shader compiler, and the library opens the Vulkan loader
+# (vulkan-icd-loader) at run time: no libdawn of its own. Dawn would
+# git-clone its own dependencies at configure time; here they are Arch's
+# packages, build inputs only (_ortf_patch_dawn): SPIRV-Headers,
+# SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-Libraries for their
+# headers and CMake targets, and Python's jinja2 and markupsafe for Dawn's
+# code generators. Abseil is ONNX Runtime's own, already in the build.
+# The licence directory has Dawn's LICENSE (BSD-3-Clause, Tint's too)
+# and the licences of the Arch headers compiled in, SPIRV-Headers' (MIT)
+# and Vulkan-Headers' (MIT), from Arch's packages
+# (package_onnxruntime-provider-webgpu).
 #
 # Training: onnxruntime_ENABLE_TRAINING=ON (build()), as Arch builds, for
 # every line. Its CUDA kernels call cuDNN's backward functions directly, so
@@ -235,7 +264,7 @@
 # package: <name>-bin provides <name>=<pkgver>-<pkgrel> and conflicts with
 # <name>, and provides (and conflicts with) the plain virtual names <name>
 # provides, at the same versions (onnxruntime-provider-cuda13-rtx-bin:
-# provides onnxruntime-provider-cuda13-rtx=1.29.0-7,
+# provides onnxruntime-provider-cuda13-rtx=1.29.0-8,
 # onnxruntime-provider-cuda=1.29.0 and onnxruntime-provider-cuda13=1.29.0).
 # Every dependency between the packages is therefore on a name such a
 # package provides: on onnxruntime-core=<pkgver>-<pkgrel> (the providers
@@ -360,7 +389,7 @@
 # would not under `makepkg -e` or `-R` with another environment, or after a
 # CUDA upgrade), and says what to pass. Every other field of `makepkg
 # --printsrcinfo` is the same for any inputs, but the source fields
-# (ORTF_SOURCE), makedepends, one optdepend and the NCCL fields: with tensorrt
+# (ORTF_SOURCE), makedepends, two optdepends and the NCCL fields: with tensorrt
 # in ORTF_EPS makedepends has tensorrt, with migraphx migraphx and
 # hip-runtime-amd (no other build pulls in ROCm); with NCCL (ORTF_NCCL=1) it
 # has the build's NCCL (nccl; nccl-cuda12.9 in the cuda12 line; rccl in the
@@ -370,14 +399,18 @@
 # -nccloff packages provide and conflict with their base names and depend on
 # onnxruntime-core-nccloff; and onnxruntime-core's and
 # python-onnxruntime-core's optdepends name onnxruntime-provider-dnnl only
-# when ORTF_EPS has dnnl (onnxruntime-provider-migraphx always, the MIGraphX
-# line's package).
+# when ORTF_EPS has dnnl, and onnxruntime-provider-webgpu only when it has
+# webgpu (onnxruntime-provider-migraphx always, the MIGraphX line's
+# package).
 #   ORTF_EPS           execution providers, space- or comma-separated, from
-#                      cuda, tensorrt, openvino, dnnl, migraphx; or `cpu`
-#                      alone for a CPU-only build (default: "cuda tensorrt
-#                      openvino dnnl", _ortf_default_eps).
+#                      cuda, tensorrt, openvino, dnnl, webgpu, migraphx; or
+#                      `cpu` alone for a CPU-only build (default: "cuda
+#                      tensorrt openvino dnnl webgpu", _ortf_default_eps).
 #                      tensorrt needs cuda; dnnl (oneDNN, CPU) needs no
-#                      vendor install; migraphx (AMD GPUs, untested on
+#                      vendor install, nor does webgpu (WebGPU over Vulkan,
+#                      Dawn built from its source archive; Arch's Vulkan
+#                      and SPIR-V headers at build time, makedepends of
+#                      every build); migraphx (AMD GPUs, untested on
 #                      AMD hardware) stands alone or joins the others
 #                      (untested together). The CPU provider is always
 #                      built.
@@ -493,6 +526,12 @@
 #                                     # the Python package) only
 #   ORTF_EPS=dnnl ORTF_NCCL=0 makepkg -d -f
 #                                     # CPU only, with the oneDNN provider
+#   ORTF_EPS=webgpu ORTF_NCCL=0 ORTF_PYTHON=0 makepkg -d -f
+#                                     # the WebGPU provider alone, a
+#                                     # recipe check: makes
+#                                     # onnxruntime-core-nccloff and
+#                                     # onnxruntime-provider-webgpu-nccloff
+#                                     # (no NCCL without cuda)
 #   ORTF_EPS=migraphx ORTF_NCCL=0 makepkg -d -f
 #                                     # AMD GPUs only, a local build (the
 #                                     # published one is the MIGraphX
@@ -507,7 +546,7 @@
 #                                     # hip-runtime-amd first, and -d skips
 #                                     # the check (prepare() still checks
 #                                     # the ROCm install)
-#   ORTF_EPS='cuda tensorrt openvino dnnl migraphx' MAKEFLAGS=-j8 makepkg -s -f
+#   ORTF_EPS='cuda tensorrt openvino dnnl webgpu migraphx' MAKEFLAGS=-j8 makepkg -s -f
 #                                     # every provider (untested together)
 #   ORTF_SOURCE=upstream MAKEFLAGS=-j8 makepkg -f
 #                                     # from the git tag of
@@ -525,21 +564,22 @@
 # A clean chroot has no TensorRT package in its repositories: the AUR's
 # tensorrt is built first and handed over (makechrootpkg -I).
 # Install the packages of one build with one pacman transaction, naming
-# its files: a glob such as ./*onnxruntime-*-1.29.0-7-* also picks up the
+# its files: a glob such as ./*onnxruntime-*-1.29.0-8-* also picks up the
 # packages an earlier build with other inputs left in this directory (e.g.
 # onnxruntime-provider-cuda13-sm120 beside -cuda13-rtx, which conflict, and
 # the transaction fails). makepkg writes them as
-# <name>-1.29.0-7-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
+# <name>-1.29.0-8-x86_64<PKGEXT>, PKGEXT from /etc/makepkg.conf
 # (.pkg.tar.zst on Arch); PKGDEST=/an/empty/directory makepkg ... keeps one
 # build's packages apart. For the default build:
-#   sudo pacman -U onnxruntime-core-1.29.0-7-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-cuda13-rtx-1.29.0-7-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-tensorrt-cuda13-1.29.0-7-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-openvino-1.29.0-7-x86_64.pkg.tar.zst \
-#     onnxruntime-provider-dnnl-1.29.0-7-x86_64.pkg.tar.zst \
-#     python-onnxruntime-core-1.29.0-7-x86_64.pkg.tar.zst
+#   sudo pacman -U onnxruntime-core-1.29.0-8-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-cuda13-rtx-1.29.0-8-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-tensorrt-cuda13-1.29.0-8-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-openvino-1.29.0-8-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-dnnl-1.29.0-8-x86_64.pkg.tar.zst \
+#     onnxruntime-provider-webgpu-1.29.0-8-x86_64.pkg.tar.zst \
+#     python-onnxruntime-core-1.29.0-8-x86_64.pkg.tar.zst
 # (with migraphx in ORTF_EPS, also
-# onnxruntime-provider-migraphx-1.29.0-7-x86_64.pkg.tar.zst).
+# onnxruntime-provider-migraphx-1.29.0-8-x86_64.pkg.tar.zst).
 # Upgrading from 1.29.0-1, the single onnxruntime-full (and its
 # python-onnxruntime-full) of this recipe's first, unsplit version:
 # onnxruntime-core has replaces=(onnxruntime-full) and
@@ -607,6 +647,19 @@ _ortf_rocm_home=/opt/rocm
 _ortf_cudnn_home=/usr
 _ortf_nccl_home=/usr
 _ortf_openvino_cmake_dir=/usr/lib/cmake
+# The prefix of Arch's spirv-headers, spirv-tools, vulkan-headers and
+# vulkan-utility-libraries, whose CMake packages Dawn builds against
+# (_ortf_patch_dawn), and those packages' config files under it, each with
+# the Arch package that installs it. prepare() checks that each is there
+# (_ortf_resolve) and build() points CMake's <name>_DIR at its directory
+# (<name> from <name>Config.cmake), so the files checked are the ones used.
+_ortf_webgpu_prefix=/usr
+_ortf_webgpu_configs=(
+  share/cmake/SPIRV-Headers/SPIRV-HeadersConfig.cmake:spirv-headers
+  lib/cmake/SPIRV-Tools/SPIRV-ToolsConfig.cmake:spirv-tools
+  share/cmake/VulkanHeaders/VulkanHeadersConfig.cmake:vulkan-headers
+  lib/cmake/VulkanUtilityLibraries/VulkanUtilityLibrariesConfig.cmake:vulkan-utility-libraries
+)
 _ortf_tensorrt_default=/opt/nvidia/tensorrt
 # Where the AUR's tensorrt installs, and the TensorRT root looked in when
 # the default one has no headers.
@@ -757,6 +810,7 @@ _ortf_pkgnames() {
     [[ $eps != *' tensorrt '* ]] || names+=" onnxruntime-provider-tensorrt-cuda$4"
     [[ $eps != *' openvino '* ]] || names+=" onnxruntime-provider-openvino"
     [[ $eps != *' dnnl '* ]] || names+=" onnxruntime-provider-dnnl"
+    [[ $eps != *' webgpu '* ]] || names+=" onnxruntime-provider-webgpu"
     [[ $eps != *' migraphx '* ]] || names+=" onnxruntime-provider-migraphx"
     [[ $3 == 0 ]] || names+=" python-onnxruntime-core"
   fi
@@ -842,7 +896,13 @@ pkgver=1.29.0
 # RUNPATH is $ORIGIN again (no build path); the add-on's licence
 # directory is a link; package() fails on a library with an undefined
 # symbol (_ortf_check_symbols) or a build path in its RUNPATH
-# (_ortf_check_runpaths). 7 stays 7: no package of 7 was released.
+# (_ortf_check_runpaths). Those came before 7 was released, and are in its
+# packages (tag v1.29.0-7); the first build's packages never were.
+# 8: adds onnxruntime-provider-webgpu (the WebGPU plugin provider, Dawn
+# and Tint static) to the default build; libonnxruntime.so and the Python
+# module are built with onnxruntime_USE_WEBGPU and
+# onnxruntime_USE_EP_API_ADAPTERS, and Dawn's archive joins the dependency
+# mirror. The provider bridge is unchanged: _ortf_core_abi_pkgrel stays 7.
 # onnxruntime-split-migraphx's own pkgrel (scripts/gen-migraphx.sh); the
 # notes above are those of onnxruntime-split's.
 pkgrel=1
@@ -918,7 +978,11 @@ url='https://onnxruntime.ai'
 # (BSL-1.0); Eigen, built MPL2-only (MPL-2.0); date, nlohmann json, GSL,
 # SafeInt, cudnn-frontend (MIT). Their notices are in ThirdPartyNotices.txt,
 # but cudnn-frontend's, which the CUDA package carries itself
-# (_ortf_cudnn_frontend_license). Every package's licence directory also
+# (_ortf_cudnn_frontend_license). The WebGPU provider also compiles in
+# Dawn and Tint (BSD-3-Clause), SPIRV-Headers (MIT), Vulkan-Headers
+# (Apache-2.0 OR MIT) and Vulkan-Utility-Libraries (Apache-2.0); the WebGPU
+# package carries their licences (package_onnxruntime-provider-webgpu).
+# Every package's licence directory also
 # holds one licence text of each identifier here that Arch does not ship in
 # /usr/share/licenses/spdx (namcap's licensepkg rule wants a file for each
 # of MIT, BSD-2-Clause and BSD-3-Clause): ONNX Runtime's LICENSE (MIT),
@@ -969,6 +1033,16 @@ if [[ -z $_ortf_nccl_sfx && $_ortf_line != migraphx ]]; then
   makedepends+=("$_ortf_nccl_pkg")
 fi
 [[ $_ortf_line != main ]] || makedepends+=('openvino')
+# Dawn's build inputs (webgpu in ORTF_EPS), Arch's packages in place of the
+# git clones Dawn would fetch at configure time (_ortf_patch_dawn): the
+# headers and CMake targets of SPIRV-Headers, SPIRV-Tools, Vulkan-Headers
+# and Vulkan-Utility-Libraries, and jinja2 and markupsafe for Dawn's code
+# generators. Small, and in Arch's repositories: for every build of the
+# main line, as openvino. None is a run-time dependency (the provider
+# links none of their libraries, _ortf_check_libs).
+[[ $_ortf_line != main ]] ||
+  makedepends+=('python-jinja' 'python-markupsafe' 'spirv-headers' 'spirv-tools' 'vulkan-headers'
+    'vulkan-utility-libraries')
 # ROCm only when ORTF_EPS (from the environment, as for pkgname: the names
 # it gave above) selects migraphx: its install runs to GiB, and no other
 # build needs it. migraphx
@@ -992,8 +1066,9 @@ fi
 ! _ortf_makes "onnxruntime-provider-tensorrt-cuda$_ortf_cuda_major" || makedepends+=('tensorrt')
 # The provider packages, by the names they provide (whatever their CUDA
 # architectures), for onnxruntime-core's and python-onnxruntime-core's
-# optdepends. onnxruntime-provider-dnnl only when the names have it, as
-# the build that makes onnxruntime-core makes it too (by default).
+# optdepends. onnxruntime-provider-dnnl and onnxruntime-provider-webgpu
+# only when the names have them, as the build that makes onnxruntime-core
+# makes them too (by default).
 # onnxruntime-provider-migraphx always: the AUR pkgbase
 # onnxruntime-split-migraphx makes it for any core of this pkgver from
 # _ortf_core_abi_pkgrel (as does a build with migraphx in ORTF_EPS). A
@@ -1007,6 +1082,8 @@ _ortf_provider_optdepends=(
 )
 ! _ortf_makes onnxruntime-provider-dnnl ||
   _ortf_provider_optdepends+=('onnxruntime-provider-dnnl: the oneDNN execution provider (CPU)')
+! _ortf_makes onnxruntime-provider-webgpu ||
+  _ortf_provider_optdepends+=('onnxruntime-provider-webgpu: the WebGPU execution provider (GPUs with a Vulkan driver; a plugin provider)')
 _ortf_provider_optdepends+=('onnxruntime-provider-migraphx: the MIGraphX execution provider (AMD GPUs; AUR pkgbase onnxruntime-split-migraphx, untested on AMD hardware)')
 # _ortf_mgx_pylink: whether the MIGraphX package itself links its library
 # into the Python module's capi directory (package_onnxruntime-provider-
@@ -1073,14 +1150,22 @@ fi
 # libraries' version scripts. prepare() checks each URL and SHA-1 against
 # deps.txt, so a version bump that misses one fails there. Not mirrored, as
 # this build does not use them: the unit-test, benchmark, XNNPACK, CoreML,
-# WebGPU, DirectML, telemetry and Arm dependencies, and onnx_tensorrt (the
-# TensorRT provider uses TensorRT's own ONNX parser). The training ops
-# (onnxruntime_ENABLE_TRAINING, build()) add two: cxxopts and tensorboard
-# (whose event protos are compiled into libonnxruntime.so).
+# DirectML (and DirectX-Headers), telemetry and Arm dependencies, and
+# onnx_tensorrt (the TensorRT provider uses TensorRT's own ONNX parser).
+# The training ops (onnxruntime_ENABLE_TRAINING, build()) add two: cxxopts
+# and tensorboard (whose event protos are compiled into libonnxruntime.so).
 _ortf_deps=(
   abseil_cpp re2 protobuf date mp11 json pytorch_cpuinfo microsoft_gsl safeint
   flatbuffers onnx eigen dlpack pybind11 cutlass cudnn_frontend cxxopts tensorboard
 )
+# The WebGPU provider adds dawn, Google's WebGPU implementation, whose own
+# dependencies are Arch's packages (makedepends, _ortf_patch_dawn). The
+# main line's only (its source and checksum below): the cuda12 and
+# migraphx lines build no WebGPU provider, and nothing there reads Dawn.
+[[ $_ortf_line != main ]] || _ortf_deps+=(dawn)
+# The Dawn release of cmake/deps.txt (the tag of google/dawn): 91.2 MiB,
+# the largest archive of the mirror.
+_ortf_dawn_tag=v20260714.215939
 # oneDNN, which the oneDNN provider (dnnl in ORTF_EPS) links statically: not
 # in cmake/deps.txt (upstream clones oneDNN 3.0.1 from git in
 # cmake/external/dnnl.cmake, which prepare() points at this archive
@@ -1141,6 +1226,11 @@ b2sums=("$_ortf_tree_b2sum"
         'b6318baf652ee118153752c3b83f175691b35c28a5aee449ae61086bfb44f85f4507b5a24af23e40af917c962235f2430f0f99226439a21e6406365bfb6405dd'
         '8e68d4e22e46026c303526f3ced8b53751264aeb9af04eaead40230553f768d8c84ec0042a5366387d978dc8c7f594b965bd178437cf66b68ad75074b7ab7045'
         'e1bd2db15056f1a2740860659b0d96e8200f9367989f05d09e1d9e2c4abf7967821e25afed293db3e867170ac3a682133b4388b2841606f51cdf6081af7a6f59')
+# Dawn's archive, in the main line (_ortf_deps), after the others.
+if [[ $_ortf_line == main ]]; then
+  source+=("ortf-dep-dawn.zip::https://github.com/google/dawn/archive/refs/tags/$_ortf_dawn_tag.zip")
+  b2sums+=('6619f7eb24ea05fca4814cb2868558e3e19b74c0b88df9c24724082bbfab5cbf411afa3bc6cff00be6fc4971f041bd9bec4e1098eea3ae711e160d970d6fd2f4')
+fi
 
 # _ortf_lib_pkg <soname> <tensorrt package>: prints the package that
 # provides the library <soname> on Arch; nothing when it is not mapped.
@@ -1241,6 +1331,14 @@ _ortf_lib_depends() {
     # which the package does not depend on.
     if [[ $soname == libdnnl.so* ]]; then
       echo "$label: $soname: oneDNN must be linked statically (ONEDNN_LIBRARY_TYPE=STATIC, _ortf_patch_dnnl), not as a shared library" >&2
+      bad=1
+      continue
+    fi
+    # Dawn likewise into the WebGPU provider (dawn_native, dawn_proc): a
+    # shared Dawn (onnxruntime_BUILD_DAWN_SHARED_LIBRARY) would be a
+    # library of this build's that no package installs.
+    if [[ $soname == libwebgpu_dawn.so* || $soname == libdawn*.so* ]]; then
+      echo "$label: $soname: Dawn must be linked statically into the WebGPU provider, not as a shared library" >&2
       bad=1
       continue
     fi
@@ -1474,9 +1572,10 @@ _ortf_jobs() {
 _ortf_resolve() {
   local out=$1 _ortf_val _ortf_src w
   local -a words lines=()
-  local cpu=0 cuda=0 trt=0 ov=0 dnnl=0 mgx=0 eps archs='' python=0 python_exe='' nvcc_threads ccache='' jobs
+  local cpu=0 cuda=0 trt=0 ov=0 dnnl=0 wgpu=0 mgx=0 eps archs='' python=0 python_exe='' nvcc_threads ccache='' jobs
   local trt_home='' trt_libdir='' host_cxx='' cuda_major='' cudnn_major='' cudnn_src nvcc_out cudnn_version
   local trt_version='' trt_installed='' ov_version='' python_version='' bounds rc
+  local spirv_version='' vulkan_version=''
   local mgx_version='' hip_version='' mgx_soname='' hip_soname='' cudnn_minor=''
   local nccl=0 nccl_src nccl_lib='' tree
 
@@ -1501,7 +1600,7 @@ _ortf_resolve() {
   _ortf_pick ORTF_EPS "$_ortf_default_eps" _ortf_default_eps
   read -ra words <<<"${_ortf_val//,/ }"
   if ((${#words[@]} == 0)); then
-    echo "ORTF_EPS: empty; give cpu, or some of cuda, tensorrt, openvino, dnnl, migraphx" >&2
+    echo "ORTF_EPS: empty; give cpu, or some of cuda, tensorrt, openvino, dnnl, webgpu, migraphx" >&2
     return 1
   fi
   for w in "${words[@]}"; do
@@ -1512,13 +1611,16 @@ _ortf_resolve() {
       openvino) ov=1 ;;
       # oneDNN, built from ortf-dep-onednn.zip: no vendor install.
       dnnl) dnnl=1 ;;
+      # WebGPU over Vulkan, Dawn built from ortf-dep-dawn.zip: no vendor
+      # install, Arch's headers only.
+      webgpu) wgpu=1 ;;
       # Alone or with the others: nothing in ONNX Runtime's CMake excludes
       # the combination (untested together, and on AMD hardware).
       migraphx) mgx=1 ;;
-      *) echo "ORTF_EPS: unknown provider '$w' (known: cpu, cuda, tensorrt, openvino, dnnl, migraphx)" >&2; return 1 ;;
+      *) echo "ORTF_EPS: unknown provider '$w' (known: cpu, cuda, tensorrt, openvino, dnnl, webgpu, migraphx)" >&2; return 1 ;;
     esac
   done
-  if ((cpu && cuda + trt + ov + dnnl + mgx > 0)); then
+  if ((cpu && cuda + trt + ov + dnnl + wgpu + mgx > 0)); then
     echo "ORTF_EPS: cpu stands alone (the CPU provider is always built); drop it or the others" >&2
     return 1
   fi
@@ -1532,6 +1634,7 @@ _ortf_resolve() {
   ((trt)) && eps+=' tensorrt'
   ((ov)) && eps+=' openvino'
   ((dnnl)) && eps+=' dnnl'
+  ((wgpu)) && eps+=' webgpu'
   ((mgx)) && eps+=' migraphx'
   eps=${eps# }
   # The cuda12 line has one package, the CUDA one: another provider would
@@ -1797,6 +1900,37 @@ _ortf_resolve() {
     lines+=("dnnl: oneDNN $_ortf_onednn_version from ortf-dep-onednn.zip, built static into the provider (OpenMP runtime: libgomp)")
   fi
 
+  if ((wgpu)); then
+    # The CMake packages of Arch's spirv-headers, spirv-tools, vulkan-headers
+    # and vulkan-utility-libraries, whose targets stand in for the copies
+    # Dawn would clone (_ortf_patch_dawn); makepkg -d skips the makedepends
+    # check, so a missing one is named here rather than in CMake's error.
+    for w in "${_ortf_webgpu_configs[@]}"; do
+      if [[ ! -f $_ortf_webgpu_prefix/${w%%:*} ]]; then
+        echo "webgpu: no $_ortf_webgpu_prefix/${w%%:*} (install ${w##*:})" >&2
+        return 1
+      fi
+    done
+    # Dawn's code generators run with the system python (build(),
+    # Python3_EXECUTABLE) and import Arch's jinja2 and markupsafe; without
+    # them configure would fail deep in Dawn's CMake.
+    if ! "$_ortf_system_python" -I -c 'import jinja2, markupsafe' >/dev/null 2>&1; then
+      echo "webgpu: $_ortf_system_python cannot import jinja2 and markupsafe, which Dawn's code generators need (install python-jinja and python-markupsafe)" >&2
+      return 1
+    fi
+    # The versions of the headers compiled into the provider, for the
+    # record (no run-time dependency follows from them).
+    if ! spirv_version=$(_ortf_installed_version spirv-headers) || [[ -z $spirv_version ]]; then
+      echo "webgpu: no version recorded for spirv-headers (pacman -Qi spirv-headers gives none), whose headers the WebGPU provider compiles in: install Arch's spirv-headers" >&2
+      return 1
+    fi
+    if ! vulkan_version=$(_ortf_installed_version vulkan-headers) || [[ -z $vulkan_version ]]; then
+      echo "webgpu: no version recorded for vulkan-headers (pacman -Qi vulkan-headers gives none), whose headers the WebGPU provider compiles in: install Arch's vulkan-headers" >&2
+      return 1
+    fi
+    lines+=("webgpu: Dawn $_ortf_dawn_tag from ortf-dep-dawn.zip, built static into the provider (Vulkan backend); SPIRV-Headers, SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-Libraries from $_ortf_webgpu_prefix (spirv-headers $spirv_version, vulkan-headers $vulkan_version installed); jinja2 and markupsafe for $_ortf_system_python")
+  fi
+
   if ((mgx)); then
     # The CMake packages the provider's find_package(hip) and
     # find_package(migraphx) look for under the ROCm root.
@@ -1912,6 +2046,8 @@ _ortf_resolve() {
     printf 'ORTF_TENSORRT_LIBDIR=%s\n' "$trt_libdir"
     printf 'ORTF_TENSORRT_VERSION=%s\n' "$trt_version"
     printf 'ORTF_OPENVINO_VERSION=%s\n' "$ov_version"
+    printf 'ORTF_SPIRV_HEADERS_VERSION=%s\n' "$spirv_version"
+    printf 'ORTF_VULKAN_HEADERS_VERSION=%s\n' "$vulkan_version"
     printf 'ORTF_MIGRAPHX_VERSION=%s\n' "$mgx_version"
     printf 'ORTF_HIP_VERSION=%s\n' "$hip_version"
     printf 'ORTF_MIGRAPHX_SONAME_MAJOR=%s\n' "$mgx_soname"
@@ -2754,6 +2890,105 @@ _ortf_patch_git_info() {
   set(ORT_GIT_BRANCH \"makepkg\")"
 }
 
+# _ortf_patch_dawn <cmake/external/onnxruntime_external_deps.cmake>: Dawn,
+# for the WebGPU provider, without network at configure time. Upstream
+# fetches Dawn's archive with FetchContent (the dependency mirror has it,
+# ortf-dep-dawn.zip), applies its own patches to it (cmake/patches/dawn/,
+# and removes its test/ tree), and sets DAWN_FETCH_DEPENDENCIES, with which
+# Dawn's CMake runs tools/fetch_dawn_dependencies.py: git clones from
+# chromium.googlesource.com of its whole dependency list, whatever the
+# options, that no makepkg source covers. Here that is off, and what
+# Dawn's third_party/CMakeLists.txt would add from the clones (each behind
+# an `if(NOT TARGET <name>)`) is already a target: Arch's CMake packages
+# of SPIRV-Headers, SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-
+# Libraries (makedepends), found GLOBAL so that the provider's own link
+# step sees them too; SPIRV-Headers, the name Dawn and Tint use, is an
+# alias of Arch's SPIRV-Headers::SPIRV-Headers. Of SPIRV-Tools, Tint's
+# SPIR-V writer needs the target to exist, and links none of its
+# libraries (_ortf_check_libs would fail on a libSPIRV-Tools NEEDED entry,
+# which maps to no package). Abseil is ONNX Runtime's (absl::strings is a
+# target already), and glslang, Vulkan-Loader, webgpu-headers, DXC, GLFW,
+# protobuf and googletest are unused with upstream's options. jinja2 and
+# markupsafe are the Python's that runs Dawn's generators
+# (Python3_EXECUTABLE, build()): their directories empty, Dawn's
+# generator/CMakeLists.txt takes the "system jinja2" branch (its defaults
+# name the clones). Upstream's patch path stays, unlike with
+# onnxruntime_CUSTOM_DAWN_SRC_PATH, which turns the fetching off but
+# skips the patches. The one upstream text it replaces must be there
+# exactly once, or it fails and leaves the file untouched
+# (_ortf_patch_exact).
+_ortf_patch_dawn() {
+  _ortf_patch_exact _ortf_patch_dawn "$1" \
+    '      set(DAWN_FETCH_DEPENDENCIES ON CACHE BOOL "" FORCE)' \
+    '      # omarchy-onnxruntime (onnxruntime-split/PKGBUILD, _ortf_patch_dawn):
+      # no git clones at configure time; Dawn'"'"'s dependencies are Arch'"'"'s
+      # packages, under the target names Dawn checks before it adds its own.
+      set(DAWN_FETCH_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+      find_package(SPIRV-Headers CONFIG REQUIRED GLOBAL)
+      find_package(SPIRV-Tools CONFIG REQUIRED GLOBAL)
+      find_package(VulkanHeaders CONFIG REQUIRED GLOBAL)
+      find_package(VulkanUtilityLibraries CONFIG REQUIRED GLOBAL)
+      if(NOT TARGET SPIRV-Headers)
+        add_library(SPIRV-Headers INTERFACE IMPORTED GLOBAL)
+        target_link_libraries(SPIRV-Headers INTERFACE SPIRV-Headers::SPIRV-Headers)
+      endif()
+      set(DAWN_JINJA2_DIR "")
+      set(DAWN_MARKUPSAFE_DIR "")'
+}
+
+# _ortf_patch_webgpu_install <cmake/onnxruntime_providers_webgpu.cmake>:
+# installs the WebGPU plugin provider's library,
+# libonnxruntime_providers_webgpu.so, into the library directory, beside
+# libonnxruntime.so, as every other provider's is. Upstream installs the
+# provider only in a static build (onnxruntime_BUILD_SHARED_LIB off, where
+# it is a static library linked into libonnxruntime), so in this build it
+# would stay in the build tree and miss the stage the packages copy from
+# (_ortf_stage). Upstream's rule stays, as the branch for a static build
+# without the plugin. The one upstream text it replaces must be there
+# exactly once, or it fails and leaves the file untouched
+# (_ortf_patch_exact).
+# shellcheck disable=SC2016 # CMake's ${...}, not the shell's
+_ortf_patch_webgpu_install() {
+  _ortf_patch_exact _ortf_patch_webgpu_install "$1" \
+    '  if (NOT onnxruntime_BUILD_SHARED_LIB)
+    install(TARGETS onnxruntime_providers_webgpu EXPORT ${PROJECT_NAME}Targets' \
+    '  # omarchy-onnxruntime (onnxruntime-split/PKGBUILD, _ortf_patch_webgpu_install):
+  # the plugin library goes beside libonnxruntime.so, as the other
+  # providers do.
+  if (onnxruntime_USE_EP_API_ADAPTERS)
+    install(TARGETS onnxruntime_providers_webgpu
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  elseif (NOT onnxruntime_BUILD_SHARED_LIB)
+    install(TARGETS onnxruntime_providers_webgpu EXPORT ${PROJECT_NAME}Targets'
+}
+
+# _ortf_patch_pybind_webgpu <onnxruntime/python/onnxruntime_pybind_state.cc>:
+# the Python module of a build with the WebGPU plugin provider. Every
+# target of such a build is compiled with USE_WEBGPU (cmake/CMakeLists.txt,
+# ORT_PROVIDER_FLAGS) and ORT_USE_EP_API_ADAPTERS, and the core leaves its
+# built-in WebGPU factory out under the latter (provider_registration.cc,
+# ort_env.cc). The module's CreateExecutionProviderFactoryInstance tests
+# USE_WEBGPU alone, and would call WebGpuProviderFactoryCreator::Create,
+# which only the plugin's own library defines (and keeps local, its
+# version script): the module would not load, "undefined symbol". Here it
+# tests both, as the core does, and the module then says, for
+# providers=["WebGpuExecutionProvider"], that the provider is not
+# available; the plugin is reached through
+# onnxruntime.register_execution_provider_library and get_ep_devices
+# (the top of the file). The one upstream text it replaces must be there
+# exactly once, or it fails and leaves the file untouched
+# (_ortf_patch_exact).
+_ortf_patch_pybind_webgpu() {
+  _ortf_patch_exact _ortf_patch_pybind_webgpu "$1" \
+    '  } else if (type == kWebGpuExecutionProvider) {
+#if defined(USE_WEBGPU)' \
+    '  } else if (type == kWebGpuExecutionProvider) {
+    // omarchy-onnxruntime (onnxruntime-split/PKGBUILD, _ortf_patch_pybind_webgpu):
+    // the WebGPU factory is the plugin library'"'"'s own in a build of the
+    // plugin provider (ORT_USE_EP_API_ADAPTERS), as in the core.
+#if defined(USE_WEBGPU) && !defined(ORT_USE_EP_API_ADAPTERS)'
+}
+
 prepare() {
   echo "ONNX Runtime build inputs:"
   _ortf_resolve "$srcdir/ortf.conf" || return 1
@@ -2818,6 +3053,14 @@ prepare() {
   # Python module.
   _ortf_patch_pybind_providers onnxruntime/python/_pybind_state.py.in || return 1
   echo "the Python module: get_available_providers lists MIGraphX when its provider library is in capi/ (_ortf_patch_pybind_providers)"
+  # Whatever ORTF_EPS is, as the oneDNN patch: these files are only read
+  # with webgpu in ORTF_EPS.
+  _ortf_patch_dawn cmake/external/onnxruntime_external_deps.cmake || return 1
+  echo "Dawn: no git clones; SPIRV-Headers, SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-Libraries from Arch's packages (_ortf_patch_dawn)"
+  _ortf_patch_webgpu_install cmake/onnxruntime_providers_webgpu.cmake || return 1
+  echo "the WebGPU provider: its plugin library is installed beside libonnxruntime.so (_ortf_patch_webgpu_install)"
+  _ortf_patch_pybind_webgpu onnxruntime/python/onnxruntime_pybind_state.cc || return 1
+  echo "the Python module: no built-in WebGPU factory with the plugin provider (_ortf_patch_pybind_webgpu)"
   # A fresh CMake build directory, so that a cache from other build inputs
   # is never reused (makepkg -e skips prepare() and continues a build).
   rm -rf -- "$srcdir/build" "$srcdir/dist" "$srcdir/stage"
@@ -2946,6 +3189,33 @@ build() {
     # oneDNN from its source archive, built static (_ortf_patch_dnnl).
     args+=(-Donnxruntime_USE_DNNL=ON -DORTF_DNNL_ARCHIVE="$srcdir/ortf-dep-onednn.zip")
   fi
+  if _ortf_has webgpu; then
+    # The plugin provider, upstream's --use_webgpu shared_lib: its own
+    # library, with Dawn (dawn_native, dawn_proc) linked in statically,
+    # never a shared Dawn (onnxruntime_BUILD_DAWN_SHARED_LIBRARY, which
+    # upstream refuses with the plugin). Linux's Dawn backend is Vulkan.
+    # Dawn's dependencies: _ortf_patch_dawn. Dawn's generators run with
+    # the system python, whose site-packages have Arch's jinja2 and
+    # markupsafe: Dawn finds its own Python3 (not the Python the module is
+    # built with), the first on PATH otherwise.
+    args+=(-Donnxruntime_USE_WEBGPU=ON -Donnxruntime_USE_EP_API_ADAPTERS=ON
+      -DPython3_EXECUTABLE="$_ortf_system_python")
+    # Arch's CMake packages that stand in for Dawn's clones, the ones
+    # prepare() checked (_ortf_webgpu_configs).
+    local cfg name
+    for cfg in "${_ortf_webgpu_configs[@]}"; do
+      cfg=${cfg%%:*} name=${cfg##*/}
+      args+=("-D${name%Config.cmake}_DIR=$_ortf_webgpu_prefix/${cfg%/*}")
+    done
+    # Dawn's version header asks git for the commit of Dawn's source
+    # directory (generator/dawn_version_generator.py, at configure and at
+    # build time); the archive is no checkout, and git would walk up to the
+    # repository around src/ (this one, or an AUR clone) and give its
+    # commit. Git stops at $srcdir instead: no commit, which Dawn takes as
+    # an unknown version (an upstream checkout, src/onnxruntime, lies
+    # below and is unaffected).
+    local -x GIT_CEILING_DIRECTORIES=$srcdir
+  fi
   if _ortf_has migraphx; then
     # Host C++ only, and no GPU architecture is fixed at build time:
     # MIGraphX compiles each model for the GPU it finds at run time. ONNX
@@ -3053,6 +3323,22 @@ _ortf_licenses() {
 # which ThirdPartyNotices.txt has no entry for.
 _ortf_cudnn_frontend_license() {
   _ortf_dep_license cudnn_frontend LICENSE.txt cudnn-frontend-LICENSE.txt
+}
+
+# _ortf_system_license <package> <entry> <file>: the licence file <entry>
+# of the installed Arch package <package>, from its licence directory
+# (_ortf_system_licenses/<package>/<entry>), installed as <file> in the
+# licence directory of the package being written: for build inputs from
+# Arch's packages whose code is compiled into a library (the WebGPU
+# provider's headers). Fails when the file is missing or empty.
+_ortf_system_licenses=/usr/share/licenses
+_ortf_system_license() {
+  local src=$_ortf_system_licenses/$1/$2 dest=$pkgdir/usr/share/licenses/${pkgname[0]}/$3
+  if [[ ! -s $src ]]; then
+    echo "$src not found or empty: $1's licence, which ${pkgname[0]} must carry, is read from it (install $1)" >&2
+    return 1
+  fi
+  install -Dm644 -- "$src" "$dest"
 }
 
 # _ortf_dep_license <dependency> <entry> <file>: the licence file <entry>
@@ -3648,6 +3934,38 @@ package_onnxruntime-provider-dnnl() {
   _ortf_package_provider dnnl
   _ortf_dep_license onednn LICENSE onednn-LICENSE || return 1
   _ortf_dep_license onednn THIRD-PARTY-PROGRAMS onednn-THIRD-PARTY-PROGRAMS
+}
+
+# The WebGPU package: libonnxruntime_providers_webgpu.so, the plugin
+# provider (the top of the file), with Dawn and Tint linked in statically
+# (no libdawn in its NEEDED entries; _ortf_lib_depends maps none). Dawn
+# opens the Vulkan loader, libvulkan.so.1, at run time, so
+# vulkan-icd-loader is in depends without a NEEDED entry to show it; the
+# loader then needs a vendor's Vulkan driver, one optdepend each. It
+# carries the licences of what is compiled in besides ONNX Runtime's own
+# (all in license=()): Dawn's (BSD-3-Clause, Tint's too), from Dawn's
+# archive, and those of the headers of Arch's packages, SPIRV-Headers'
+# (MIT) and Vulkan-Headers' (MIT, of its Apache-2.0 OR MIT), from their
+# licence directories (_ortf_system_license). Vulkan-Utility-Libraries'
+# headers (Apache-2.0) are compiled in too; Arch's package ships no text,
+# Apache-2.0 being one of /usr/share/licenses/spdx. SPIRV-Tools only
+# gives a CMake target (_ortf_patch_dawn), no code. Like the OpenVINO
+# package, it provides nothing: its own name is the one the optdepends
+# use.
+package_onnxruntime-provider-webgpu() {
+  pkgdesc='The WebGPU execution provider of ONNX Runtime, for onnxruntime-core (GPUs with a Vulkan driver; a plugin provider)'
+  depends=("${_ortf_core_dep[@]}" 'glibc' 'libgcc' 'libstdc++' 'vulkan-icd-loader')
+  conflicts=("${_ortf_nccl_conflicts[@]}")
+  _ortf_nccloff_names
+  optdepends=(
+    'vulkan-intel: the Vulkan driver for Intel graphics (Mesa ANV)'
+    'vulkan-radeon: the Vulkan driver for AMD graphics (Mesa RADV)'
+    'nvidia-utils: the Vulkan driver for NVIDIA graphics (the proprietary driver)'
+  )
+  _ortf_package_provider webgpu
+  _ortf_dep_license dawn LICENSE dawn-LICENSE || return 1
+  _ortf_system_license spirv-headers LICENSE spirv-headers-LICENSE || return 1
+  _ortf_system_license vulkan-headers MIT.txt vulkan-headers-MIT.txt
 }
 
 # The MIGraphX package (AMD GPUs; built and checked here, never run on AMD

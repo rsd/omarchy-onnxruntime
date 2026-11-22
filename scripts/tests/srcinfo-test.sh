@@ -56,10 +56,13 @@ fi
 
 echo "== the committed .SRCINFO"
 T=$'\t'
-for line in 'pkgbase = onnxruntime-split' "${T}pkgrel = 7" 'pkgname = onnxruntime-core' \
+for line in 'pkgbase = onnxruntime-split' "${T}pkgrel = 8" 'pkgname = onnxruntime-core' \
     'pkgname = onnxruntime-provider-cuda13-rtx' 'pkgname = onnxruntime-provider-tensorrt-cuda13' \
-    'pkgname = onnxruntime-provider-openvino' 'pkgname = onnxruntime-provider-dnnl' 'pkgname = python-onnxruntime-core' \
+    'pkgname = onnxruntime-provider-openvino' 'pkgname = onnxruntime-provider-dnnl' \
+    'pkgname = onnxruntime-provider-webgpu' 'pkgname = python-onnxruntime-core' \
     "${T}makedepends = tensorrt" "${T}makedepends = cuda" "${T}makedepends = cudnn" \
+    "${T}makedepends = spirv-headers" "${T}makedepends = vulkan-headers" "${T}makedepends = python-jinja" \
+    "${T}source = ortf-dep-dawn.zip::https://github.com/google/dawn/archive/refs/tags/v20260714.215939.zip" \
     "${T}conflicts = onnxruntime-provider-cuda12-legacy<1.29.0-2" \
     "${T}conflicts = onnxruntime-provider-cuda12-legacy-bin<1.29.0-2"; do
     if grep -qxF -- "$line" "$srcinfo_file"; then ok "has [$line]"; else fail "lacks [$line]"; fi
@@ -187,6 +190,15 @@ else
 fi
 if git -C "$top" check-ignore -q onnxruntime-split-migraphx/.SRCINFO; then fail "git ignores onnxruntime-split-migraphx/.SRCINFO"; else
     ok "git does not ignore onnxruntime-split-migraphx/.SRCINFO"; fi
+# The WebGPU provider is the main line's: neither line gains its package,
+# Dawn's archive or Dawn's build inputs.
+for f in "$srcinfo12_file" "$srcinfo_mgx_file"; do
+    if bad=$(grep -niE 'webgpu|dawn|vulkan|spirv|python-jinja|python-markupsafe' "$f"); then
+        fail "${f#"$top"/}: WebGPU content: $bad"
+    else
+        ok "${f#"$top"/}: no WebGPU package, Dawn archive or Dawn build input"
+    fi
+done
 
 echo "== a copy of the script and the recipe"
 copy=$tmp/repo
@@ -197,10 +209,10 @@ cp "$top/onnxruntime-split-cuda12/PKGBUILD" "$srcinfo12_file" "$copy/onnxruntime
 cp "$top/onnxruntime-split-migraphx/PKGBUILD" "$srcinfo_mgx_file" "$copy/onnxruntime-split-migraphx/"
 if "$copy/scripts/srcinfo.sh" --check >/dev/null 2>&1; then ok "the copy checks out"; else
     fail "the unaltered copy fails --check"; fi
-sed -i 's/^\tpkgrel = 7$/\tpkgrel = 5/' "$copy/onnxruntime-split/.SRCINFO"
+sed -i 's/^\tpkgrel = 8$/\tpkgrel = 5/' "$copy/onnxruntime-split/.SRCINFO"
 status=0
 out=$("$copy/scripts/srcinfo.sh" --check 2>&1) || status=$?
-if ((status == 1)) && grep -qxF -- "-${T}pkgrel = 5" <<<"$out" && grep -qxF -- "+${T}pkgrel = 7" <<<"$out" &&
+if ((status == 1)) && grep -qxF -- "-${T}pkgrel = 5" <<<"$out" && grep -qxF -- "+${T}pkgrel = 8" <<<"$out" &&
     grep -qF 'is stale: run srcinfo.sh --write' <<<"$out"; then
     ok "an altered .SRCINFO fails --check (exit 1) with a diff"
 else
@@ -340,7 +352,7 @@ else
     fail "--aur into a clone: $out"
 fi
 rm -f "$aur/PKGBUILD" "$aur/.SRCINFO"
-sed -i 's/^\tpkgrel = 7$/\tpkgrel = 5/' "$copy/onnxruntime-split/.SRCINFO"
+sed -i 's/^\tpkgrel = 8$/\tpkgrel = 5/' "$copy/onnxruntime-split/.SRCINFO"
 status=0
 out=$("$copy/scripts/srcinfo.sh" --aur "$aur" 2>&1) || status=$?
 if ((status == 1)) && [[ ! -e $aur/PKGBUILD ]]; then ok "--aur with a stale .SRCINFO fails, copies nothing"; else
