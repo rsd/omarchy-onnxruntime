@@ -89,27 +89,30 @@
 # (_ortf_patch_dnnl_threadpool_args).
 #
 # The WebGPU package (onnxruntime-provider-webgpu) is a plugin execution
-# provider, upstream's --use_webgpu shared_lib (onnxruntime_USE_WEBGPU with
-# onnxruntime_USE_EP_API_ADAPTERS): an application registers its library
-# with RegisterExecutionProviderLibrary and appends one of the devices
-# GetEpDevices lists, instead of naming the provider as it names the
-# others, and the Python module's providers=["WebGpuExecutionProvider"]
-# does not reach it (_ortf_patch_pybind_webgpu). It runs on Dawn, Google's
-# WebGPU implementation, over Vulkan, so it reaches any GPU with a Vulkan
-# driver: Mesa's for Intel and AMD graphics, NVIDIA's own. Dawn is the
-# release cmake/deps.txt pins (_ortf_dawn_tag), in the dependency mirror
-# like the other pinned sources and patched by ONNX Runtime's own
-# patches; it is built static into libonnxruntime_providers_webgpu.so,
-# with Tint, its shader compiler, and the library opens the Vulkan loader
-# (vulkan-icd-loader) at run time: no libdawn of its own. Dawn would
-# git-clone its own dependencies at configure time; here they are Arch's
-# packages, build inputs only (_ortf_patch_dawn): SPIRV-Headers,
-# SPIRV-Tools, Vulkan-Headers and Vulkan-Utility-Libraries for their
-# headers and CMake targets, and Python's jinja2 and markupsafe for Dawn's
-# code generators. Abseil is ONNX Runtime's own, already in the build.
-# The licence directory has Dawn's LICENSE (BSD-3-Clause, Tint's too)
-# and the licences of the Arch headers compiled in, SPIRV-Headers' (MIT)
-# and Vulkan-Headers' (MIT), from Arch's packages
+# provider, upstream's --use_webgpu shared_lib (onnxruntime_USE_WEBGPU
+# with onnxruntime_USE_EP_API_ADAPTERS): an application registers its
+# library with RegisterExecutionProviderLibrary and appends one of the
+# devices GetEpDevices lists, instead of naming the provider as it names
+# the others, and the Python module's
+# providers=["WebGpuExecutionProvider"] does not reach it
+# (_ortf_patch_pybind_webgpu), and its Conv gets the right channel index
+# for inputs of 6, 9, 15 ... channels (_ortf_patch_webgpu_conv). It runs
+# on Dawn, Google's WebGPU implementation, over Vulkan, so it reaches
+# any GPU with a Vulkan driver: Mesa's for Intel and AMD graphics,
+# NVIDIA's own. Dawn is the release cmake/deps.txt pins
+# (_ortf_dawn_tag), in the dependency mirror like the other pinned
+# sources and patched by ONNX Runtime's own patches; it is built static
+# into libonnxruntime_providers_webgpu.so, with Tint, its shader
+# compiler, and the library opens the Vulkan loader (vulkan-icd-loader)
+# at run time: no libdawn of its own. Dawn would git-clone its own
+# dependencies at configure time; here they are Arch's packages, build
+# inputs only (_ortf_patch_dawn): SPIRV-Headers, SPIRV-Tools,
+# Vulkan-Headers and Vulkan-Utility-Libraries for their headers and
+# CMake targets, and Python's jinja2 and markupsafe for Dawn's code
+# generators. Abseil is ONNX Runtime's own, already in the build. The
+# licence directory has Dawn's LICENSE (BSD-3-Clause, Tint's too) and
+# the licences of the Arch headers compiled in, SPIRV-Headers' (MIT) and
+# Vulkan-Headers' (MIT), from Arch's packages
 # (package_onnxruntime-provider-webgpu).
 #
 # Training: onnxruntime_ENABLE_TRAINING=ON (build()), as Arch builds, for
@@ -2989,6 +2992,29 @@ _ortf_patch_pybind_webgpu() {
 #if defined(USE_WEBGPU) && !defined(ORT_USE_EP_API_ADAPTERS)'
 }
 
+# _ortf_patch_webgpu_conv <onnxruntime/core/providers/webgpu/nn/conv2d_mm.cc>:
+# the WebGPU provider's channels-last Conv with a kernel larger than 1x1.
+# For an input channel count divisible by 3 but not by 4, above 3 (6, 9,
+# 15, 18, 21), and an output channel count divisible by 4, its shader reads
+# the input three scalars at a time (get_x_snippet, case 3) from an input
+# bound with one component per element (input_components), yet the
+# coordinate it reads at divides the channel index by 4: the output is
+# wrong (errors of 27 to 75 against the CPU provider, on NVIDIA and on
+# Intel graphics). The divisor is the component count, 1 for three. This
+# is the upstream source's mistake in ONNX Runtime 1.29.0, pending
+# upstream; drop the patch with the release whose line has the fix: the
+# check below then fails, and says so. The one upstream text it replaces
+# must be there exactly once, or it fails and leaves the file untouched
+# (_ortf_patch_exact).
+_ortf_patch_webgpu_conv() {
+  _ortf_patch_exact _ortf_patch_webgpu_conv "$1" \
+    '  const std::string coord_a_snippet = is_channels_last_ ? "let coord = vec4<i32>(batch, xRow, xCol, xCh / " + std::to_string(inner_element_size_x == 3 ? 4 : inner_element_size_x) + ");" : "let coord = vec4<i32>(batch, xCh, xRow, xCol);";' \
+    '  // omarchy-onnxruntime (onnxruntime-split/PKGBUILD, _ortf_patch_webgpu_conv):
+  // the input of the 3-wide read is bound with one component, so the
+  // channel index is divided by 1, not 4.
+  const std::string coord_a_snippet = is_channels_last_ ? "let coord = vec4<i32>(batch, xRow, xCol, xCh / " + std::to_string(inner_element_size_x == 3 ? 1 : inner_element_size_x) + ");" : "let coord = vec4<i32>(batch, xCh, xRow, xCol);";'
+}
+
 prepare() {
   echo "ONNX Runtime build inputs:"
   _ortf_resolve "$srcdir/ortf.conf" || return 1
@@ -3061,6 +3087,8 @@ prepare() {
   echo "the WebGPU provider: its plugin library is installed beside libonnxruntime.so (_ortf_patch_webgpu_install)"
   _ortf_patch_pybind_webgpu onnxruntime/python/onnxruntime_pybind_state.cc || return 1
   echo "the Python module: no built-in WebGPU factory with the plugin provider (_ortf_patch_pybind_webgpu)"
+  _ortf_patch_webgpu_conv onnxruntime/core/providers/webgpu/nn/conv2d_mm.cc || return 1
+  echo "the WebGPU provider: Conv with 3-wide input reads divides the channel index by 1, not 4 (_ortf_patch_webgpu_conv)"
   # A fresh CMake build directory, so that a cache from other build inputs
   # is never reused (makepkg -e skips prepare() and continues a build).
   rm -rf -- "$srcdir/build" "$srcdir/dist" "$srcdir/stage"

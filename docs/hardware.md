@@ -87,7 +87,7 @@ The use of the provider:
 
 - **It is a second route, not a replacement.** Where a vendor provider covers the GPU, that provider is the one to use. WebGPU is the route for NVIDIA Maxwell (no CUDA provider), for Intel graphics through Mesa without Intel's compute runtime, and for the AMD Polaris and Vega APUs that Arch's ROCm build list leaves out.
 - **It is not shown to be faster than the CPU.** On the test machine, with a fast CPU and small models, the Intel GPU was slower than the CPU, and the RTX was faster on two of three models ([results.md](results.md#webgpu-provider-1290-8)). A speed-up on older machines (NVIDIA Maxwell, Intel Gen8 and later graphics through Mesa, AMD Polaris and Vega APUs) is **not tested**. The value is a working GPU path where no vendor provider exists.
-- **One known limitation.** The MODNet model does not run on it, because of two limits of ONNX Runtime 1.29.0's WebGPU provider ([engines.md](engines.md#webgpu-limitations)).
+- **One known limitation.** The MODNet model runs on it only with CPU fallback allowed, because one int64 `Gather` has no WebGPU kernel in ONNX Runtime 1.29.0. Its output is correct on both tested GPUs, because this recipe fixes a WebGPU convolution bug of 1.29.0 from 1.29.0-8 on, pending upstream ([engines.md](engines.md#webgpu-limitations)).
 - **A different way to load it.** An application has to register the provider and pick a device, and `providers=["WebGpuExecutionProvider"]` does not reach it ([engines.md](engines.md#using-it-a-plugin-provider)).
 
 ## oneDNN (CPU; supported, tested)

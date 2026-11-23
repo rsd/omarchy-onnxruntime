@@ -97,7 +97,7 @@ The GPUs WebGPU is for:
 - Intel graphics from Gen8 on, through Mesa's `vulkan-intel`, as a second route beside OpenVINO's `GPU` device (Gen8, Gen9 and Gen11 need a legacy driver you install yourself there).
 - AMD Polaris and Vega APUs, which are not in Arch's ROCm build list, and AMD discrete cards through `vulkan-radeon`.
 
-It needs `vulkan-icd-loader` and one Vulkan driver for the GPU. It is not shown to be faster than the CPU. On the test machine's CPU and three small models the Intel GPU's median was 2.1 to 5.8 times the CPU's, and the RTX was faster on two of the three ([results.md](results.md#webgpu-provider-1290-8)). A speed-up on older machines is not tested. An application that selects providers by name with `providers=[...]` cannot use it without a code change, and the MODNet model does not run on it ([engines.md](engines.md#webgpu)).
+It needs `vulkan-icd-loader` and one Vulkan driver for the GPU. It is not shown to be faster than the CPU. On the test machine's CPU and three small models the Intel GPU's median was 2.1 to 5.8 times the CPU's, and the RTX was faster on two of the three ([results.md](results.md#webgpu-provider-1290-8)). A speed-up on older machines is not tested. An application that selects providers by name with `providers=[...]` cannot use it without a code change, and the MODNet model needs CPU fallback on it, because one `Gather` has no WebGPU kernel ([engines.md](engines.md#webgpu-limitations)).
 
 ## Where Arch is the better choice
 

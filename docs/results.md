@@ -339,7 +339,7 @@ The packages were then installed with `pacman` and run from `/usr`, with no envi
 
 ## WebGPU provider 1.29.0-8
 
-`onnxruntime-provider-webgpu` ([engines.md](engines.md#webgpu)) was run on two GPUs: the NVIDIA GPU and the Intel integrated GPU of the test machine. The measurements are of this one package. The WebGPU provider is **not shown to be faster than the CPU** here: see [the reading](#webgpu-reading-the-figures).
+`onnxruntime-provider-webgpu` ([engines.md](engines.md#webgpu)) was run on two GPUs: the NVIDIA GPU and the Intel integrated GPU of the test machine. The measurements are of this one package. The WebGPU provider of 1.29.0-8 carries a fix for a convolution bug of ONNX Runtime 1.29.0 ([below](#the-webgpu-convolution-fix)); the single-convolution runs and the MODNet runs are before and after it. The WebGPU provider is **not shown to be faster than the CPU** here: see [the reading](#webgpu-reading-the-figures).
 
 ### Conditions
 
@@ -351,7 +351,7 @@ The packages were then installed with `pacman` and run from `/usr`, with no envi
 | CPU and kernel | Intel Core Ultra 9 275HX, 24 threads; Linux 7.2.15-1-omarchy |
 | Where it ran | The smoke test against the extracted core and provider of 1.29.0-8, with `--prefix`. The model check used the machine's installed Python module (1.29.0-7), with `--webgpu-lib` naming the extracted provider library of 1.29.0-8; the plugin loaded into that core |
 | Smoke test | `scripts/smoke-test.sh --require webgpu:intel --only cpu,webgpu:intel`, and `--require webgpu:nvidia --only webgpu:nvidia`, each target alone, 5 warm runs, CPU EP fallback disabled |
-| Model check | `tools/ort-model-check/model-check.py --targets cpu,webgpu:intel,webgpu:nvidia --webgpu-lib <library>`, 50 timed runs after 3 warm-up runs, CPU EP fallback disabled, the defaults of [the conditions above](#conditions). The desktop was in use. The Intel GPU did not appear in Dawn's device list on the first runs of that day and did after a reboot; the cause was not investigated, and the figures below are from after it |
+| Model check | `tools/ort-model-check/model-check.py --targets cpu,webgpu:intel,webgpu:nvidia --webgpu-lib <library>`, 50 timed runs after 3 warm-up runs, CPU EP fallback disabled, the defaults of [the conditions above](#conditions). The desktop was in use. The Intel GPU did not appear in Dawn's device list on the first runs of that day and did after a reboot; the cause was not investigated, and the figures below are from after it. The three small models, the smoke test and the "before" figures of MODNet were run before the convolution fix; the "after" figures of MODNet and the single-convolution sweeps, and a rerun of the three small models and the smoke test, are of the build with the fix. Driver versions as above |
 
 ### Smoke test
 
@@ -397,11 +397,27 @@ The same models as above. Medians are in milliseconds, and the errors are agains
 
 An earlier run on the RTX alone gave medians of 1.38, 3.72 and 1.70 ms for the three models, with the same maximum and mean errors, so the timings move a little from run to run.
 
-#### modnet_photographic, input 1x3x512x512: does not run
+#### modnet_photographic, input 1x3x512x512: needs CPU fallback
 
-`--size 512x512`, the model of the earlier tables. With CPU fallback disabled, session creation fails on the Intel GPU (this run) and on the RTX (an earlier run, same tool and library) with `This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled`. The CPU target ran (median 48.35 ms here, 51.55 ms in the earlier run). The cause is one int64 `Gather`, fed by a `Shape` node, which has no WebGPU kernel in ONNX Runtime 1.29.0.
+`--size 512x512`, the model of the earlier tables. With CPU fallback disabled, session creation fails on both GPUs, after the convolution fix below as before, with `This session contains graph nodes that are assigned to the default CPU EP, but fallback to CPU EP has been explicitly disabled`. The cause is one int64 `Gather`, fed by a `Shape` node, which has no WebGPU kernel in ONNX Runtime 1.29.0. With CPU fallback allowed, the model runs, and since the convolution fix the output is correct on both GPUs. Medians over 50 runs, errors against the CPU's output; `ok*` means CPU fallback was allowed:
 
-With CPU fallback allowed, MODNet runs on the RTX but the output is wrong: maximum error 1.00 and mean error 0.14 against the CPU's output. The first wrong node is a convolution (`Conv_304`). A sweep of single convolutions found them wrong when the kernel is larger than 1x1, the output channel count is a multiple of 4, and the input channel count is a multiple of 3, is not a multiple of 4, and is above 3 (6, 9, 15, 18 and so on). Bias and image size make no difference. The Intel GPU gives the same result as the NVIDIA GPU: MODNet with CPU fallback allowed is wrong by the same amount, and the single-convolution errors are bit-identical on both GPUs, which points at the provider's own kernel rather than at either driver. Both look like limitations of ONNX Runtime's own WebGPU provider, which this recipe does not change. It is a **known limitation**, and not fixed here.
+| Target | status | median ms, before the fix | max err, before | mean err, before | median ms, after | max err, after | mean err, after |
+|---|---|---:|---:|---:|---:|---:|---:|
+| cpu | ok | 50.13 | 0 | 0 | 56.77 | 0 | 0 |
+| webgpu:nvidia | before FAIL, after ok* | 9.60 | 1.00e+0 | 1.40e-1 | 13.52 | 4.87e-5 | 7.34e-7 |
+| webgpu:intel | before FAIL, after ok* | 125.99 | 1.00e+0 | 1.40e-1 | 132.79 | 5.04e-5 | 7.40e-7 |
+
+Before the fix the output was wrong, by 1.00 at most and 0.14 on average, on both GPUs. The first wrong node was a convolution (`Conv_304`), the one of the next section. The two columns are separate runs, so the timings move a little between them, as the CPU's median does (50.13 and 56.77 ms).
+
+#### The WebGPU convolution fix
+
+The WebGPU provider of ONNX Runtime 1.29.0 gave wrong output for a `Conv` with a kernel larger than 1x1, an output channel count that is a multiple of 4, and an input channel count that is a multiple of 3, not a multiple of 4, and above 3 (6, 9, 15, 18, 21, 27, 30 and so on). The recipe carries a one-line fix for it from 1.29.0-8 on ([build.md](build.md#dependencies-are-mirrored-not-fetched)); the fix is pending upstream. This section is a before and after of a sweep of single convolutions, with the CPU provider as the reference. Both GPUs gave the same figures.
+
+- **Conditions.** `k=3`, padding 1, 8 output channels, 32x32, fp32, bias, tolerance 1e-3 on the maximum absolute error. The same sweep on the NVIDIA and the Intel GPU. The Intel runs were confirmed on the Intel GPU (`0000:00:02.0`) by the kernel's usage counters; the NVIDIA driver keeps none, so its adapter is inferred from the power preference, as above. The "after" runs are the build of 1.29.0-8 with the fix, WebGPU only, built offline with `makepkg`. The "before" runs are the build without it.
+- **Before.** Input channels 1 to 24: input channels 6, 9, 15, 18 and 21 were wrong, with maximum errors of 2.67e+1, 4.11e+1, 6.27e+1, 7.11e+1 and 7.52e+1. All the others were within 4.2e-5. The errors were identical, to the printed digits, on the two GPUs, which pointed at the provider's own kernel rather than at a driver.
+- **After.** Every input channel count from 1 to 24 and from 27 to 48 passes, with the worst maximum error at 4.58e-5 (1 to 24) and 7.63e-5 (27 to 48). Input channels 6, 9, 15, 18 and 21 now give 7.63e-6, 1.53e-5, 1.91e-5, 2.29e-5 and 4.58e-5.
+- **Variants, all passing after the fix on both GPUs:** kernel 1, 2 and 5; padding 0; no bias; 16x16 and 64x64 images; 2 groups; depthwise (9 output channels, 3 groups); 1, 3, 4, 12 and 16 output channels; and 1 to 9, 12, 16 and 32 output channels at 6 to 9 input channels (before the fix, 4, 8, 12, 16 and 32 output channels failed there).
+- **No regressions.** With CPU fallback disabled, after the fix, median and maximum error against the CPU: selfie segmentation, NVIDIA 1.54 ms and 6.06e-8, Intel 4.56 ms and 6.06e-8; PP-HumanSeg v2 mobile, NVIDIA 4.64 ms and 1.79e-7, Intel 18.22 ms and 1.79e-7; PP-HumanSeg v2 lite, NVIDIA 2.88 ms and 5.96e-7, Intel 8.62 ms and 5.96e-7. The maximum errors are those of the tables above. The smoke test, with the fix: CPU ok, `webgpu:intel` ok, `webgpu:nvidia` ok, maximum error 0.
 
 ### Python
 
@@ -410,7 +426,7 @@ On the machine's installed 1.29.0-7 Python module, `InferenceSession(model, prov
 ### WebGPU: reading the figures
 
 - **No speed-up is shown.** Medians over 50 runs, CPU against the GPU: the RTX was faster on selfie segmentation (1.05 against 1.85 ms) and PP-HumanSeg lite (1.70 against 3.69 ms) and slower on PP-HumanSeg mobile (3.86 against 2.92 ms). The Intel GPU was slower on all three: 4.57 against 1.85 ms, 16.99 against 2.92 ms and 7.60 against 3.69 ms, which is 2.1 to 5.8 times the CPU's median. The CPU here is a fast desktop-class laptop CPU, and the models are small, so each run takes a few milliseconds. A speed-up on older machines (NVIDIA Maxwell, Intel Gen8 and later graphics through Mesa, AMD Polaris and Vega APUs) is **not tested**. The value of the provider is a working GPU path where no vendor provider exists.
-- **Accuracy.** The outputs agree with the CPU's to a maximum error of at most 6e-7, in fp32, on both GPUs.
+- **Accuracy.** The outputs of the three small models agree with the CPU's to a maximum error of at most 6e-7, in fp32, on both GPUs, with and without the convolution fix. MODNet, with CPU fallback allowed and the fix, agrees to 5.04e-5.
 - **Start-up.** Session creation on a GPU took 23 to 201 ms and the first run 9.9 to 365 ms, against 0.4 to 12 ms for the CPU's first run. In the model check the Intel GPU's first run was the slowest, 145 to 365 ms.
 - **What was not run.** The WebGPU package of the default (NCCL) build, installed with `pacman` and run from `/usr`; the Python module of 1.29.0-8; any GPU other than the two above.
 
